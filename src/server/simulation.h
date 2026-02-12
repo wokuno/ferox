@@ -64,4 +64,10 @@ void simulation_age_region(World* world, int start_x, int start_y,
 // Update colony stats (wobble animation, etc) - can run in parallel per colony
 void simulation_update_colony_stats(World* world);
 
+// Combat resolution when colonies meet at borders
+void simulation_resolve_combat(World* world);
+
+// Update nutrients, toxins, and environmental layers
+void simulation_update_nutrients(World* world);
+
 #endif // FEROX_SIMULATION_H

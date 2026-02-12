@@ -419,15 +419,18 @@ TEST(simulation_division_preserves_cell_count) {
     Colony colony = create_test_colony();
     uint32_t id = world_add_colony(world, colony);
     
-    // Create two disconnected groups
-    world_get_cell(world, 0, 0)->colony_id = id;
-    world_get_cell(world, 1, 0)->colony_id = id;
-    world_get_cell(world, 2, 0)->colony_id = id;
-    world_get_cell(world, 10, 10)->colony_id = id;
-    world_get_cell(world, 11, 10)->colony_id = id;
+    // Create two disconnected groups, each >= 5 cells (minimum to avoid tiny fragment cleanup)
+    // Group 1: 5 cells at (0,0) to (4,0)
+    for (int x = 0; x < 5; x++) {
+        world_get_cell(world, x, 0)->colony_id = id;
+    }
+    // Group 2: 5 cells at (10,10) to (14,10)
+    for (int x = 10; x < 15; x++) {
+        world_get_cell(world, x, 10)->colony_id = id;
+    }
     
     Colony* col = world_get_colony(world, id);
-    col->cell_count = 5;
+    col->cell_count = 10;
     
     // Count initial cells
     int initial_cells = 0;
@@ -443,6 +446,7 @@ TEST(simulation_division_preserves_cell_count) {
         if (world->cells[i].colony_id != 0) final_cells++;
     }
     
+    // Cell count should be preserved (both groups >= 5, so no cleanup)
     ASSERT_EQ(initial_cells, final_cells);
     
     world_destroy(world);

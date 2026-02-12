@@ -89,6 +89,13 @@ target_compile_definitions(test_visual_stability PRIVATE STANDALONE_TEST)
 add_test(NAME VisualStabilityTests COMMAND test_visual_stability)
 set_tests_properties(VisualStabilityTests PROPERTIES TIMEOUT 300)
 
+# Combat system tests
+add_executable(test_combat_system test_combat_system.c)
+target_link_libraries(test_combat_system PRIVATE ferox_server_lib)
+target_compile_definitions(test_combat_system PRIVATE STANDALONE_TEST)
+add_test(NAME CombatSystemTests COMMAND test_combat_system)
+set_tests_properties(CombatSystemTests PROPERTIES TIMEOUT 120)
+
 # GUI unit tests (no SDL dependency - tests logic only)
 add_executable(test_gui test_gui.c)
 target_link_libraries(test_gui PRIVATE m)

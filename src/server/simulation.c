@@ -280,14 +280,15 @@ void simulation_spread(World* world) {
                     float strategic_modifier = 1.0f;
                     if (enemy_count > 0) {
                         // Slow down if target is contested (unless very aggressive)
-                        strategic_modifier *= (0.5f + colony->genome.aggression * 0.5f);
+                        strategic_modifier *= (0.3f + colony->genome.aggression * 0.4f);
                     }
                     
                     // Success history affects spread direction
-                    float history_bonus = 1.0f + colony->success_history[d % 8] * 0.3f;
+                    float history_bonus = 1.0f + colony->success_history[d % 8] * 0.2f;
                     
+                    // Slightly slower spread to allow more interaction time
                     float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * 
-                                        env_modifier * dir_weight * strategic_modifier * history_bonus;
+                                        env_modifier * dir_weight * strategic_modifier * history_bonus * 0.7f;
                     
                     if (rand_float() < spread_prob) {
                         if (pending_count >= pending_capacity) {
@@ -301,7 +302,8 @@ void simulation_spread(World* world) {
         }
     }
     
-    // Apply pending colonizations
+    // Apply pending colonizations - this is where new cells are "born"
+    // Mutations happen during cell division (new cell creation)
     for (int i = 0; i < pending_count; i++) {
         Cell* cell = world_get_cell(world, pending[i].x, pending[i].y);
         if (cell) {
@@ -319,10 +321,18 @@ void simulation_spread(World* world) {
             cell->colony_id = pending[i].colony_id;
             cell->age = 0;
             
-            // Update new colony's cell count
+            // Update new colony's cell count and potentially mutate
             Colony* colony = world_get_colony(world, pending[i].colony_id);
             if (colony) {
                 colony->cell_count++;
+                
+                // MUTATION ON REPRODUCTION: Each new cell has a chance to cause colony mutation
+                // Higher stress = more mutations (adaptation pressure)
+                float mutation_chance = colony->genome.mutation_rate * 
+                                        (1.0f + colony->stress_level * 2.0f);
+                if (rand_float() < mutation_chance) {
+                    genome_mutate(&colony->genome);
+                }
             }
         }
     }
@@ -331,11 +341,22 @@ void simulation_spread(World* world) {
 }
 
 void simulation_mutate(World* world) {
+    // Mutations now primarily happen during cell division (in simulation_spread)
+    // This function provides a small baseline mutation for all colonies
+    // to ensure even stable colonies can adapt over very long time
     if (!world) return;
     
     for (size_t i = 0; i < world->colony_count; i++) {
-        if (world->colonies[i].active) {
-            genome_mutate(&world->colonies[i].genome);
+        Colony* colony = &world->colonies[i];
+        if (!colony->active) continue;
+        
+        // Very low baseline mutation rate (most mutation comes from cell division)
+        // Stressed colonies mutate more as they try to adapt
+        float baseline_rate = colony->genome.mutation_rate * 0.1f;
+        baseline_rate *= (1.0f + colony->stress_level);
+        
+        if (rand_float() < baseline_rate) {
+            genome_mutate(&colony->genome);
         }
     }
 }
@@ -365,9 +386,25 @@ void simulation_check_divisions(World* world) {
             }
             
             // Create new colonies for non-largest components (min 5 cells to avoid tiny fragments)
+            // Track cells that get orphaned (tiny fragments)
+            int orphaned_cells = 0;
+            
             for (int c = 0; c < num_components; c++) {
                 if (c == largest_idx) continue;
-                if (sizes[c] < 5) continue;  // Don't create colonies from tiny fragments
+                if (sizes[c] < 5) {
+                    // Tiny fragment - these cells will be orphaned (removed)
+                    // Clear these cells from the grid
+                    for (int j = 0; j < world->width * world->height; j++) {
+                        if (world->cells[j].colony_id == colony->id && 
+                            world->cells[j].component_id == c) {
+                            world->cells[j].colony_id = 0;
+                            world->cells[j].age = 0;
+                            world->cells[j].is_border = false;
+                            orphaned_cells++;
+                        }
+                    }
+                    continue;
+                }
                 
                 // Create new colony with mutated genome
                 Colony new_colony;
@@ -398,7 +435,7 @@ void simulation_check_divisions(World* world) {
                 }
             }
             
-            // Update original colony's cell count
+            // Update original colony's cell count to largest component only
             colony->cell_count = (size_t)largest_size;
             division_occurred = true;  // Only one division per tick
         }
@@ -821,23 +858,40 @@ void simulation_consume_resources(World* world) {
             float consumption = colony->genome.resource_consumption * 
                                 (0.5f + colony->genome.aggression * 0.5f);
             
-            // Deplete nutrients (but leave some minimum for regrowth)
+            // Deplete nutrients more aggressively - creates starvation pressure
             world->nutrients[idx] = utils_clamp_f(
-                world->nutrients[idx] - consumption * 0.02f, 0.1f, 1.0f);
+                world->nutrients[idx] - consumption * 0.05f, 0.0f, 1.0f);
         }
     }
     
-    // Slow nutrient regeneration in empty cells
+    // Nutrient regeneration - faster in empty cells, slower in occupied
     for (int i = 0; i < world->width * world->height; i++) {
         if (world->cells[i].colony_id == 0) {
-            world->nutrients[i] = utils_clamp_f(world->nutrients[i] + 0.005f, 0.0f, 1.0f);
+            // Empty cells regenerate quickly
+            world->nutrients[i] = utils_clamp_f(world->nutrients[i] + 0.02f, 0.0f, 1.0f);
+        } else {
+            // Occupied cells regenerate very slowly
+            world->nutrients[i] = utils_clamp_f(world->nutrients[i] + 0.002f, 0.0f, 1.0f);
         }
+    }
+    
+    // Toxin decay
+    for (int i = 0; i < world->width * world->height; i++) {
+        world->toxins[i] = utils_clamp_f(world->toxins[i] - 0.01f, 0.0f, 1.0f);
     }
 }
 
 // Combat resolution when colonies meet at borders
 void simulation_resolve_combat(World* world) {
     if (!world) return;
+    
+    // Decay existing toxins
+    if (world->toxins) {
+        int total = world->width * world->height;
+        for (int i = 0; i < total; i++) {
+            world->toxins[i] *= 0.95f;  // 5% decay per tick
+        }
+    }
     
     typedef struct { int x, y; uint32_t winner; uint32_t loser; float strength; } CombatResult;
     CombatResult* results = NULL;
@@ -1021,10 +1075,75 @@ void simulation_resolve_combat(World* world) {
 void simulation_tick(World* world) {
     if (!world) return;
     
-    // Age all cells
+    // Age all cells and handle starvation/toxin death
     for (int i = 0; i < world->width * world->height; i++) {
-        if (world->cells[i].colony_id != 0 && world->cells[i].age < 255) {
-            world->cells[i].age++;
+        Cell* cell = &world->cells[i];
+        if (cell->colony_id == 0) continue;
+        
+        // Age the cell
+        if (cell->age < 255) cell->age++;
+        
+        Colony* colony = world_get_colony(world, cell->colony_id);
+        if (!colony || !colony->active) continue;
+        
+        // STARVATION: Cells in depleted areas may die
+        float nutrients = world->nutrients[i];
+        if (nutrients < 0.2f) {
+            // Low nutrients - chance of cell death based on efficiency
+            float death_chance = (0.2f - nutrients) * 0.1f * (1.0f - colony->genome.efficiency);
+            if (rand_float() < death_chance) {
+                cell->colony_id = 0;
+                cell->age = 0;
+                cell->is_border = false;
+                if (colony->cell_count > 0) colony->cell_count--;
+                colony->stress_level = utils_clamp_f(colony->stress_level + 0.02f, 0.0f, 1.0f);
+                continue;
+            }
+        }
+        
+        // TOXIN DEATH: Cells in toxic areas may die
+        float toxins = world->toxins[i];
+        if (toxins > 0.3f) {
+            float death_chance = (toxins - 0.3f) * 0.15f * (1.0f - colony->genome.toxin_resistance);
+            if (rand_float() < death_chance) {
+                cell->colony_id = 0;
+                cell->age = 0;
+                cell->is_border = false;
+                if (colony->cell_count > 0) colony->cell_count--;
+                colony->stress_level = utils_clamp_f(colony->stress_level + 0.02f, 0.0f, 1.0f);
+                continue;
+            }
+        }
+        
+        // NATURAL DECAY: All cells have a small baseline death rate
+        // This ensures colonies shrink over time if they're not actively growing
+        // Border cells die faster (exposed), interior cells are more stable
+        float base_death_rate = 0.003f;  // ~0.3% per tick baseline
+        if (cell->is_border) {
+            base_death_rate = 0.008f;  // Border cells more vulnerable
+        }
+        // Biofilm protects against natural decay
+        base_death_rate *= (1.0f - colony->biofilm_strength * 0.5f);
+        // Efficiency reduces decay
+        base_death_rate *= (1.0f - colony->genome.efficiency * 0.3f);
+        
+        if (rand_float() < base_death_rate) {
+            cell->colony_id = 0;
+            cell->age = 0;
+            cell->is_border = false;
+            if (colony->cell_count > 0) colony->cell_count--;
+            continue;
+        }
+        
+        // OLD AGE: Very old cells have higher chance of dying
+        if (cell->age > 150) {
+            float age_death_chance = (cell->age - 150) * 0.0003f;  // Gradual increase
+            if (rand_float() < age_death_chance) {
+                cell->colony_id = 0;
+                cell->age = 0;
+                cell->is_border = false;
+                if (colony->cell_count > 0) colony->cell_count--;
+            }
         }
     }
     
@@ -1083,6 +1202,9 @@ void simulation_tick(World* world) {
             }
         }
     }
+    
+    // Recount all colony cell counts from grid to fix any inconsistencies
+    simulation_update_colony_stats(world);
     
     // Update colony stats, state, and strategy
     for (size_t i = 0; i < world->colony_count; i++) {
