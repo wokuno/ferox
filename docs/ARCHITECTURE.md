@@ -331,6 +331,36 @@ The atomic design maps directly to accelerator and distributed programming model
 | `renderer.h/c` | Terminal rendering with ANSI escape codes |
 | `input.h/c` | Non-blocking keyboard input (raw terminal mode) |
 
+### GUI Client (`ferox_gui/`)
+
+The SDL2-based graphical client provides enhanced visualization.
+
+| Feature | Description |
+|---------|-------------|
+| Grid rendering | Pixel-perfect grid with no cell overlap |
+| Zoom/pan | Mouse wheel zoom, click-drag pan |
+| Colony selection | Click to select, view detailed stats |
+| Continuous input | Hold keys for smooth navigation |
+| 8 shape types | Procedurally generated distinct colony shapes |
+
+**Keyboard Controls (GUI):**
+
+| Key | Action |
+|-----|--------|
+| Arrow keys (hold) | Pan viewport |
+| `+`/`-` | Zoom in/out |
+| `Space` | Pause/resume |
+| `Esc` | Deselect colony |
+| `Q` | Quit |
+
+**Mouse Controls:**
+
+| Input | Action |
+|-------|--------|
+| Scroll wheel | Zoom in/out |
+| Left click | Select colony |
+| Left drag | Pan viewport |
+
 ## Key Data Structures
 
 ### Cell
@@ -383,7 +413,7 @@ typedef struct {
 | STRESSED | Transitional state with modified behavior |
 
 ### Genome
-The genetic code controlling colony behavior.
+The genetic code controlling colony behavior. See [GENETICS.md](GENETICS.md) for full trait documentation.
 
 ```c
 typedef struct {
@@ -399,6 +429,28 @@ typedef struct {
     uint8_t max_tracked;      // Max colonies to track (1-4)
     float social_factor;      // Attraction/repulsion (-1 to +1)
     float merge_affinity;     // Merge bonus (0-0.3)
+    
+    // Environmental sensing
+    float nutrient_sensitivity;  // Response to nutrient gradients (0-1)
+    float edge_affinity;         // World edge preference (-1 to +1)
+    float density_tolerance;     // Crowding tolerance (0-1)
+    
+    // Colony interactions
+    float toxin_production;      // Toxin secretion rate (0-1)
+    float toxin_resistance;      // Toxin immunity (0-1)
+    float signal_emission;       // Signal output rate (0-1)
+    float signal_sensitivity;    // Signal response (0-1)
+    float gene_transfer_rate;    // Horizontal gene transfer (0-0.1)
+    
+    // Survival strategies
+    float dormancy_threshold;    // Stress to trigger dormancy (0-1)
+    float dormancy_resistance;   // Resistance to forced dormancy (0-1)
+    float biofilm_investment;    // Biofilm resources (0-1)
+    float motility;              // Cell movement speed (0-1)
+    float motility_direction;    // Movement angle (0-2π)
+    
+    // Metabolic
+    float efficiency;            // Metabolic efficiency (0-1)
     
     Color body_color;         // Interior cell color
     Color border_color;       // Border cell color
@@ -417,8 +469,25 @@ typedef struct {
     size_t colony_count;
     size_t colony_capacity;
     uint64_t tick;          // Current simulation tick
+    
+    // Environmental layers (per-cell data)
+    float* nutrients;       // Nutrient level per cell (0-1)
+    float* toxins;          // Toxin level per cell (0-1)
+    float* signals;         // Chemical signal level per cell (0-1)
+    uint32_t* signal_source; // Colony ID that emitted signal (0 = none)
 } World;
 ```
+
+#### Environmental Layers
+
+| Layer | Type | Description |
+|-------|------|-------------|
+| `nutrients` | float[] | Nutrient concentration at each cell |
+| `toxins` | float[] | Toxin concentration at each cell |
+| `signals` | float[] | Chemical signal strength at each cell |
+| `signal_source` | uint32_t[] | Colony that emitted the signal |
+
+All layers use row-major indexing: `layer[y * width + x]`
 
 ## Memory Management
 

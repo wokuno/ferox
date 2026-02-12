@@ -26,20 +26,39 @@
 
 ## Features
 
+### Core Simulation
 - **Genetic Evolution** - Each colony has a genome controlling spread patterns, mutation rates, aggression, resilience, and colors
 - **Social Behavior (Chemotaxis)** - Colonies detect nearby neighbors and exhibit attraction or repulsion based on social_factor genes
 - **Family-Based Recombination** - Only related colonies (parent-child or siblings) can merge, creating stable ecosystems
 - **Cascade-Free Growth** - Newly claimed cells wait one tick before spreading, ensuring smooth realistic expansion
-- **Organic Colony Borders** - Colonies display irregular, blob-like shapes using wobble factors instead of perfect circles
-- **Animated Borders** - Colony borders pulse and shift slightly over time via wobble phase animation
+- **Organic Colony Borders** - 8 distinct procedural shape types with animated pulsing borders
 - **Territorial Competition** - Colonies compete for space based on aggression vs. resilience mechanics
 - **Colony Lifecycle** - Colonies track their peak population history and die when population reaches 0
 - **Colony Division** - When colonies split geographically, they divide into separate species with mutated genomes
+
+### Environmental Systems
+- **Nutrient Layer** - Spatial nutrient distribution affecting colony growth and spread direction
+- **Toxin Layer** - Colonies produce toxins that damage nearby competitors
+- **Chemical Signals** - Colony communication through signal emission and detection
+- **Colony States** - NORMAL, DORMANT, and STRESSED states with adaptive behavior
+
+### Advanced Genetics
+- **Environmental Sensing** - nutrient_sensitivity, edge_affinity, density_tolerance traits
+- **Colony Interactions** - toxin production/resistance, signal emission/sensitivity, gene transfer
+- **Survival Strategies** - dormancy threshold/resistance, biofilm investment, motility
+- **Metabolic Efficiency** - Resource conversion optimization
+
+### Technical Features
 - **Lock-Free Parallel Simulation** - Atomic CAS-based spreading enables 28%+ CPU utilization with no lock contention
 - **GPU/MPI/SHMEM Ready** - Architecture designed for CUDA, OpenCL, and distributed computing acceleration
 - **Client/Server Architecture** - Multiple clients can connect to observe the same simulation
-- **Terminal Rendering** - Beautiful 24-bit color display with box-drawing characters
+
+### Clients
+- **Terminal Client** - Beautiful 24-bit color display with box-drawing characters
+- **GUI Client (SDL2)** - Grid-based rendering, zoom/pan, colony selection, continuous key input
 - **Real-time Controls** - Pause, speed up/down, select colonies for detailed info
+
+### Quality
 - **Comprehensive Test Suite** - 15 test suites with 200+ tests ensuring simulation correctness
 
 ## Quick Start

@@ -692,6 +692,98 @@ if (rand_float() < SHAPE_MUTATION_RATE) {
 
 Colony shapes are generated procedurally from `shape_seed` using fractal noise. See [GENETICS.md](GENETICS.md) for detailed shape generation documentation.
 
+## Colony States
+
+Colonies can exist in different behavioral states that affect their metabolism and survival strategies.
+
+### State Transitions
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     COLONY STATE MACHINE                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│     ┌─────────────┐     stress > dormancy_threshold             │
+│     │   NORMAL    │────────────────────────────────►┌───────────┤
+│     │             │                                 │ STRESSED  │
+│     │ Full growth │◄────────────────────────────────│           │
+│     │ Full spread │    stress decreases             └─────┬─────┤
+│     └─────────────┘                                       │     │
+│           ▲                                               │     │
+│           │                                               ▼     │
+│           │         ┌─────────────┐                             │
+│           │         │  DORMANT    │◄───── continued stress      │
+│           │         │             │                             │
+│           │         │ Minimal     │                             │
+│           └─────────│ metabolism  │                             │
+│           recovery  │ High resist │                             │
+│                     └─────────────┘                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### State Behaviors
+
+| State | Spread Rate | Resilience | Metabolism | Description |
+|-------|-------------|------------|------------|-------------|
+| NORMAL | 100% | Base | 100% | Standard active growth |
+| STRESSED | 50% | +20% | 70% | Transitional, preparing for dormancy |
+| DORMANT | 10% | +50% | 30% | Survival mode, minimal activity |
+
+### Stress Accumulation
+
+Stress increases from:
+- **Toxin exposure** - toxins × (1 - toxin_resistance)
+- **Nutrient scarcity** - (1 - local_nutrients) × nutrient_sensitivity
+- **Overcrowding** - density × (1 - density_tolerance)
+- **Combat losses** - lost cells from enemy attacks
+
+Stress decreases when conditions improve.
+
+## Environmental Layers
+
+The world contains environmental layers that affect colony behavior.
+
+### Nutrient Layer
+
+```c
+float* nutrients;  // Per-cell nutrient concentration (0-1)
+```
+
+**Dynamics:**
+- Nutrients regenerate slowly over time
+- Consumed by colony growth
+- Colonies with high `nutrient_sensitivity` spread toward nutrient-rich areas
+
+### Toxin Layer
+
+```c
+float* toxins;  // Per-cell toxin concentration (0-1)
+```
+
+**Dynamics:**
+- Emitted by colonies with high `toxin_production`
+- Diffuses to neighboring cells
+- Decays over time
+- Damages colonies based on (1 - toxin_resistance)
+
+### Signal Layer
+
+```c
+float* signals;        // Chemical signal strength (0-1)
+uint32_t* signal_source;  // Colony ID that emitted signal
+```
+
+**Dynamics:**
+- Emitted by colonies based on `signal_emission`
+- Diffuses rapidly
+- Decays quickly
+- Colonies respond based on `signal_sensitivity`
+
+**Signal Uses:**
+- Coordinate movement toward kin
+- Mark territory
+- Warn of dangers
+
 ## Border Detection
 
 Cells are marked as border cells for rendering purposes:
