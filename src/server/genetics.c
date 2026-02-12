@@ -3,7 +3,9 @@
 #include <stdlib.h>
 #include <math.h>
 
-#define MUTATION_DELTA 0.1f
+// Much larger mutations for dynamic evolution
+#define MUTATION_DELTA 0.25f
+#define MUTATION_DELTA_LARGE 0.4f  // For dramatic trait shifts
 #define NUM_GENOME_FIELDS 26  // All evolvable traits (added neural network + env sensing fields)
 // Basic (5): spread_rate(1) + mutation_rate*5(0.5) + aggression(1) + resilience(1) + metabolism(1) = 4.5
 // Social (4): detection_range(1) + social_factor*0.5(1) + merge_affinity(1) + max_tracked(0.75) = 3.75
@@ -26,11 +28,11 @@ Genome genome_create_random(void) {
     for (int i = 0; i < 8; i++) {
         g.spread_weights[i] = 0.3f + rand_float() * 0.7f;
     }
-    g.spread_rate = 0.3f + rand_float() * 0.5f;  // 0.3-0.8: faster spread for more activity
-    g.mutation_rate = rand_float() * 0.1f;  // 0-0.1
-    g.aggression = 0.3f + rand_float() * 0.7f;  // 0.3-1.0: varied aggression
-    g.resilience = 0.2f + rand_float() * 0.6f;  // 0.2-0.8
-    g.metabolism = 0.4f + rand_float() * 0.5f;  // 0.4-0.9: higher metabolism = faster growth
+    g.spread_rate = 0.5f + rand_float() * 0.5f;  // 0.5-1.0: very fast spread for dynamic simulation
+    g.mutation_rate = 0.02f + rand_float() * 0.15f;  // 0.02-0.17: much higher mutation for visible evolution
+    g.aggression = 0.4f + rand_float() * 0.6f;  // 0.4-1.0: aggressive colonies
+    g.resilience = 0.2f + rand_float() * 0.5f;  // 0.2-0.7
+    g.metabolism = 0.6f + rand_float() * 0.4f;  // 0.6-1.0: high metabolism for fast activity
     
     // === Social Behavior ===
     g.detection_range = 0.1f + rand_float() * 0.4f;  // 0.1-0.5
@@ -88,15 +90,22 @@ Genome genome_create_random(void) {
     return g;
 }
 
-// Helper macro for mutation
+// Helper macro for mutation - now with larger changes
 #define MUTATE_FIELD(field, min_val, max_val) \
     if (rand_float() < mutation_chance) { \
         float delta = (rand_float() - 0.5f) * 2.0f * MUTATION_DELTA; \
         genome->field = utils_clamp_f(genome->field + delta, min_val, max_val); \
     }
 
+// Large mutations for key traits that drive behavior
+#define MUTATE_FIELD_LARGE(field, min_val, max_val) \
+    if (rand_float() < mutation_chance * 1.5f) { \
+        float delta = (rand_float() - 0.5f) * 2.0f * MUTATION_DELTA_LARGE; \
+        genome->field = utils_clamp_f(genome->field + delta, min_val, max_val); \
+    }
+
 #define MUTATE_FIELD_SLOW(field, min_val, max_val) \
-    if (rand_float() < mutation_chance * 0.5f) { \
+    if (rand_float() < mutation_chance * 0.7f) { \
         float delta = (rand_float() - 0.5f) * MUTATION_DELTA; \
         genome->field = utils_clamp_f(genome->field + delta, min_val, max_val); \
     }
@@ -104,14 +113,21 @@ Genome genome_create_random(void) {
 void genome_mutate(Genome* genome) {
     if (!genome) return;
     
-    float mutation_chance = genome->mutation_rate;
+    // Base mutation chance from genome, but with a floor for constant evolution
+    float mutation_chance = fmaxf(genome->mutation_rate, 0.05f);
     
-    // === Basic Traits ===
-    MUTATE_FIELD(spread_rate, 0.0f, 1.0f);
-    MUTATE_FIELD(mutation_rate, 0.0f, 0.2f);
-    MUTATE_FIELD(aggression, 0.0f, 1.0f);
-    MUTATE_FIELD(resilience, 0.0f, 1.0f);
-    MUTATE_FIELD(metabolism, 0.0f, 1.0f);
+    // Occasional "hypermutation" events - dramatic genetic shifts
+    bool hypermutation = rand_float() < 0.02f;  // 2% chance per mutation call
+    if (hypermutation) {
+        mutation_chance *= 3.0f;  // Triple mutation rate during hypermutation
+    }
+    
+    // === Basic Traits - these drive core behavior ===
+    MUTATE_FIELD_LARGE(spread_rate, 0.1f, 1.0f);  // Always some spread capability
+    MUTATE_FIELD(mutation_rate, 0.02f, 0.3f);     // Higher max mutation rate
+    MUTATE_FIELD_LARGE(aggression, 0.0f, 1.0f);
+    MUTATE_FIELD_LARGE(resilience, 0.0f, 1.0f);
+    MUTATE_FIELD_LARGE(metabolism, 0.2f, 1.0f);   // Always some metabolism
     
     // === Social Behavior ===
     MUTATE_FIELD(detection_range, 0.05f, 0.6f);
@@ -139,15 +155,15 @@ void genome_mutate(Genome* genome) {
     MUTATE_FIELD(alarm_threshold, 0.0f, 1.0f);
     MUTATE_FIELD_SLOW(gene_transfer_rate, 0.0f, 0.1f);
     
-    // === Competitive Strategy ===
-    MUTATE_FIELD(resource_consumption, 0.0f, 1.0f);
-    MUTATE_FIELD_SLOW(defense_priority, 0.0f, 1.0f);
+    // === Competitive Strategy - key for dynamic battles ===
+    MUTATE_FIELD_LARGE(resource_consumption, 0.0f, 1.0f);
+    MUTATE_FIELD_LARGE(defense_priority, 0.0f, 1.0f);
     
     // === Survival Strategies ===
     MUTATE_FIELD_SLOW(dormancy_threshold, 0.0f, 0.5f);
     MUTATE_FIELD(dormancy_resistance, 0.0f, 1.0f);
-    MUTATE_FIELD_SLOW(biofilm_investment, 0.0f, 1.0f);
-    MUTATE_FIELD(motility, 0.0f, 0.5f);
+    MUTATE_FIELD(biofilm_investment, 0.0f, 1.0f);
+    MUTATE_FIELD_LARGE(motility, 0.0f, 0.8f);  // Higher max motility
     
     if (rand_float() < mutation_chance) {
         genome->motility_direction += (rand_float() - 0.5f) * 0.5f;
@@ -156,20 +172,39 @@ void genome_mutate(Genome* genome) {
     }
     
     // === Metabolic Strategy ===
-    MUTATE_FIELD(efficiency, 0.0f, 1.0f);
+    MUTATE_FIELD_LARGE(efficiency, 0.0f, 1.0f);
     
-    // === Neural Network Decision Layer ===
+    // === Neural Network Decision Layer - more active learning ===
     for (int i = 0; i < 8; i++) {
-        if (rand_float() < mutation_chance * 0.5f) {
-            float delta = (rand_float() - 0.5f) * MUTATION_DELTA;
+        if (rand_float() < mutation_chance) {
+            float delta = (rand_float() - 0.5f) * MUTATION_DELTA_LARGE;
             genome->hidden_weights[i] = utils_clamp_f(genome->hidden_weights[i] + delta, -1.0f, 1.0f);
         }
     }
-    MUTATE_FIELD_SLOW(learning_rate, 0.0f, 1.0f);
-    MUTATE_FIELD_SLOW(memory_factor, 0.0f, 1.0f);
+    MUTATE_FIELD(learning_rate, 0.0f, 1.0f);
+    MUTATE_FIELD(memory_factor, 0.0f, 1.0f);
+    
+    // === Color mutations - visible evolution ===
+    if (rand_float() < mutation_chance * 0.3f) {
+        int color_shift = rand_range(-30, 30);
+        genome->body_color.r = (uint8_t)utils_clamp_i(genome->body_color.r + color_shift, 30, 255);
+    }
+    if (rand_float() < mutation_chance * 0.3f) {
+        int color_shift = rand_range(-30, 30);
+        genome->body_color.g = (uint8_t)utils_clamp_i(genome->body_color.g + color_shift, 30, 255);
+    }
+    if (rand_float() < mutation_chance * 0.3f) {
+        int color_shift = rand_range(-30, 30);
+        genome->body_color.b = (uint8_t)utils_clamp_i(genome->body_color.b + color_shift, 30, 255);
+    }
+    // Border color tracks body color
+    genome->border_color.r = (uint8_t)(genome->body_color.r / 2);
+    genome->border_color.g = (uint8_t)(genome->body_color.g / 2);
+    genome->border_color.b = (uint8_t)(genome->body_color.b / 2);
 }
 
 #undef MUTATE_FIELD
+#undef MUTATE_FIELD_LARGE
 #undef MUTATE_FIELD_SLOW
 
 float genome_distance(const Genome* a, const Genome* b) {

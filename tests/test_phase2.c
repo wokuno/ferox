@@ -194,7 +194,7 @@ TEST(genome_create_random_produces_values_in_valid_ranges) {
     for (int i = 0; i < 100; i++) {
         Genome g = genome_create_random();
         ASSERT_TRUE(g.spread_rate >= 0.0f && g.spread_rate <= 1.0f);
-        ASSERT_TRUE(g.mutation_rate >= 0.0f && g.mutation_rate <= 0.1f);  // mutation_rate is 0-0.1
+        ASSERT_TRUE(g.mutation_rate >= 0.0f && g.mutation_rate <= 0.5f);  // mutation_rate range increased for dynamic sim
         ASSERT_TRUE(g.aggression >= 0.0f && g.aggression <= 1.0f);
         ASSERT_TRUE(g.resilience >= 0.0f && g.resilience <= 1.0f);
         ASSERT_TRUE(g.metabolism >= 0.0f && g.metabolism <= 1.0f);
