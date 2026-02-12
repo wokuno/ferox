@@ -494,16 +494,23 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                 if (!neighbor) continue;
                 
                 if (neighbor->colony_id == 0) {
-                    // Empty cell - can spread
-                    if (rand_float() < colony->genome.spread_rate * colony->genome.metabolism) {
+                    // Empty cell - can spread (increased base rate)
+                    float spread_chance = colony->genome.spread_rate * colony->genome.metabolism * 1.5f;
+                    if (rand_float() < spread_chance) {
                         pending_buffer_add(pending, nx, ny, cell->colony_id);
                     }
                 } else if (neighbor->colony_id != cell->colony_id) {
                     // Enemy cell - might overtake based on aggression vs resilience
                     Colony* enemy = world_get_colony(world, neighbor->colony_id);
-                    float combat_chance = colony->genome.aggression * (1.0f - enemy->genome.resilience * 0.5f);
-                    if (enemy && rand_float() < combat_chance) {
-                        pending_buffer_add(pending, nx, ny, cell->colony_id);
+                    if (enemy && enemy->active) {
+                        // More aggressive combat: attacker advantage
+                        float attack = colony->genome.aggression * (1.0f + colony->genome.toxin_production * 0.5f);
+                        float defense = enemy->genome.resilience * (0.5f + enemy->genome.defense_priority * 0.5f);
+                        float combat_chance = attack / (attack + defense + 0.1f);
+                        // Higher overall combat rate (was * 0.3, now * 0.6)
+                        if (rand_float() < combat_chance * 0.6f) {
+                            pending_buffer_add(pending, nx, ny, cell->colony_id);
+                        }
                     }
                 }
             }
@@ -828,10 +835,10 @@ void simulation_resolve_combat(World* world) {
                     defend_str *= (0.7f + world->nutrients[defender_idx] * 0.3f);
                 }
                 
-                // Probabilistic outcome - no guaranteed winner
-                float attack_chance = attack_str / (attack_str + defend_str + 0.2f);
+                // Probabilistic outcome - higher combat rate for more dynamic simulation
+                float attack_chance = attack_str / (attack_str + defend_str + 0.1f);
                 
-                if (rand_float() < attack_chance * 0.3f) {
+                if (rand_float() < attack_chance * 0.5f) {
                     // Attacker wins this exchange
                     if (result_count >= result_capacity) {
                         result_capacity *= 2;
@@ -850,13 +857,22 @@ void simulation_resolve_combat(World* world) {
         if (cell && cell->colony_id != 0 && cell->colony_id != results[i].winner) {
             // Defender loses this cell
             Colony* loser = world_get_colony(world, cell->colony_id);
+            Colony* winner = world_get_colony(world, results[i].winner);
             if (loser && loser->cell_count > 0) {
                 loser->cell_count--;
             }
-            // Cell becomes empty (not captured - simulates mutual destruction)
-            cell->colony_id = 0;
-            cell->age = 0;
-            cell->is_border = false;
+            // Cell is captured by winner (not just destroyed)
+            if (winner && winner->active) {
+                cell->colony_id = results[i].winner;
+                cell->age = 0;
+                cell->is_border = true;
+                winner->cell_count++;
+            } else {
+                // Fallback: cell becomes empty
+                cell->colony_id = 0;
+                cell->age = 0;
+                cell->is_border = false;
+            }
         }
     }
     
@@ -881,6 +897,53 @@ void simulation_tick(World* world) {
     simulation_mutate(world);
     simulation_check_divisions(world);
     simulation_check_recombinations(world);
+    
+    // Combat resolution for more dynamic battles
+    simulation_resolve_combat(world);
+    
+    // Count active colonies and total cells
+    int active_colonies = 0;
+    int total_cells = 0;
+    for (size_t i = 0; i < world->colony_count; i++) {
+        if (world->colonies[i].active) {
+            active_colonies++;
+            total_cells += world->colonies[i].cell_count;
+        }
+    }
+    
+    // Spontaneous generation: spawn new colonies in empty areas
+    // More likely when there's lots of empty space
+    int world_size = world->width * world->height;
+    float empty_ratio = 1.0f - (float)total_cells / (float)world_size;
+    if (empty_ratio > 0.3f && active_colonies < 100 && rand_float() < empty_ratio * 0.02f) {
+        // Find a random empty spot
+        for (int attempts = 0; attempts < 20; attempts++) {
+            int x = rand() % world->width;
+            int y = rand() % world->height;
+            Cell* cell = world_get_cell(world, x, y);
+            if (cell && cell->colony_id == 0) {
+                // Spawn a new random colony here
+                Colony colony;
+                memset(&colony, 0, sizeof(Colony));
+                colony.genome = genome_create_random();
+                colony.color = colony.genome.body_color;
+                colony.cell_count = 1;
+                colony.max_cell_count = 1;
+                colony.active = true;
+                colony.parent_id = 0;
+                colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
+                colony.wobble_phase = (float)(rand() % 628) / 100.0f;
+                generate_scientific_name(colony.name, sizeof(colony.name));
+                
+                uint32_t id = world_add_colony(world, colony);
+                if (id > 0) {
+                    cell->colony_id = id;
+                    cell->age = 0;
+                }
+                break;
+            }
+        }
+    }
     
     // Update colony stats and wobble animation
     for (size_t i = 0; i < world->colony_count; i++) {
