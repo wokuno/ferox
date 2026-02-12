@@ -336,7 +336,7 @@ void gui_renderer_draw_colony(GuiRenderer* renderer, const ProtoColony* colony, 
     float screen_radius = colony->radius * renderer->zoom;
     
     // Skip if too small or off screen
-    if (screen_radius < 1.0f) return;
+    if (screen_radius < 1.0f || !isfinite(screen_radius)) return;
     if (cx + screen_radius < 0 || cx - screen_radius > renderer->window_width) return;
     if (cy + screen_radius < 0 || cy - screen_radius > renderer->window_height) return;
     
@@ -348,6 +348,7 @@ void gui_renderer_draw_colony(GuiRenderer* renderer, const ProtoColony* colony, 
         float angle = (float)i / COLONY_SEGMENTS * 2.0f * M_PI;
         float shape_mult = colony_shape_at_angle(colony->shape_seed, angle, 
                                                   colony->wobble_phase + renderer->time * 0.5f);
+        if (!isfinite(shape_mult) || shape_mult < 0.1f) shape_mult = 1.0f;
         float r_at_angle = screen_radius * shape_mult;
         
         points_x[i] = cx + cosf(angle) * r_at_angle;
@@ -381,27 +382,36 @@ void gui_renderer_draw_colony(GuiRenderer* renderer, const ProtoColony* colony, 
             int num_intersect = 0;
             
             // Edge from center to p1
-            if ((cy <= sy && y1 >= sy) || (y1 <= sy && cy >= sy)) {
-                float t = (sy - cy) / (y1 - cy + 0.001f);
-                intersections[num_intersect++] = cx + t * (x1 - cx);
+            float dy1 = y1 - cy;
+            if (fabsf(dy1) > 0.01f && ((cy <= sy && y1 >= sy) || (y1 <= sy && cy >= sy))) {
+                float t = (sy - cy) / dy1;
+                float x_int = cx + t * (x1 - cx);
+                if (isfinite(x_int)) intersections[num_intersect++] = x_int;
             }
             // Edge from p1 to p2
-            if ((y1 <= sy && y2 >= sy) || (y2 <= sy && y1 >= sy)) {
-                float t = (sy - y1) / (y2 - y1 + 0.001f);
-                intersections[num_intersect++] = x1 + t * (x2 - x1);
+            float dy2 = y2 - y1;
+            if (fabsf(dy2) > 0.01f && ((y1 <= sy && y2 >= sy) || (y2 <= sy && y1 >= sy))) {
+                float t = (sy - y1) / dy2;
+                float x_int = x1 + t * (x2 - x1);
+                if (isfinite(x_int)) intersections[num_intersect++] = x_int;
             }
             // Edge from p2 to center
-            if ((y2 <= sy && cy >= sy) || (cy <= sy && y2 >= sy)) {
-                float t = (sy - y2) / (cy - y2 + 0.001f);
-                intersections[num_intersect++] = x2 + t * (cx - x2);
+            float dy3 = cy - y2;
+            if (fabsf(dy3) > 0.01f && ((y2 <= sy && cy >= sy) || (cy <= sy && y2 >= sy))) {
+                float t = (sy - y2) / dy3;
+                float x_int = x2 + t * (cx - x2);
+                if (isfinite(x_int)) intersections[num_intersect++] = x_int;
             }
             
             if (num_intersect >= 2) {
                 float left = fminf(intersections[0], intersections[1]);
                 float right = fmaxf(intersections[0], intersections[1]);
                 
+                // Skip invalid lines
+                if (!isfinite(left) || !isfinite(right) || right - left > renderer->window_width) continue;
+                
                 // Calculate gradient based on distance from center
-                float dist = sqrtf((sy - cy) * (sy - cy));
+                float dist = sqrtf((float)((sy - cy) * (sy - cy)));
                 float t = dist / (screen_radius + 1);
                 if (t > 1.0f) t = 1.0f;
                 

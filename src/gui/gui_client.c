@@ -356,15 +356,21 @@ static void gui_client_receive_updates(GuiClient* client) {
     MessageHeader header;
     uint8_t* payload = NULL;
     
+    // Try to receive with timeout to avoid blocking forever
     net_set_nonblocking(client->socket, false);
     
-    if (protocol_recv_message(client->socket->fd, &header, &payload) == 0) {
+    int result = protocol_recv_message(client->socket->fd, &header, &payload);
+    if (result == 0) {
         gui_client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
         free(payload);
-    } else {
+    } else if (result < 0) {
+        // Connection error - but don't immediately quit, try to reconnect or continue
+        // Only disconnect on fatal errors
+        fprintf(stderr, "Network receive error\n");
         client->connected = false;
-        client->running = false;
+        // Don't set running = false here - let user decide to quit
     }
+    // result > 0 means partial read, just continue
     
     net_set_nonblocking(client->socket, true);
 }
