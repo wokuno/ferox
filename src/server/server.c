@@ -208,7 +208,11 @@ static void* simulation_thread_func(void* arg) {
         
         // Calculate sleep time to maintain tick rate
         long elapsed = get_time_ms() - start_time;
-        int target_ms = (int)(server->tick_rate_ms / server->speed_multiplier);
+        // Ensure target_ms is at least 1ms to prevent busy-waiting and timing issues
+        float speed = server->speed_multiplier;
+        if (speed < 0.1f) speed = 0.1f;  // Clamp to prevent division issues
+        int target_ms = (int)(server->tick_rate_ms / speed);
+        if (target_ms < 1) target_ms = 1;  // Minimum 1ms tick to prevent CPU spinning
         if (elapsed < target_ms) {
             sleep_ms(target_ms - (int)elapsed);
         }
@@ -408,6 +412,8 @@ void server_handle_command(Server* server, ClientSession* client, CommandType cm
         case CMD_SPEED_UP:
             if (server->speed_multiplier < 10.0f) {
                 server->speed_multiplier *= 2.0f;
+                // Clamp to max to handle floating point accumulation
+                if (server->speed_multiplier > 10.0f) server->speed_multiplier = 10.0f;
                 printf("Speed increased to %.1fx by client %u\n", server->speed_multiplier, client->id);
             }
             break;
@@ -415,6 +421,8 @@ void server_handle_command(Server* server, ClientSession* client, CommandType cm
         case CMD_SLOW_DOWN:
             if (server->speed_multiplier > 0.1f) {
                 server->speed_multiplier /= 2.0f;
+                // Clamp to min to handle floating point accumulation
+                if (server->speed_multiplier < 0.1f) server->speed_multiplier = 0.1f;
                 printf("Speed decreased to %.1fx by client %u\n", server->speed_multiplier, client->id);
             }
             break;

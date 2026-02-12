@@ -62,7 +62,7 @@ static float calculate_env_spread_modifier(World* world, Colony* colony, int tx,
         modifier *= (1.0f - density_penalty);
     }
     
-    return utils_clamp_f(modifier, 0.0f, 2.0f);
+    return utils_clamp_f(modifier, 0.3f, 2.0f);  // Minimum floor of 0.3 to prevent stalling
 }
 
 // Stack for iterative flood-fill
@@ -477,7 +477,8 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                 } else if (neighbor->colony_id != cell->colony_id) {
                     // Enemy cell - might overtake based on aggression vs resilience
                     Colony* enemy = world_get_colony(world, neighbor->colony_id);
-                    if (enemy && rand_float() < colony->genome.aggression * (1.0f - enemy->genome.resilience)) {
+                    float combat_chance = colony->genome.aggression * (1.0f - enemy->genome.resilience * 0.5f);
+                    if (enemy && rand_float() < combat_chance) {
                         pending_buffer_add(pending, nx, ny, cell->colony_id);
                     }
                 }
@@ -804,9 +805,9 @@ void simulation_resolve_combat(World* world) {
                 }
                 
                 // Probabilistic outcome - no guaranteed winner
-                float attack_chance = attack_str / (attack_str + defend_str + 0.5f);
+                float attack_chance = attack_str / (attack_str + defend_str + 0.2f);
                 
-                if (rand_float() < attack_chance * 0.1f) {
+                if (rand_float() < attack_chance * 0.3f) {
                     // Attacker wins this exchange
                     if (result_count >= result_capacity) {
                         result_capacity *= 2;

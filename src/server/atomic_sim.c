@@ -232,6 +232,10 @@ void atomic_world_sync_from_world(AtomicWorld* aworld) {
             free(aworld->colony_stats);
             aworld->colony_stats = new_stats;
             aworld->max_colonies = new_max;
+        } else {
+            // Allocation failed - this is critical, log error
+            // Continue with existing array but skip colonies with IDs >= max_colonies
+            fprintf(stderr, "Warning: Failed to expand colony_stats array (new_max=%zu)\n", new_max);
         }
     }
     
@@ -339,6 +343,10 @@ void atomic_spread_region(AtomicRegionWork* work) {
             
             uint32_t colony_id = atomic_load(&cell->colony_id);
             if (colony_id == 0) continue;  // Empty cell
+            
+            // Skip cells with colony IDs beyond our tracking capacity
+            // This can happen if colony_stats resize failed
+            if (colony_id >= aworld->max_colonies) continue;
             
             // Don't spread from cells with age=0 (just claimed this tick)
             // This prevents cascade spreading within a single tick
