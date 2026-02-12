@@ -306,8 +306,35 @@ void renderer_draw_colony_info(Renderer* renderer, const ProtoColony* colony) {
     renderer_move_cursor(renderer, ++panel_y, panel_x);
     renderer_writef(renderer, "Radius: %.1f", colony->radius);
     
-    renderer_move_cursor(renderer, ++panel_y, panel_x);
-    renderer_writef(renderer, "Growth: %.2f/tick", colony->growth_rate);
+    // Trait diagram header
+    panel_y += 2;
+    renderer_move_cursor(renderer, panel_y++, panel_x);
+    renderer_write(renderer, ANSI_BOLD "Traits" ANSI_RESET);
+    renderer_set_color_fg(renderer, 200, 200, 200);
+    
+    // Helper macro to draw a bar: [████░░░░░░] 0.75
+    #define DRAW_TRAIT_BAR(label, value, r, g, b) do { \
+        renderer_move_cursor(renderer, panel_y++, panel_x); \
+        renderer_writef(renderer, "%-6s", label); \
+        renderer_set_color_fg(renderer, r, g, b); \
+        int filled = (int)(value * 8 + 0.5f); \
+        renderer_write(renderer, "["); \
+        for (int _i = 0; _i < 8; _i++) { \
+            if (_i < filled) renderer_write(renderer, "█"); \
+            else renderer_write(renderer, "░"); \
+        } \
+        renderer_write(renderer, "]"); \
+        renderer_set_color_fg(renderer, 200, 200, 200); \
+    } while(0)
+    
+    // Draw trait bars with color coding
+    DRAW_TRAIT_BAR("ATK", colony->aggression, 255, 100, 100);      // Red for attack
+    DRAW_TRAIT_BAR("DEF", colony->defense, 100, 150, 255);         // Blue for defense
+    DRAW_TRAIT_BAR("SPD", colony->spread_rate, 100, 255, 100);     // Green for spread
+    DRAW_TRAIT_BAR("MET", colony->metabolism, 255, 200, 100);      // Orange for metabolism
+    DRAW_TRAIT_BAR("TOX", colony->toxin_production, 200, 100, 255); // Purple for toxin
+    
+    #undef DRAW_TRAIT_BAR
     
     renderer_reset_colors(renderer);
 }

@@ -4,11 +4,17 @@ A multi-threaded bacterial colony simulation with client-server architecture.
 
 ## Features
 
-- Real-time bacterial colony simulation
-- Genetic mutation and evolution mechanics
-- Multi-threaded simulation engine
-- Client-server architecture for remote viewing
-- Thread pool for parallel processing
+- **Real-time bacterial colony simulation** with genetic evolution
+- **Multi-threaded simulation engine** with lock-free atomic operations
+- **Client-server architecture** for remote viewing
+- **Genetics system** - mutation, speciation, family-based recombination
+- **Combat mechanics** - aggression vs resilience traits determine territorial disputes
+- **Size-based decay** - larger colonies decay faster (resource transport limitation)
+- **Social behavior** - chemotaxis-like attraction/repulsion between colonies
+- **Environmental systems** - nutrients, toxins, chemical signals
+- **Terminal client** - 24-bit ANSI color rendering
+- **GUI client (SDL2)** - grid-based rendering with zoom/pan
+- **Demo mode** - standalone visualization without server
 
 ## Project Structure
 
@@ -87,16 +93,52 @@ make install
 
 ## Usage
 
-### Starting the Server
+### Using Scripts (Recommended)
 
 ```bash
-./ferox_server [options]
+# Build the project
+./scripts/build.sh
+
+# Run server + terminal client
+./scripts/run.sh
+
+# Run server + GUI client
+./scripts/run.sh gui+
+
+# Run terminal client in demo mode (no server)
+./scripts/run.sh demo
+
+# Run all tests
+./scripts/test.sh
 ```
 
-### Starting the Client
+### Manual Execution
+
+**Starting the Server:**
 
 ```bash
-./ferox_client [server_address] [port]
+./ferox_server -p 8765 -w 100 -H 100 -c 10 -t 4
+```
+
+| Option | Description |
+|--------|-------------|
+| `-p, --port` | TCP port (default: 8080) |
+| `-w, --width` | World grid width |
+| `-H, --height` | World grid height |
+| `-c, --colonies` | Initial colony count |
+| `-t, --threads` | Thread pool size |
+
+**Starting Clients:**
+
+```bash
+# Terminal client
+./ferox_client localhost 8765
+
+# Terminal client in demo mode
+./ferox_client --demo
+
+# GUI client (requires SDL2)
+./ferox_gui localhost 8765
 ```
 
 ## Contributing

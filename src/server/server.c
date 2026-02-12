@@ -320,6 +320,13 @@ static void build_protocol_world(Server* server, ProtoWorld* proto_world) {
             proto_colony->wobble_phase = server->world->colonies[i].wobble_phase;
             proto_colony->shape_evolution = server->world->colonies[i].shape_evolution;
             
+            // Copy key trait data for info panel display
+            proto_colony->aggression = server->world->colonies[i].genome.aggression;
+            proto_colony->defense = server->world->colonies[i].genome.defense_priority;
+            proto_colony->metabolism = server->world->colonies[i].genome.metabolism;
+            proto_colony->toxin_production = server->world->colonies[i].genome.toxin_production;
+            proto_colony->spread_rate = server->world->colonies[i].genome.spread_rate;
+            
             count++;
         }
     }

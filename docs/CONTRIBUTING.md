@@ -30,9 +30,10 @@ Do NOT open public issues for security vulnerabilities. See [SECURITY.md](../SEC
 ### Prerequisites
 
 - **C11 compiler**: GCC 7+ or Clang 5+
+- **CMake**: 3.16 or higher
 - **POSIX system**: Linux or macOS
 - **Git**: For version control
-- **Make**: For build automation (optional)
+- **SDL2**: For GUI client (optional)
 
 ### Getting Started
 
@@ -41,13 +42,17 @@ Do NOT open public issues for security vulnerabilities. See [SECURITY.md](../SEC
 git clone https://github.com/your-org/ferox.git
 cd ferox
 
-# Build the project
-gcc -O2 -pthread -o ferox_server src/server/*.c src/shared/*.c
-gcc -O2 -o ferox_client src/client/*.c src/shared/*.c
+# Build with CMake (recommended)
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
 
 # Run tests
-gcc -o tests/test_phase1 tests/test_phase1.c src/shared/*.c
-./tests/test_phase1
+ctest --output-on-failure
+
+# Or use the provided scripts
+./scripts/build.sh
+./scripts/test.sh
 ```
 
 ### Development Tools

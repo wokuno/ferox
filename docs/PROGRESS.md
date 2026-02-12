@@ -150,7 +150,7 @@ ferox/
 ├── src/
 │   ├── shared/          # ✅ Complete (14 files)
 │   │   ├── types.h
-│   │   ├── atomic_types.h  # NEW: Lock-free atomic types
+│   │   ├── atomic_types.h  # Lock-free atomic types
 │   │   ├── protocol.h/c
 │   │   ├── network.h/c
 │   │   ├── colors.h/c
@@ -162,16 +162,22 @@ ferox/
 │   │   ├── server.h/c
 │   │   ├── world.h/c
 │   │   ├── simulation.h/c
-│   │   ├── atomic_sim.h/c  # NEW: Atomic simulation engine
+│   │   ├── atomic_sim.h/c  # Atomic simulation engine
 │   │   ├── genetics.h/c
 │   │   ├── threadpool.h/c
 │   │   ├── parallel.h/c
 │   │   └── CMakeLists.txt
-│   └── client/          # ✅ Complete (8 files)
-│       ├── main.c
-│       ├── client.h/c
-│       ├── renderer.h/c
-│       ├── input.h/c
+│   ├── client/          # ✅ Terminal client (8 files)
+│   │   ├── main.c       # Includes demo mode
+│   │   ├── client.h/c
+│   │   ├── renderer.h/c
+│   │   ├── input.h/c
+│   │   └── CMakeLists.txt
+│   └── gui/             # ✅ GUI client - SDL2 (8 files)
+│       ├── gui_main.c
+│       ├── gui_client.h/c
+│       ├── gui_renderer.h/c
+│       ├── gui_input.h/c
 │       └── CMakeLists.txt
 ├── tests/               # ✅ 15+ test files
 │   ├── test_phase1.c through test_phase6.c

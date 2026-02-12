@@ -729,11 +729,46 @@ if (colony->cell_count == 0) {
 - All cells captured by aggressive neighboring colonies
 - Gradual attrition from superior competitors
 - Geographic isolation leading to elimination
+- Size-based decay (natural cell death)
 
 **Effects of death:**
 - `active` flag set to `false`
 - Colony hidden from info panel display
 - Colony data retained for historical tracking
+
+### Size-Based Decay
+
+Larger colonies experience faster cell death due to resource transport limitations. This creates a natural equilibrium mechanism where mega-colonies face structural challenges:
+
+```c
+// Base death rate varies by position
+float base_death_rate = 0.01f;  // Interior cells: 1%
+if (cell->is_border) {
+    base_death_rate = 0.035f;   // Border cells: 3.5% (more vulnerable)
+}
+
+// SIZE SCALING: Colonies over 50 cells decay faster
+// Each additional 100 cells adds ~20% more decay
+if (colony->cell_count > 50) {
+    float size_factor = 1.0f + (colony->cell_count - 50) / 500.0f;
+    base_death_rate *= size_factor;
+}
+
+// Interior starvation: Large colony interiors decay even faster
+if (!cell->is_border && colony->cell_count > 100) {
+    base_death_rate *= 1.3f;  // 30% faster interior death
+}
+
+// Protective factors
+base_death_rate *= (1.0f - colony->biofilm_strength * 0.5f);  // Biofilm protection
+base_death_rate *= (1.0f - colony->genome.efficiency * 0.4f); // Efficiency reduces decay
+```
+
+**Biological rationale:**
+- Resources must travel from border to interior
+- Larger colonies have longer resource transport paths
+- Interior cells are "last to be fed" and starve first
+- Creates boom/bust cycles and prevents monopolies
 
 ### Max Population Tracking
 

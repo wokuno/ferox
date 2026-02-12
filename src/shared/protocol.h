@@ -59,12 +59,19 @@ typedef struct ProtoColony {
     uint32_t shape_seed;             // Seed for procedural shape generation
     float wobble_phase;              // Animation phase for border movement
     float shape_evolution;           // Shape evolution factor (0-1, changes over time)
+    // Key traits for display
+    float aggression;                // 0-1: combat aggression
+    float defense;                   // 0-1: defense priority
+    float metabolism;                // 0-1: growth speed
+    float toxin_production;          // 0-1: toxin output
+    float spread_rate;               // 0-1: expansion rate
 } ProtoColony;
 
 // Colony serialized size: id(4) + name(32) + x(4) + y(4) + radius(4) + population(4) + 
 //                        max_population(4) + growth_rate(4) + colors(3) + alive(1) +
-//                        shape_seed(4) + wobble_phase(4) + shape_evolution(4) = 76 bytes
-#define COLONY_SERIALIZED_SIZE 76
+//                        shape_seed(4) + wobble_phase(4) + shape_evolution(4) +
+//                        aggression(4) + defense(4) + metabolism(4) + toxin(4) + spread(4) = 96 bytes
+#define COLONY_SERIALIZED_SIZE 96
 
 // Grid cell for transmission (just colony ownership)
 typedef struct ProtoCell {

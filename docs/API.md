@@ -44,14 +44,12 @@ typedef enum Direction {
     DIR_COUNT  // = 8
 } Direction;
 
-#define WOBBLE_POINTS 8  // Legacy, kept for compatibility
-#define SHAPE_SEED_OCTAVES 4  // Number of noise octaves for shape generation
-
 typedef struct Color {
     uint8_t r, g, b;
 } Color;
 
 typedef struct Genome {
+    // Basic Traits
     float spread_weights[8];  // Direction preferences (0-1)
     float spread_rate;        // Overall spread probability (0-1)
     float mutation_rate;      // Mutation probability (0-0.1)
@@ -60,10 +58,47 @@ typedef struct Genome {
     float metabolism;         // Growth speed modifier (0-1)
     
     // Social behavior (chemotaxis-like)
-    float detection_range;    // Neighbor detection range (0.1-0.5)
+    float detection_range;    // Neighbor detection range (0-1)
     uint8_t max_tracked;      // Max colonies to track (1-4)
     float social_factor;      // Attraction/repulsion (-1 to +1)
-    float merge_affinity;     // Merge bonus (0-0.3)
+    float merge_affinity;     // Merge bonus (0-1)
+    
+    // Environmental Sensing
+    float nutrient_sensitivity;  // How strongly to follow nutrient gradients (0-1)
+    float toxin_sensitivity;     // How strongly to avoid toxins (0-1)
+    float edge_affinity;         // Seek/avoid world edges (-1 to +1)
+    float density_tolerance;     // How well colony handles crowding (0-1)
+    float quorum_threshold;      // Local density threshold for quorum sensing (0-1)
+    
+    // Colony Interactions
+    float toxin_production;      // Toxin emission rate (0-1)
+    float toxin_resistance;      // Resistance to toxin damage (0-1)
+    float signal_emission;       // Chemical signal strength (0-1)
+    float signal_sensitivity;    // Reaction to signals (0-1)
+    float alarm_threshold;       // When to emit alarm signals (0-1)
+    float gene_transfer_rate;    // Horizontal gene transfer probability (0-0.1)
+    
+    // Competitive Strategy
+    float resource_consumption;  // Aggressive vs sustainable growth (0-1)
+    float defense_priority;      // Defensive borders vs expansion (0-1)
+    
+    // Survival Strategies
+    float dormancy_threshold;    // Population ratio triggering dormancy (0-1)
+    float dormancy_resistance;   // Dormant cell resistance (0-1)
+    float sporulation_threshold; // Stress level triggering dormancy (0-1)
+    float biofilm_investment;    // Trade growth for resilience (0-1)
+    float biofilm_tendency;      // Tendency to form biofilm (0-1)
+    float motility;              // Colony drift capability (0-1)
+    float motility_direction;    // Preferred drift direction (0-2π)
+    float specialization;        // Edge vs interior cell differentiation (0-1)
+    
+    // Metabolic Strategy
+    float efficiency;            // Resource conversion efficiency (0-1)
+    
+    // Neural Network Decision Layer
+    float hidden_weights[8];     // Hidden layer weights for decisions
+    float learning_rate;         // Adaptation speed (0-1)
+    float memory_factor;         // Past experience influence (0-1)
     
     Color body_color;
     Color border_color;
@@ -80,11 +115,14 @@ typedef struct Colony {
     uint32_t parent_id;
     bool active;
     Color color;
+    
+    // Dynamic state
+    ColonyState state;        // NORMAL, DORMANT, or STRESSED
+    float stress_level;       // Accumulated stress (0-1)
+    float biofilm_strength;   // Current biofilm protection (0-1)
 } Colony;
 typedef struct World { ... } World;
 ```
-
-> **Note:** The `shape_seed` and `wobble_phase` fields have been removed. Colony visualization now uses cell-based rendering from grid data.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed structure documentation.
 

@@ -66,28 +66,38 @@
 ### Building
 
 ```bash
-# Clone and build
+# Using CMake (recommended)
 cd ferox
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
 
-# Compile the server
-gcc -O2 -pthread -o ferox_server \
-    src/server/*.c src/shared/*.c
-
-# Compile the client
-gcc -O2 -o ferox_client \
-    src/client/*.c src/shared/*.c
+# Or use the build script
+./scripts/build.sh
 ```
 
 ### Running
 
-**Start the server:**
+**Using scripts (recommended):**
 ```bash
-./ferox_server -p 8765 -w 100 -H 50 -c 10
+./scripts/run.sh              # Server + terminal client
+./scripts/run.sh gui+         # Server + GUI client
+./scripts/run.sh demo         # Demo mode (no server)
 ```
 
-**Connect a client:**
+**Manual execution:**
 ```bash
+# Start the server
+./ferox_server -p 8765 -w 100 -H 50 -c 10
+
+# Connect terminal client
 ./ferox_client localhost 8765
+
+# Connect GUI client (requires SDL2)
+./ferox_gui localhost 8765
+
+# Run demo mode (no server needed)
+./ferox_client --demo
 ```
 
 ### Keyboard Controls

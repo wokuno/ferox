@@ -695,13 +695,20 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                     // Enemy cell - aggressive takeover
                     Colony* enemy = world_get_colony(world, neighbor->colony_id);
                     if (enemy && enemy->active) {
-                        // Very aggressive combat
-                        float attack = colony->genome.aggression * (1.0f + colony->genome.toxin_production * 0.7f);
-                        float defense = enemy->genome.resilience * (0.4f + enemy->genome.defense_priority * 0.4f);
+                        // Wide variance in combat: aggression 0-1, defense 0-1
+                        float attack = colony->genome.aggression * (1.0f + colony->genome.toxin_production * 0.8f);
+                        float defense = enemy->genome.resilience * (0.3f + enemy->genome.defense_priority * 0.7f);
                         float combat_chance = attack / (attack + defense + 0.05f);
-                        // Always at least 50% chance to attack, boosted by combat_chance
-                        if (rand_float() < 0.5f + combat_chance * 0.5f) {
+                        
+                        // Attack if random check passes (40% base + 60% from combat_chance)
+                        if (rand_float() < 0.4f + combat_chance * 0.6f) {
                             pending_buffer_add(pending, nx, ny, cell->colony_id);
+                        } else {
+                            // DEFENSE REWARD: Defender successfully repelled attack
+                            enemy->genome.resilience = utils_clamp_f(
+                                enemy->genome.resilience + 0.003f, 0.0f, 1.0f);
+                            enemy->genome.defense_priority = utils_clamp_f(
+                                enemy->genome.defense_priority + 0.002f, 0.0f, 1.0f);
                         }
                     }
                 }
@@ -720,24 +727,43 @@ void simulation_apply_pending(World* world, PendingBuffer** buffers, int buffer_
         for (int i = 0; i < pending->count; i++) {
             Cell* cell = world_get_cell(world, pending->cells[i].x, pending->cells[i].y);
             if (cell) {
-                uint32_t old_colony = cell->colony_id;
+                uint32_t old_colony_id = cell->colony_id;
+                uint32_t new_colony_id = pending->cells[i].colony_id;
+                Colony* new_colony = world_get_colony(world, new_colony_id);
                 
                 // Update old colony's cell count
-                if (old_colony != 0) {
-                    Colony* old = world_get_colony(world, old_colony);
+                if (old_colony_id != 0) {
+                    Colony* old = world_get_colony(world, old_colony_id);
                     if (old && old->cell_count > 0) {
                         old->cell_count--;
+                        
+                        // COMBAT REWARD: Conquering colony gains resources from enemy
+                        if (new_colony && old_colony_id != new_colony_id) {
+                            // Attacker gets a metabolism boost from consuming enemy
+                            float resource_gain = old->genome.resource_consumption * 0.02f;
+                            new_colony->genome.metabolism = utils_clamp_f(
+                                new_colony->genome.metabolism + resource_gain, 0.0f, 1.0f);
+                            
+                            // Small aggression boost for successful attacks
+                            new_colony->genome.aggression = utils_clamp_f(
+                                new_colony->genome.aggression + 0.005f, 0.0f, 1.0f);
+                            
+                            // Track success in neural network
+                            int dx = pending->cells[i].x - (world->width / 2);
+                            int dy = pending->cells[i].y - (world->height / 2);
+                            int dir = (dx > 0 ? 1 : 0) + (dy > 0 ? 2 : 0);  // Simple directional encoding
+                            new_colony->success_history[dir % 8] += 0.1f;
+                        }
                     }
                 }
                 
                 // Colonize
-                cell->colony_id = pending->cells[i].colony_id;
+                cell->colony_id = new_colony_id;
                 cell->age = 0;
                 
                 // Update new colony's cell count
-                Colony* colony = world_get_colony(world, pending->cells[i].colony_id);
-                if (colony) {
-                    colony->cell_count++;
+                if (new_colony) {
+                    new_colony->cell_count++;
                 }
             }
         }

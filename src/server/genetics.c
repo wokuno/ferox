@@ -40,8 +40,10 @@ Genome genome_create_random(void) {
     
     g.spread_rate = utils_clamp_f(0.2f + rand_float() * 0.5f + growth_bias * 0.3f, 0.0f, 1.0f);
     g.mutation_rate = 0.02f + rand_float() * 0.25f;  // 0.02-0.27: wide mutation range
-    g.aggression = utils_clamp_f(rand_float() * 0.4f + aggression_bias * 0.6f, 0.0f, 1.0f);
-    g.resilience = utils_clamp_f(rand_float() * 0.5f + (1.0f - aggression_bias) * 0.4f, 0.0f, 1.0f);
+    // Wide aggression variance: full 0-1 range with archetype influence
+    g.aggression = utils_clamp_f(rand_float() * 0.5f + aggression_bias * 0.5f, 0.0f, 1.0f);
+    // Wide defense variance: full 0-1 range, inverse to aggression bias
+    g.resilience = utils_clamp_f(rand_float() * 0.5f + (1.0f - aggression_bias) * 0.5f, 0.0f, 1.0f);
     g.metabolism = utils_clamp_f(0.3f + rand_float() * 0.4f + growth_bias * 0.3f, 0.0f, 1.0f);
     
     // === Social Behavior - Very varied ===
@@ -57,17 +59,20 @@ Genome genome_create_random(void) {
     g.density_tolerance = rand_float();  // 0-1.0
     g.quorum_threshold = rand_float() * 0.8f;  // 0-0.8
     
-    // === Colony Interactions - Wide variety ===
-    g.toxin_production = utils_clamp_f(rand_float() * aggression_bias + rand_float() * 0.2f, 0.0f, 1.0f);
-    g.toxin_resistance = rand_float();  // 0-1.0
+    // === Colony Interactions - Wide variety with production specialization ===
+    // Some colonies specialize in toxin production, others in resource production
+    float production_spec = rand_float();  // 0=resource producer, 1=toxin producer
+    g.toxin_production = utils_clamp_f(production_spec * 0.8f + rand_float() * 0.2f, 0.0f, 1.0f);
+    g.toxin_resistance = utils_clamp_f(rand_float() * 0.6f + production_spec * 0.4f, 0.0f, 1.0f);
     g.signal_emission = utils_clamp_f(rand_float() * social_bias + rand_float() * 0.3f, 0.0f, 1.0f);
     g.signal_sensitivity = rand_float();  // 0-1.0
     g.alarm_threshold = rand_float() * 0.8f;  // 0-0.8
     g.gene_transfer_rate = rand_float() * 0.15f;  // 0-0.15
     
-    // === Competitive Strategy ===
-    g.resource_consumption = utils_clamp_f(0.2f + rand_float() * 0.8f, 0.0f, 1.0f);
-    g.defense_priority = utils_clamp_f(rand_float() * (1.0f - aggression_bias) + 0.1f, 0.0f, 1.0f);
+    // === Competitive Strategy - Wide variance ===
+    g.resource_consumption = utils_clamp_f((1.0f - production_spec) * 0.6f + rand_float() * 0.4f, 0.0f, 1.0f);
+    // Defense priority: full 0-1 range with archetype influence
+    g.defense_priority = utils_clamp_f(rand_float() * 0.5f + (1.0f - aggression_bias) * 0.5f, 0.0f, 1.0f);
     
     // === Survival Strategies ===
     g.dormancy_threshold = rand_float() * 0.4f;  // 0-0.4

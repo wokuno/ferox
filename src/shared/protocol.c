@@ -116,6 +116,22 @@ int protocol_serialize_colony(const ProtoColony* colony, uint8_t* buffer) {
     write_float(buffer + offset, colony->shape_evolution);
     offset += 4;
     
+    // Trait data
+    write_float(buffer + offset, colony->aggression);
+    offset += 4;
+    
+    write_float(buffer + offset, colony->defense);
+    offset += 4;
+    
+    write_float(buffer + offset, colony->metabolism);
+    offset += 4;
+    
+    write_float(buffer + offset, colony->toxin_production);
+    offset += 4;
+    
+    write_float(buffer + offset, colony->spread_rate);
+    offset += 4;
+    
     return offset;
 }
 
@@ -161,6 +177,22 @@ int protocol_deserialize_colony(const uint8_t* buffer, ProtoColony* colony) {
     offset += 4;
     
     colony->shape_evolution = read_float(buffer + offset);
+    offset += 4;
+    
+    // Trait data
+    colony->aggression = read_float(buffer + offset);
+    offset += 4;
+    
+    colony->defense = read_float(buffer + offset);
+    offset += 4;
+    
+    colony->metabolism = read_float(buffer + offset);
+    offset += 4;
+    
+    colony->toxin_production = read_float(buffer + offset);
+    offset += 4;
+    
+    colony->spread_rate = read_float(buffer + offset);
     offset += 4;
     
     return offset;
