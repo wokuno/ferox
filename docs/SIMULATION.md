@@ -327,19 +327,106 @@ static inline void atomic_stats_add_cell(AtomicColonyStats* stats) {
 
 ### Combat Mechanics
 
-When colony A attacks colony B's cell:
+Combat occurs when colonies meet at borders. The system is strategic with multiple factors:
+
+#### Combat Resolution Flow
 
 ```
-Success probability = A.aggression × (1.0 - B.resilience)
+┌────────────────────────────────────────────────────────────────┐
+│                    COMBAT RESOLUTION                            │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  1. Toxin Emission Phase                                       │
+│     ├─ Border cells emit toxins (toxin_production trait)      │
+│     └─ Toxins spread to neighboring cells                     │
+│                                                                │
+│  2. Combat Calculation Phase (for each border cell)           │
+│     ├─ Base strength: aggression vs resilience                │
+│     ├─ Flanking bonus: friendly neighbors boost attack        │
+│     ├─ Defensive formation: defense_priority + neighbors      │
+│     ├─ Directional preference: spread_weights affect push     │
+│     ├─ Toxin warfare: production/resistance modifiers         │
+│     ├─ Biofilm defense: absorbs incoming damage               │
+│     ├─ Nutrient advantage: well-fed cells fight harder        │
+│     ├─ Toxin damage: cells in toxins fight worse              │
+│     ├─ Momentum: success_history boosts confidence            │
+│     ├─ Stress effects: desperate attacks vs crumbling defense │
+│     └─ Size advantage: larger colonies get morale bonus       │
+│                                                                │
+│  3. Resolution Phase                                           │
+│     ├─ Calculate win probability from attack/defend strength  │
+│     ├─ Winner captures cell, loser loses it                   │
+│     ├─ Update stress levels (winners decrease, losers inc)    │
+│     └─ Update success_history for learning                    │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
 ```
 
-| A.aggression | B.resilience | Success Rate |
-|--------------|--------------|--------------|
-| 1.0 | 0.0 | 100% |
-| 1.0 | 0.5 | 50% |
-| 1.0 | 1.0 | 0% |
-| 0.5 | 0.5 | 25% |
-| 0.3 | 0.7 | 9% |
+#### Combat Strength Calculation
+
+```c
+// Attacker strength
+attack_str = aggression * 1.2f
+           * flanking_bonus           // 1.0 + (friendly_neighbors * 0.15)
+           * direction_weight         // 0.7-1.3 based on spread_weights
+           + toxin_production * 0.4f
+           * nutrient_modifier        // 0.6-1.1 based on local nutrients
+           * (1 - toxin_damage)       // Reduced by enemy toxins
+           * momentum_bonus           // 0.8-1.2 from success_history
+
+// Defender strength  
+defend_str = resilience * 1.0f
+           * defensive_bonus          // 1.0 + (defense_priority * friendly * 0.2)
+           + toxin_resistance * 0.3f
+           * biofilm_strength         // 1.0-1.3 from biofilm_strength
+           * nutrient_modifier
+           * (1 - toxin_damage)
+
+// Win probability
+attack_chance = attack_str / (attack_str + defend_str + 0.1f)
+success = random() < attack_chance * 0.7f
+```
+
+#### Strategic Factors
+
+| Factor | Trait | Effect |
+|--------|-------|--------|
+| Flanking | - | +15% attack per friendly neighbor |
+| Defensive wall | defense_priority | +20% defense per friendly neighbor |
+| Directional push | spread_weights | 70-130% attack based on direction |
+| Toxin offense | toxin_production | +40% attack, creates hostile zone |
+| Toxin defense | toxin_resistance | +30% defense, resists toxin damage |
+| Biofilm armor | biofilm_strength | +30% defense at borders |
+| Well-fed | nutrients | +50% attack/defense in nutrient-rich areas |
+| Size advantage | cell_count | ±15% based on relative colony size |
+| Momentum | success_history | ±20% based on past success |
+
+#### Learning System
+
+Colonies learn from combat outcomes:
+
+```c
+// On successful attack
+success_history[direction] += 0.05 * learning_rate
+
+// On failed attack
+success_history[direction] -= 0.02 * learning_rate
+
+// Decay over time (memory fades)
+success_history[d] *= (0.995 + memory_factor * 0.004)
+```
+
+#### Stress and State
+
+Colonies track stress levels that affect behavior:
+
+| State | Trigger | Effect |
+|-------|---------|--------|
+| Normal | stress < 0.5 | Standard combat behavior |
+| Stressed | stress 0.5-0.7 | Non-defensive colonies crumble faster |
+| Dormant | stress > sporulation_threshold | Stop attacking, become resistant |
+
+Defensive colonies under high stress stop attacking (tactical retreat).
 
 ## Phase 3: Mutation
 
