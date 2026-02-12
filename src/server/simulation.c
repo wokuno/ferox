@@ -209,6 +209,38 @@ int* find_connected_components(World* world, uint32_t colony_id, int* num_compon
     return sizes;
 }
 
+// Count friendly neighbors around a cell (for flanking calculation)
+static int count_friendly_neighbors(World* world, int x, int y, uint32_t colony_id) {
+    int count = 0;
+    for (int d = 0; d < 4; d++) {
+        Cell* n = world_get_cell(world, x + DX[d], y + DY[d]);
+        if (n && n->colony_id == colony_id) count++;
+    }
+    return count;
+}
+
+// Count enemy neighbors around a cell (for pressure calculation)
+static int count_enemy_neighbors(World* world, int x, int y, uint32_t colony_id) {
+    int count = 0;
+    for (int d = 0; d < 4; d++) {
+        Cell* n = world_get_cell(world, x + DX[d], y + DY[d]);
+        if (n && n->colony_id != 0 && n->colony_id != colony_id) count++;
+    }
+    return count;
+}
+
+// Get directional weight for spread_weights (maps 4-direction to 8-direction weights)
+static float get_direction_weight(Genome* g, int dx, int dy) {
+    // Map dx,dy to direction index
+    // N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
+    int dir = -1;
+    if (dy == -1 && dx == 0) dir = 0;      // N
+    else if (dy == 0 && dx == 1) dir = 2;  // E
+    else if (dy == 1 && dx == 0) dir = 4;  // S
+    else if (dy == 0 && dx == -1) dir = 6; // W
+    return dir >= 0 ? g->spread_weights[dir] : 0.5f;
+}
+
 void simulation_spread(World* world) {
     if (!world) return;
     
@@ -239,7 +271,23 @@ void simulation_spread(World* world) {
                 if (neighbor->colony_id == 0) {
                     // Empty cell - calculate spread probability with environmental sensing
                     float env_modifier = calculate_env_spread_modifier(world, colony, nx, ny, x, y);
-                    float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * env_modifier;
+                    
+                    // Directional preference from genome
+                    float dir_weight = get_direction_weight(&colony->genome, DX[d], DY[d]);
+                    
+                    // Strategic spread: push harder towards open space, less where enemies are
+                    int enemy_count = count_enemy_neighbors(world, nx, ny, cell->colony_id);
+                    float strategic_modifier = 1.0f;
+                    if (enemy_count > 0) {
+                        // Slow down if target is contested (unless very aggressive)
+                        strategic_modifier *= (0.5f + colony->genome.aggression * 0.5f);
+                    }
+                    
+                    // Success history affects spread direction
+                    float history_bonus = 1.0f + colony->success_history[d % 8] * 0.3f;
+                    
+                    float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * 
+                                        env_modifier * dir_weight * strategic_modifier * history_bonus;
                     
                     if (rand_float() < spread_prob) {
                         if (pending_count >= pending_capacity) {
@@ -791,14 +839,40 @@ void simulation_consume_resources(World* world) {
 void simulation_resolve_combat(World* world) {
     if (!world) return;
     
-    typedef struct { int x, y; uint32_t winner; } CombatResult;
+    typedef struct { int x, y; uint32_t winner; uint32_t loser; float strength; } CombatResult;
     CombatResult* results = NULL;
     int result_count = 0;
-    int result_capacity = 64;
+    int result_capacity = 128;
     results = (CombatResult*)malloc(result_capacity * sizeof(CombatResult));
     if (!results) return;
     
-    // Check border cells for adjacent enemy cells
+    // First pass: emit toxins from aggressive colonies to create hostile zones
+    for (int y = 0; y < world->height; y++) {
+        for (int x = 0; x < world->width; x++) {
+            Cell* cell = world_get_cell(world, x, y);
+            if (!cell || cell->colony_id == 0 || !cell->is_border) continue;
+            
+            Colony* colony = world_get_colony(world, cell->colony_id);
+            if (!colony || !colony->active) continue;
+            
+            // Border cells emit toxins based on toxin_production
+            float toxin_emit = colony->genome.toxin_production * 0.1f;
+            if (toxin_emit > 0.01f) {
+                // Emit to self and neighbors
+                int idx = y * world->width + x;
+                world->toxins[idx] = utils_clamp_f(world->toxins[idx] + toxin_emit, 0.0f, 1.0f);
+                for (int d = 0; d < 4; d++) {
+                    int nx = x + DX[d], ny = y + DY[d];
+                    if (nx >= 0 && nx < world->width && ny >= 0 && ny < world->height) {
+                        int ni = ny * world->width + nx;
+                        world->toxins[ni] = utils_clamp_f(world->toxins[ni] + toxin_emit * 0.5f, 0.0f, 1.0f);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Second pass: resolve combat at borders with strategic modifiers
     for (int y = 0; y < world->height; y++) {
         for (int x = 0; x < world->width; x++) {
             Cell* cell = world_get_cell(world, x, y);
@@ -806,6 +880,13 @@ void simulation_resolve_combat(World* world) {
             
             Colony* attacker = world_get_colony(world, cell->colony_id);
             if (!attacker || !attacker->active) continue;
+            
+            // Skip if colony is in retreat mode (stressed and defensive)
+            if (attacker->stress_level > 0.7f && attacker->genome.defense_priority > 0.6f) {
+                continue; // Defensive colonies under stress don't attack
+            }
+            
+            int attacker_friendly = count_friendly_neighbors(world, x, y, cell->colony_id);
             
             // Check neighbors for enemy cells
             for (int d = 0; d < 4; d++) {
@@ -819,33 +900,87 @@ void simulation_resolve_combat(World* world) {
                 Colony* defender = world_get_colony(world, neighbor->colony_id);
                 if (!defender || !defender->active) continue;
                 
-                // Combat calculation:
-                // Attacker strength = aggression * (1 - defense_priority) + toxin_production
-                // Defender strength = resilience * defense_priority + toxin_resistance
-                float attack_str = attacker->genome.aggression * (1.0f - attacker->genome.defense_priority * 0.5f) +
-                                   attacker->genome.toxin_production * 0.5f;
-                float defend_str = defender->genome.resilience * (0.5f + defender->genome.defense_priority * 0.5f) +
-                                   defender->genome.toxin_resistance * 0.3f;
+                // === STRATEGIC COMBAT CALCULATION ===
                 
-                // Nutrient advantage: well-fed cells fight better
+                // Base strength from genome
+                float attack_str = attacker->genome.aggression * 1.2f;
+                float defend_str = defender->genome.resilience * 1.0f;
+                
+                // 1. FLANKING BONUS: More friendly neighbors = stronger attack
+                float flanking_bonus = 1.0f + (attacker_friendly * 0.15f);
+                attack_str *= flanking_bonus;
+                
+                // 2. DEFENSIVE FORMATION: Defenders with high defense_priority are harder to crack
+                int defender_friendly = count_friendly_neighbors(world, nx, ny, neighbor->colony_id);
+                float defensive_bonus = 1.0f + (defender->genome.defense_priority * defender_friendly * 0.2f);
+                defend_str *= defensive_bonus;
+                
+                // 3. DIRECTIONAL PREFERENCE: Colonies fight harder in preferred directions
+                float dir_weight = get_direction_weight(&attacker->genome, DX[d], DY[d]);
+                attack_str *= (0.7f + dir_weight * 0.6f); // 0.7-1.3x based on preferred direction
+                
+                // 4. TOXIN WARFARE: Toxin production aids attack, resistance aids defense
+                attack_str += attacker->genome.toxin_production * 0.4f;
+                defend_str += defender->genome.toxin_resistance * 0.3f;
+                
+                // 5. BIOFILM DEFENSE: Defenders with biofilm are harder to defeat
+                defend_str *= (1.0f + defender->biofilm_strength * 0.3f);
+                
+                // 6. NUTRIENT ADVANTAGE: Well-fed cells fight better
                 if (world->nutrients) {
                     int attacker_idx = y * world->width + x;
                     int defender_idx = ny * world->width + nx;
-                    attack_str *= (0.7f + world->nutrients[attacker_idx] * 0.3f);
-                    defend_str *= (0.7f + world->nutrients[defender_idx] * 0.3f);
+                    attack_str *= (0.6f + world->nutrients[attacker_idx] * 0.5f);
+                    defend_str *= (0.6f + world->nutrients[defender_idx] * 0.5f);
+                    
+                    // Toxin damage reduces effectiveness
+                    attack_str *= (1.0f - world->toxins[attacker_idx] * (1.0f - attacker->genome.toxin_resistance));
+                    defend_str *= (1.0f - world->toxins[defender_idx] * (1.0f - defender->genome.toxin_resistance));
                 }
                 
-                // Probabilistic outcome - higher combat rate for more dynamic simulation
+                // 7. MOMENTUM: Colonies that have been winning keep winning (success_history)
+                attack_str *= (0.8f + attacker->success_history[d] * 0.4f);
+                
+                // 8. STRESSED COLONIES FIGHT DIFFERENTLY
+                if (attacker->stress_level > 0.5f) {
+                    // Desperate attacks: higher risk, higher reward
+                    attack_str *= (1.0f + attacker->genome.aggression * 0.3f);
+                }
+                if (defender->stress_level > 0.5f && defender->genome.defense_priority < 0.4f) {
+                    // Stressed non-defensive colonies crumble
+                    defend_str *= 0.7f;
+                }
+                
+                // 9. SIZE MATTERS: Larger colonies have morale advantage
+                float size_ratio = (float)attacker->cell_count / (float)(defender->cell_count + 1);
+                if (size_ratio > 2.0f) attack_str *= 1.15f;  // 2x larger = bonus
+                if (size_ratio < 0.5f) attack_str *= 0.85f;  // 2x smaller = penalty
+                
+                // === COMBAT RESOLUTION ===
                 float attack_chance = attack_str / (attack_str + defend_str + 0.1f);
                 
-                if (rand_float() < attack_chance * 0.5f) {
-                    // Attacker wins this exchange
+                // Higher base combat rate for dynamic battles
+                if (rand_float() < attack_chance * 0.7f) {
+                    // Attacker wins - record result
                     if (result_count >= result_capacity) {
                         result_capacity *= 2;
-                        results = (CombatResult*)realloc(results, result_capacity * sizeof(CombatResult));
-                        if (!results) return;
+                        CombatResult* new_results = (CombatResult*)realloc(results, result_capacity * sizeof(CombatResult));
+                        if (!new_results) { free(results); return; }
+                        results = new_results;
                     }
-                    results[result_count++] = (CombatResult){nx, ny, cell->colony_id};
+                    results[result_count++] = (CombatResult){nx, ny, cell->colony_id, neighbor->colony_id, attack_str};
+                    
+                    // Update success history for learning
+                    if (d < 8) {
+                        attacker->success_history[d] = utils_clamp_f(
+                            attacker->success_history[d] + 0.05f * attacker->genome.learning_rate, 0.0f, 1.0f);
+                    }
+                } else if (rand_float() < 0.3f) {
+                    // Defender successfully defends - slight penalty to attacker's direction
+                    if (d < 8) {
+                        attacker->success_history[d] = utils_clamp_f(
+                            attacker->success_history[d] - 0.02f * attacker->genome.learning_rate, 0.0f, 1.0f);
+                    }
                 }
             }
         }
@@ -854,21 +989,25 @@ void simulation_resolve_combat(World* world) {
     // Apply combat results
     for (int i = 0; i < result_count; i++) {
         Cell* cell = world_get_cell(world, results[i].x, results[i].y);
-        if (cell && cell->colony_id != 0 && cell->colony_id != results[i].winner) {
-            // Defender loses this cell
-            Colony* loser = world_get_colony(world, cell->colony_id);
+        if (cell && cell->colony_id == results[i].loser) {
+            Colony* loser = world_get_colony(world, results[i].loser);
             Colony* winner = world_get_colony(world, results[i].winner);
+            
             if (loser && loser->cell_count > 0) {
                 loser->cell_count--;
+                // Increase stress when losing cells
+                loser->stress_level = utils_clamp_f(loser->stress_level + 0.01f, 0.0f, 1.0f);
             }
-            // Cell is captured by winner (not just destroyed)
+            
+            // Cell is captured by winner
             if (winner && winner->active) {
                 cell->colony_id = results[i].winner;
                 cell->age = 0;
                 cell->is_border = true;
                 winner->cell_count++;
+                // Reduce stress when winning
+                winner->stress_level = utils_clamp_f(winner->stress_level - 0.005f, 0.0f, 1.0f);
             } else {
-                // Fallback: cell becomes empty
                 cell->colony_id = 0;
                 cell->age = 0;
                 cell->is_border = false;
@@ -945,7 +1084,7 @@ void simulation_tick(World* world) {
         }
     }
     
-    // Update colony stats and wobble animation
+    // Update colony stats, state, and strategy
     for (size_t i = 0; i < world->colony_count; i++) {
         Colony* colony = &world->colonies[i];
         if (!colony->active) continue;
@@ -961,12 +1100,55 @@ void simulation_tick(World* world) {
             continue;
         }
         
-        // Animate wobble phase for organic movement
+        // === STRATEGIC STATE UPDATES ===
+        
+        // Stress decay over time (colonies recover)
+        colony->stress_level = utils_clamp_f(colony->stress_level - 0.002f, 0.0f, 1.0f);
+        
+        // Biofilm builds up based on investment trait
+        if (colony->genome.biofilm_investment > 0.3f) {
+            float target_biofilm = colony->genome.biofilm_investment * colony->genome.biofilm_tendency;
+            if (colony->biofilm_strength < target_biofilm) {
+                colony->biofilm_strength = utils_clamp_f(colony->biofilm_strength + 0.01f, 0.0f, 1.0f);
+            }
+        }
+        // Biofilm decays slightly without investment
+        colony->biofilm_strength = utils_clamp_f(colony->biofilm_strength - 0.002f, 0.0f, 1.0f);
+        
+        // Success history decay (fade old learnings)
+        for (int d = 0; d < 8; d++) {
+            colony->success_history[d] *= (0.995f + colony->genome.memory_factor * 0.004f);
+        }
+        
+        // Update colony state based on stress
+        if (colony->stress_level > colony->genome.sporulation_threshold && colony->genome.dormancy_threshold > 0.3f) {
+            colony->state = COLONY_STATE_DORMANT;
+            colony->is_dormant = true;
+        } else if (colony->stress_level > 0.5f) {
+            colony->state = COLONY_STATE_STRESSED;
+            colony->is_dormant = false;
+        } else {
+            colony->state = COLONY_STATE_NORMAL;
+            colony->is_dormant = false;
+        }
+        
+        // Track population changes for learning
+        int pop_delta = (int)colony->cell_count - (int)colony->last_population;
+        colony->last_population = (uint32_t)colony->cell_count;
+        
+        // If growing, reinforce current strategy; if shrinking, consider changing
+        if (pop_delta < -3 && colony->genome.learning_rate > 0.3f) {
+            // Losing cells - slightly randomize success history to try new strategies
+            int random_dir = rand() % 8;
+            colony->success_history[random_dir] = utils_clamp_f(
+                colony->success_history[random_dir] + 0.1f * rand_float(), 0.0f, 1.0f);
+        }
+        
+        // Animate wobble phase for organic movement (legacy, kept for compatibility)
         colony->wobble_phase += 0.03f;
         if (colony->wobble_phase > 6.28318f) colony->wobble_phase -= 6.28318f;
         
         // Gradually evolve shape over time (slow, continuous morphing)
-        // This makes colonies visually change as they age and mutate
         colony->shape_evolution += 0.002f;
         if (colony->shape_evolution > 100.0f) colony->shape_evolution -= 100.0f;
     }
