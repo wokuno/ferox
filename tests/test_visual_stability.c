@@ -183,7 +183,7 @@ static ColonySnapshot* find_in_snapshot(ColonySnapshot* snap, int count, uint32_
 // Small Scale Tests (10x10 world, 3 colonies, 50 ticks)
 // ============================================================================
 
-TEST(small_scale_shape_seed_valid) {
+TEST(small_scale_shape_seeds_are_nonzero) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -214,7 +214,7 @@ TEST(small_scale_shape_seed_valid) {
     world_destroy(world);
 }
 
-TEST(small_scale_centroid_bounded) {
+TEST(small_scale_centroid_moves_smoothly) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -256,7 +256,7 @@ TEST(small_scale_centroid_bounded) {
     world_destroy(world);
 }
 
-TEST(small_scale_radius_bounded) {
+TEST(small_scale_radius_stays_bounded) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -297,7 +297,7 @@ TEST(small_scale_radius_bounded) {
     world_destroy(world);
 }
 
-TEST(small_scale_wobble_phase_smooth) {
+TEST(small_scale_wobble_phase_changes_smoothly) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -337,7 +337,7 @@ TEST(small_scale_wobble_phase_smooth) {
     world_destroy(world);
 }
 
-TEST(small_scale_no_unexpected_colonies) {
+TEST(small_scale_colony_count_stays_bounded) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -369,7 +369,7 @@ TEST(small_scale_no_unexpected_colonies) {
 // Medium Scale Tests (100x100 world, 20 colonies, 200 ticks)
 // ============================================================================
 
-TEST(medium_scale_all_properties_valid) {
+TEST(medium_scale_colony_properties_are_valid) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -406,7 +406,7 @@ TEST(medium_scale_all_properties_valid) {
     world_destroy(world);
 }
 
-TEST(medium_scale_radius_within_bounds) {
+TEST(medium_scale_radius_within_world_bounds) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -436,7 +436,7 @@ TEST(medium_scale_radius_within_bounds) {
     world_destroy(world);
 }
 
-TEST(medium_scale_population_consistency) {
+TEST(medium_scale_population_counts_consistent) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -462,7 +462,7 @@ TEST(medium_scale_population_consistency) {
     world_destroy(world);
 }
 
-TEST(medium_scale_no_duplicate_colonies) {
+TEST(medium_scale_colony_ids_are_unique) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -513,7 +513,7 @@ TEST(medium_scale_no_duplicate_colonies) {
 // Large Scale Tests (200x100 world, 50 colonies, 500 ticks)
 // ============================================================================
 
-TEST(large_scale_extreme_value_protection) {
+TEST(large_scale_values_stay_in_bounds) {
     World* world = world_create(200, 100);
     ASSERT_NOT_NULL(world);
     
@@ -547,7 +547,7 @@ TEST(large_scale_extreme_value_protection) {
     world_destroy(world);
 }
 
-TEST(large_scale_shape_seed_valid) {
+TEST(large_scale_shape_seeds_are_nonzero) {
     World* world = world_create(200, 100);
     ASSERT_NOT_NULL(world);
     
@@ -570,7 +570,7 @@ TEST(large_scale_shape_seed_valid) {
     world_destroy(world);
 }
 
-TEST(large_scale_cell_allocation_bounds) {
+TEST(large_scale_cells_within_world_bounds) {
     World* world = world_create(200, 100);
     ASSERT_NOT_NULL(world);
     
@@ -606,7 +606,7 @@ TEST(large_scale_cell_allocation_bounds) {
 // Rapid Update Tests (30 FPS client vs 10 Hz server simulation)
 // ============================================================================
 
-TEST(rapid_update_shape_seed_valid) {
+TEST(rapid_update_shape_seeds_valid) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -646,7 +646,7 @@ TEST(rapid_update_shape_seed_valid) {
     world_destroy(world);
 }
 
-TEST(rapid_update_radius_reasonable) {
+TEST(rapid_update_radius_changes_smoothly) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -701,7 +701,7 @@ TEST(rapid_update_radius_reasonable) {
 // Division/Recombination Stress Tests
 // ============================================================================
 
-TEST(division_properties_valid) {
+TEST(division_produces_valid_colony_props) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -732,7 +732,7 @@ TEST(division_properties_valid) {
     world_destroy(world);
 }
 
-TEST(recombination_properties_stable) {
+TEST(recombination_maintains_valid_props) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -763,7 +763,7 @@ TEST(recombination_properties_stable) {
     world_destroy(world);
 }
 
-TEST(child_colony_initialization) {
+TEST(child_colonies_initialized_correctly) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -799,7 +799,7 @@ TEST(child_colony_initialization) {
 // Shape Variety Tests
 // ============================================================================
 
-TEST(shape_types_distributed) {
+TEST(shape_types_have_variety) {
     // Test that different shape seeds produce different shape types
     // The shape function has 8 shape types, we should see variety
     const int NUM_SEEDS = 100;
@@ -844,7 +844,7 @@ TEST(shape_types_distributed) {
     ASSERT_LT(max_count, NUM_SEEDS * 80 / 100);
 }
 
-TEST(shape_function_range_valid) {
+TEST(shape_function_returns_valid_range) {
     // Test that shape function always returns values in valid range
     for (int seed_iter = 0; seed_iter < 50; seed_iter++) {
         uint32_t seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
@@ -865,7 +865,7 @@ TEST(shape_function_range_valid) {
     }
 }
 
-TEST(shape_seeds_produce_different_shapes) {
+TEST(shape_seeds_produce_unique_shapes) {
     // Test that different seeds produce measurably different shapes
     const int NUM_SEEDS = 50;
     float shape_signatures[50];
@@ -899,7 +899,7 @@ TEST(shape_seeds_produce_different_shapes) {
     ASSERT_GE(unique_count, NUM_SEEDS * 80 / 100);
 }
 
-TEST(shape_animation_subtle) {
+TEST(shape_animation_changes_subtly) {
     // Test that animation (phase) produces subtle changes, not dramatic ones
     uint32_t seed = 0x12345678;
     
@@ -932,37 +932,37 @@ int run_visual_stability_tests(void) {
     printf("\n=== Visual Stability Stress Tests ===\n\n");
     
     printf("Small Scale Tests (10x10, 3 colonies, 50 ticks):\n");
-    RUN_TEST(small_scale_shape_seed_valid);
-    RUN_TEST(small_scale_centroid_bounded);
-    RUN_TEST(small_scale_radius_bounded);
-    RUN_TEST(small_scale_wobble_phase_smooth);
-    RUN_TEST(small_scale_no_unexpected_colonies);
+    RUN_TEST(small_scale_shape_seeds_are_nonzero);
+    RUN_TEST(small_scale_centroid_moves_smoothly);
+    RUN_TEST(small_scale_radius_stays_bounded);
+    RUN_TEST(small_scale_wobble_phase_changes_smoothly);
+    RUN_TEST(small_scale_colony_count_stays_bounded);
     
     printf("\nMedium Scale Tests (100x100, 20 colonies, 200 ticks):\n");
-    RUN_TEST(medium_scale_all_properties_valid);
-    RUN_TEST(medium_scale_radius_within_bounds);
-    RUN_TEST(medium_scale_population_consistency);
-    RUN_TEST(medium_scale_no_duplicate_colonies);
+    RUN_TEST(medium_scale_colony_properties_are_valid);
+    RUN_TEST(medium_scale_radius_within_world_bounds);
+    RUN_TEST(medium_scale_population_counts_consistent);
+    RUN_TEST(medium_scale_colony_ids_are_unique);
     
     printf("\nLarge Scale Tests (200x100, 50 colonies, 500 ticks):\n");
-    RUN_TEST(large_scale_extreme_value_protection);
-    RUN_TEST(large_scale_shape_seed_valid);
-    RUN_TEST(large_scale_cell_allocation_bounds);
+    RUN_TEST(large_scale_values_stay_in_bounds);
+    RUN_TEST(large_scale_shape_seeds_are_nonzero);
+    RUN_TEST(large_scale_cells_within_world_bounds);
     
     printf("\nRapid Update Tests (30 FPS client vs 10 Hz server):\n");
-    RUN_TEST(rapid_update_shape_seed_valid);
-    RUN_TEST(rapid_update_radius_reasonable);
+    RUN_TEST(rapid_update_shape_seeds_valid);
+    RUN_TEST(rapid_update_radius_changes_smoothly);
     
     printf("\nDivision/Recombination Stress Tests:\n");
-    RUN_TEST(division_properties_valid);
-    RUN_TEST(recombination_properties_stable);
-    RUN_TEST(child_colony_initialization);
+    RUN_TEST(division_produces_valid_colony_props);
+    RUN_TEST(recombination_maintains_valid_props);
+    RUN_TEST(child_colonies_initialized_correctly);
     
     printf("\nShape Variety Tests:\n");
-    RUN_TEST(shape_types_distributed);
-    RUN_TEST(shape_function_range_valid);
-    RUN_TEST(shape_seeds_produce_different_shapes);
-    RUN_TEST(shape_animation_subtle);
+    RUN_TEST(shape_types_have_variety);
+    RUN_TEST(shape_function_returns_valid_range);
+    RUN_TEST(shape_seeds_produce_unique_shapes);
+    RUN_TEST(shape_animation_changes_subtly);
     
     printf("\n--- Visual Stability Results ---\n");
     printf("Passed: %d\n", tests_passed);

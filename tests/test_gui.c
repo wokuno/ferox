@@ -225,7 +225,7 @@ static int tests_passed = 0;
 // Coordinate Conversion Tests
 // ============================================================================
 
-TEST(test_world_to_screen_center) {
+TEST(test_coord_world_to_screen_maps_center) {
     MockRenderer r = {.window_width = 800, .window_height = 600, 
                       .view_x = 50.0f, .view_y = 50.0f, .zoom = 10.0f};
     int sx, sy;
@@ -235,7 +235,7 @@ TEST(test_world_to_screen_center) {
     ASSERT_INT_EQ(sy, 300);
 }
 
-TEST(test_world_to_screen_offset) {
+TEST(test_coord_world_to_screen_applies_offset) {
     MockRenderer r = {.window_width = 800, .window_height = 600,
                       .view_x = 50.0f, .view_y = 50.0f, .zoom = 10.0f};
     int sx, sy;
@@ -245,7 +245,7 @@ TEST(test_world_to_screen_offset) {
     ASSERT_INT_EQ(sy, 300);
 }
 
-TEST(test_screen_to_world_center) {
+TEST(test_coord_screen_to_world_maps_center) {
     MockRenderer r = {.window_width = 800, .window_height = 600,
                       .view_x = 50.0f, .view_y = 50.0f, .zoom = 10.0f};
     float wx, wy;
@@ -254,7 +254,7 @@ TEST(test_screen_to_world_center) {
     ASSERT_FLOAT_EQ(wy, 50.0f, 0.01f);
 }
 
-TEST(test_screen_to_world_offset) {
+TEST(test_coord_screen_to_world_applies_offset) {
     MockRenderer r = {.window_width = 800, .window_height = 600,
                       .view_x = 50.0f, .view_y = 50.0f, .zoom = 10.0f};
     float wx, wy;
@@ -264,7 +264,7 @@ TEST(test_screen_to_world_offset) {
     ASSERT_FLOAT_EQ(wy, 50.0f, 0.01f);
 }
 
-TEST(test_coordinate_roundtrip) {
+TEST(test_coord_roundtrip_preserves_position) {
     MockRenderer r = {.window_width = 1280, .window_height = 720,
                       .view_x = 100.0f, .view_y = 75.0f, .zoom = 6.0f};
     float wx = 123.456f, wy = 78.901f;
@@ -279,7 +279,7 @@ TEST(test_coordinate_roundtrip) {
     ASSERT_FLOAT_EQ(wy, wy2, 1.0f/r.zoom + 0.01f);
 }
 
-TEST(test_world_to_screen_with_zoom) {
+TEST(test_coord_zoom_scales_offset) {
     MockRenderer r = {.window_width = 800, .window_height = 600,
                       .view_x = 0.0f, .view_y = 0.0f, .zoom = 1.0f};
     int sx1, sy1, sx2, sy2;
@@ -298,19 +298,19 @@ TEST(test_world_to_screen_with_zoom) {
 // Zoom Tests
 // ============================================================================
 
-TEST(test_set_zoom_normal) {
+TEST(test_zoom_set_accepts_valid_values) {
     MockRenderer r = {.zoom = 6.0f};
     mock_set_zoom(&r, 12.0f);
     ASSERT_FLOAT_EQ(r.zoom, 12.0f, 0.01f);
 }
 
-TEST(test_set_zoom_clamp_min) {
+TEST(test_zoom_clamps_to_minimum_one) {
     MockRenderer r = {.zoom = 6.0f};
     mock_set_zoom(&r, 0.1f);
     ASSERT_FLOAT_EQ(r.zoom, 1.0f, 0.01f);
 }
 
-TEST(test_set_zoom_clamp_max) {
+TEST(test_zoom_clamps_to_maximum_fifty) {
     MockRenderer r = {.zoom = 6.0f};
     mock_set_zoom(&r, 100.0f);
     ASSERT_FLOAT_EQ(r.zoom, 50.0f, 0.01f);
@@ -336,7 +336,7 @@ TEST(test_zoom_at_keeps_point_stable) {
     ASSERT_FLOAT_EQ(world_y_before, world_y_after, 0.1f);
 }
 
-TEST(test_zoom_at_center_no_pan) {
+TEST(test_zoom_at_center_does_not_pan) {
     MockRenderer r = {.window_width = 800, .window_height = 600,
                       .view_x = 50.0f, .view_y = 50.0f, .zoom = 10.0f};
     
@@ -355,21 +355,21 @@ TEST(test_zoom_at_center_no_pan) {
 // Pan Tests
 // ============================================================================
 
-TEST(test_pan_right) {
+TEST(test_pan_moves_view_horizontally) {
     MockRenderer r = {.view_x = 50.0f, .view_y = 50.0f};
     mock_pan(&r, 10.0f, 0.0f);
     ASSERT_FLOAT_EQ(r.view_x, 60.0f, 0.01f);
     ASSERT_FLOAT_EQ(r.view_y, 50.0f, 0.01f);
 }
 
-TEST(test_pan_diagonal) {
+TEST(test_pan_moves_view_diagonally) {
     MockRenderer r = {.view_x = 0.0f, .view_y = 0.0f};
     mock_pan(&r, 5.0f, -3.0f);
     ASSERT_FLOAT_EQ(r.view_x, 5.0f, 0.01f);
     ASSERT_FLOAT_EQ(r.view_y, -3.0f, 0.01f);
 }
 
-TEST(test_center_on) {
+TEST(test_center_on_sets_view_position) {
     MockRenderer r = {.view_x = 100.0f, .view_y = 200.0f};
     mock_center_on(&r, 25.0f, 75.0f);
     ASSERT_FLOAT_EQ(r.view_x, 25.0f, 0.01f);
@@ -380,7 +380,7 @@ TEST(test_center_on) {
 // Toggle Tests
 // ============================================================================
 
-TEST(test_toggle_grid) {
+TEST(test_toggle_grid_toggles_state) {
     MockRenderer r = {.show_grid = 0};
     mock_toggle_grid(&r);
     ASSERT(r.show_grid == 1);
@@ -388,7 +388,7 @@ TEST(test_toggle_grid) {
     ASSERT(r.show_grid == 0);
 }
 
-TEST(test_toggle_info_panel) {
+TEST(test_toggle_info_panel_toggles_state) {
     MockRenderer r = {.show_info_panel = 1};
     mock_toggle_info_panel(&r);
     ASSERT(r.show_info_panel == 0);
@@ -400,7 +400,7 @@ TEST(test_toggle_info_panel) {
 // Time/Animation Tests
 // ============================================================================
 
-TEST(test_update_time) {
+TEST(test_animation_time_increments) {
     MockRenderer r = {.time = 0.0f};
     mock_update_time(&r, 0.016f);
     ASSERT_FLOAT_EQ(r.time, 0.016f, 0.0001f);
@@ -408,7 +408,7 @@ TEST(test_update_time) {
     ASSERT_FLOAT_EQ(r.time, 0.032f, 0.0001f);
 }
 
-TEST(test_update_time_accumulates) {
+TEST(test_animation_time_accumulates) {
     MockRenderer r = {.time = 5.0f};
     for (int i = 0; i < 100; i++) {
         mock_update_time(&r, 0.01f);
@@ -442,21 +442,21 @@ static MockClient create_test_client_with_colonies(int count) {
     return client;
 }
 
-TEST(test_select_next_empty_world) {
+TEST(test_selection_empty_world_returns_zero) {
     MockClient client = {0};
     client.world.colony_count = 0;
     mock_select_next_colony(&client);
     ASSERT_INT_EQ(client.selected_colony, 0);
 }
 
-TEST(test_select_next_single_colony) {
+TEST(test_selection_finds_single_colony) {
     MockClient client = create_test_client_with_colonies(1);
     mock_select_next_colony(&client);
     ASSERT_INT_EQ(client.selected_colony, 1);
     ASSERT_INT_EQ(client.selected_index, 0);
 }
 
-TEST(test_select_next_cycles) {
+TEST(test_selection_cycles_through_colonies) {
     MockClient client = create_test_client_with_colonies(3);
     
     mock_select_next_colony(&client);
@@ -472,7 +472,7 @@ TEST(test_select_next_cycles) {
     ASSERT_INT_EQ(client.selected_colony, 1);  // Wraps around
 }
 
-TEST(test_select_prev_cycles) {
+TEST(test_selection_prev_cycles_backward) {
     MockClient client = create_test_client_with_colonies(3);
     
     mock_select_prev_colony(&client);
@@ -488,7 +488,7 @@ TEST(test_select_prev_cycles) {
     ASSERT_INT_EQ(client.selected_colony, 3);  // Wraps around
 }
 
-TEST(test_select_skips_dead_colonies) {
+TEST(test_selection_skips_dead_colonies) {
     MockClient client = create_test_client_with_colonies(5);
     client.world.colonies[1].alive = 0;  // Colony 2 dead
     client.world.colonies[2].alive = 0;  // Colony 3 dead
@@ -503,7 +503,7 @@ TEST(test_select_skips_dead_colonies) {
     ASSERT_INT_EQ(client.selected_colony, 5);
 }
 
-TEST(test_select_centers_view) {
+TEST(test_selection_centers_view_on_colony) {
     MockClient client = create_test_client_with_colonies(3);
     client.renderer.view_x = 0.0f;
     client.renderer.view_y = 0.0f;
@@ -515,7 +515,7 @@ TEST(test_select_centers_view) {
     ASSERT_FLOAT_EQ(client.renderer.view_y, client.world.colonies[0].y, 0.01f);
 }
 
-TEST(test_deselect_colony) {
+TEST(test_deselect_clears_selection) {
     MockClient client = create_test_client_with_colonies(3);
     mock_select_next_colony(&client);
     ASSERT(client.selected_colony != 0);
@@ -524,7 +524,7 @@ TEST(test_deselect_colony) {
     ASSERT_INT_EQ(client.selected_colony, 0);
 }
 
-TEST(test_select_colony_at_position) {
+TEST(test_selection_at_position_finds_colony) {
     MockClient client = create_test_client_with_colonies(3);
     // Colony 0 is at (10, 10), colony 1 at (25, 20), colony 2 at (40, 30)
     
@@ -537,7 +537,7 @@ TEST(test_select_colony_at_position) {
     ASSERT_INT_EQ(client.selected_colony, 1);
 }
 
-TEST(test_select_colony_miss) {
+TEST(test_selection_miss_does_not_select) {
     MockClient client = create_test_client_with_colonies(3);
     client.selected_colony = 0;
     
@@ -546,7 +546,7 @@ TEST(test_select_colony_miss) {
     ASSERT_INT_EQ(client.selected_colony, 0);
 }
 
-TEST(test_select_colony_ignores_dead) {
+TEST(test_selection_ignores_dead_colonies) {
     MockClient client = create_test_client_with_colonies(3);
     client.world.colonies[0].alive = 0;
     
@@ -559,7 +559,7 @@ TEST(test_select_colony_ignores_dead) {
 // Edge Cases
 // ============================================================================
 
-TEST(test_coordinate_conversion_at_origin) {
+TEST(test_coord_conversion_at_origin) {
     MockRenderer r = {.window_width = 800, .window_height = 600,
                       .view_x = 0.0f, .view_y = 0.0f, .zoom = 10.0f};
     int sx, sy;
@@ -574,7 +574,7 @@ TEST(test_coordinate_conversion_at_origin) {
     ASSERT_FLOAT_EQ(wy, 0.0f, 0.01f);
 }
 
-TEST(test_coordinate_conversion_negative_world) {
+TEST(test_coord_converts_negative_world) {
     MockRenderer r = {.window_width = 800, .window_height = 600,
                       .view_x = 0.0f, .view_y = 0.0f, .zoom = 10.0f};
     float wx, wy;
@@ -585,7 +585,7 @@ TEST(test_coordinate_conversion_negative_world) {
     ASSERT_FLOAT_EQ(wy, -30.0f, 0.1f);  // 300/10 = 30 units above center
 }
 
-TEST(test_extreme_zoom_levels) {
+TEST(test_zoom_handles_extreme_levels) {
     MockRenderer r = {.window_width = 800, .window_height = 600,
                       .view_x = 50.0f, .view_y = 50.0f, .zoom = 1.0f};
     
@@ -603,14 +603,14 @@ TEST(test_extreme_zoom_levels) {
     ASSERT(sx2 >= -100000 && sx2 <= 100000);
 }
 
-TEST(test_pan_extreme_values) {
+TEST(test_pan_handles_extreme_values) {
     MockRenderer r = {.view_x = 0.0f, .view_y = 0.0f};
     mock_pan(&r, 1000000.0f, -1000000.0f);
     ASSERT_FLOAT_EQ(r.view_x, 1000000.0f, 1.0f);
     ASSERT_FLOAT_EQ(r.view_y, -1000000.0f, 1.0f);
 }
 
-TEST(test_all_dead_colonies_selection) {
+TEST(test_selection_all_dead_returns_zero) {
     MockClient client = create_test_client_with_colonies(3);
     client.world.colonies[0].alive = 0;
     client.world.colonies[1].alive = 0;
@@ -623,7 +623,7 @@ TEST(test_all_dead_colonies_selection) {
     ASSERT_INT_EQ(client.selected_colony, 0);
 }
 
-TEST(test_large_colony_count) {
+TEST(test_selection_cycles_100_colonies) {
     MockClient client = {0};
     client.world.colony_count = 100;
     for (int i = 0; i < 100; i++) {
@@ -674,14 +674,14 @@ typedef struct {
     MockInputAction action;
 } MockInputState;
 
-TEST(test_input_state_default) {
+TEST(test_input_state_initializes_to_defaults) {
     MockInputState state = {0};
     ASSERT_INT_EQ(state.action, MOCK_INPUT_NONE);
     ASSERT_INT_EQ(state.mouse_x, 0);
     ASSERT_INT_EQ(state.clicked, 0);
 }
 
-TEST(test_input_state_click) {
+TEST(test_input_state_stores_click_position) {
     MockInputState state = {0};
     state.clicked = 1;
     state.click_x = 100;
@@ -692,7 +692,7 @@ TEST(test_input_state_click) {
     ASSERT_INT_EQ(state.click_y, 200);
 }
 
-TEST(test_input_modifiers) {
+TEST(test_input_state_stores_modifier_keys) {
     MockInputState state = {0};
     state.shift_held = 1;
     state.ctrl_held = 1;
@@ -711,57 +711,57 @@ int main(int argc, char** argv) {
     printf("=== GUI Unit Tests ===\n\n");
     
     printf("Coordinate Conversion Tests:\n");
-    RUN_TEST(test_world_to_screen_center);
-    RUN_TEST(test_world_to_screen_offset);
-    RUN_TEST(test_screen_to_world_center);
-    RUN_TEST(test_screen_to_world_offset);
-    RUN_TEST(test_coordinate_roundtrip);
-    RUN_TEST(test_world_to_screen_with_zoom);
+    RUN_TEST(test_coord_world_to_screen_maps_center);
+    RUN_TEST(test_coord_world_to_screen_applies_offset);
+    RUN_TEST(test_coord_screen_to_world_maps_center);
+    RUN_TEST(test_coord_screen_to_world_applies_offset);
+    RUN_TEST(test_coord_roundtrip_preserves_position);
+    RUN_TEST(test_coord_zoom_scales_offset);
     
     printf("\nZoom Tests:\n");
-    RUN_TEST(test_set_zoom_normal);
-    RUN_TEST(test_set_zoom_clamp_min);
-    RUN_TEST(test_set_zoom_clamp_max);
+    RUN_TEST(test_zoom_set_accepts_valid_values);
+    RUN_TEST(test_zoom_clamps_to_minimum_one);
+    RUN_TEST(test_zoom_clamps_to_maximum_fifty);
     RUN_TEST(test_zoom_at_keeps_point_stable);
-    RUN_TEST(test_zoom_at_center_no_pan);
+    RUN_TEST(test_zoom_at_center_does_not_pan);
     
     printf("\nPan Tests:\n");
-    RUN_TEST(test_pan_right);
-    RUN_TEST(test_pan_diagonal);
-    RUN_TEST(test_center_on);
+    RUN_TEST(test_pan_moves_view_horizontally);
+    RUN_TEST(test_pan_moves_view_diagonally);
+    RUN_TEST(test_center_on_sets_view_position);
     
     printf("\nToggle Tests:\n");
-    RUN_TEST(test_toggle_grid);
-    RUN_TEST(test_toggle_info_panel);
+    RUN_TEST(test_toggle_grid_toggles_state);
+    RUN_TEST(test_toggle_info_panel_toggles_state);
     
     printf("\nAnimation Tests:\n");
-    RUN_TEST(test_update_time);
-    RUN_TEST(test_update_time_accumulates);
+    RUN_TEST(test_animation_time_increments);
+    RUN_TEST(test_animation_time_accumulates);
     
     printf("\nColony Selection Tests:\n");
-    RUN_TEST(test_select_next_empty_world);
-    RUN_TEST(test_select_next_single_colony);
-    RUN_TEST(test_select_next_cycles);
-    RUN_TEST(test_select_prev_cycles);
-    RUN_TEST(test_select_skips_dead_colonies);
-    RUN_TEST(test_select_centers_view);
-    RUN_TEST(test_deselect_colony);
-    RUN_TEST(test_select_colony_at_position);
-    RUN_TEST(test_select_colony_miss);
-    RUN_TEST(test_select_colony_ignores_dead);
+    RUN_TEST(test_selection_empty_world_returns_zero);
+    RUN_TEST(test_selection_finds_single_colony);
+    RUN_TEST(test_selection_cycles_through_colonies);
+    RUN_TEST(test_selection_prev_cycles_backward);
+    RUN_TEST(test_selection_skips_dead_colonies);
+    RUN_TEST(test_selection_centers_view_on_colony);
+    RUN_TEST(test_deselect_clears_selection);
+    RUN_TEST(test_selection_at_position_finds_colony);
+    RUN_TEST(test_selection_miss_does_not_select);
+    RUN_TEST(test_selection_ignores_dead_colonies);
     
     printf("\nEdge Case Tests:\n");
-    RUN_TEST(test_coordinate_conversion_at_origin);
-    RUN_TEST(test_coordinate_conversion_negative_world);
-    RUN_TEST(test_extreme_zoom_levels);
-    RUN_TEST(test_pan_extreme_values);
-    RUN_TEST(test_all_dead_colonies_selection);
-    RUN_TEST(test_large_colony_count);
+    RUN_TEST(test_coord_conversion_at_origin);
+    RUN_TEST(test_coord_converts_negative_world);
+    RUN_TEST(test_zoom_handles_extreme_levels);
+    RUN_TEST(test_pan_handles_extreme_values);
+    RUN_TEST(test_selection_all_dead_returns_zero);
+    RUN_TEST(test_selection_cycles_100_colonies);
     
     printf("\nInput State Tests:\n");
-    RUN_TEST(test_input_state_default);
-    RUN_TEST(test_input_state_click);
-    RUN_TEST(test_input_modifiers);
+    RUN_TEST(test_input_state_initializes_to_defaults);
+    RUN_TEST(test_input_state_stores_click_position);
+    RUN_TEST(test_input_state_stores_modifier_keys);
     
     printf("\n=== Results: %d/%d tests passed ===\n", tests_passed, tests_run);
     

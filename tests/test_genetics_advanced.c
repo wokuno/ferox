@@ -93,7 +93,7 @@ static Genome create_test_genome(float spread, float mutation, float aggr, float
 // Mutation Range Tests
 // ============================================================================
 
-TEST(mutation_stays_in_range_many_iterations) {
+TEST(mutation_values_stay_in_range_after_10000_iterations) {
     // Test that after many mutations, values stay within valid ranges
     rng_seed(42);
     Genome g = genome_create_random();
@@ -115,7 +115,7 @@ TEST(mutation_stays_in_range_many_iterations) {
     }
 }
 
-TEST(mutation_at_boundaries) {
+TEST(mutation_handles_boundary_values_correctly) {
     // Test mutation when values are at boundaries (0 and 1)
     rng_seed(42);
     
@@ -140,7 +140,7 @@ TEST(mutation_at_boundaries) {
 // Genetic Distance Tests
 // ============================================================================
 
-TEST(genetic_distance_is_symmetric) {
+TEST(genome_distance_is_symmetric) {
     // Test that distance(a,b) == distance(b,a)
     rng_seed(42);
     
@@ -155,7 +155,7 @@ TEST(genetic_distance_is_symmetric) {
     }
 }
 
-TEST(genetic_distance_triangle_inequality) {
+TEST(genome_distance_obeys_triangle_inequality) {
     // Test that distance(a,c) <= distance(a,b) + distance(b,c)
     rng_seed(42);
     
@@ -174,7 +174,7 @@ TEST(genetic_distance_triangle_inequality) {
     }
 }
 
-TEST(genetic_distance_identity) {
+TEST(genome_distance_returns_zero_for_same_genome) {
     // Test that distance(a,a) == 0
     rng_seed(42);
     
@@ -185,7 +185,7 @@ TEST(genetic_distance_identity) {
     }
 }
 
-TEST(genetic_distance_non_negative) {
+TEST(genome_distance_is_always_non_negative) {
     // Test that distance is always >= 0
     rng_seed(42);
     
@@ -197,7 +197,7 @@ TEST(genetic_distance_non_negative) {
     }
 }
 
-TEST(genetic_distance_max_is_one) {
+TEST(genome_distance_max_is_one_for_extreme_diff) {
     // Test that maximum possible distance is 1.0
     Genome a = create_test_genome(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     Genome b = create_test_genome(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -210,7 +210,7 @@ TEST(genetic_distance_max_is_one) {
 // Genome Merge Tests
 // ============================================================================
 
-TEST(merge_equal_weights_produces_average) {
+TEST(genome_merge_equal_weights_returns_average) {
     Genome a = create_test_genome(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     Genome b = create_test_genome(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
     
@@ -224,7 +224,7 @@ TEST(merge_equal_weights_produces_average) {
     ASSERT_FLOAT_NEAR(result.metabolism, 0.5f, 0.0001f);
 }
 
-TEST(merge_unequal_weights_is_weighted) {
+TEST(genome_merge_respects_weight_ratios) {
     Genome a = create_test_genome(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     Genome b = create_test_genome(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
     
@@ -243,7 +243,7 @@ TEST(merge_unequal_weights_is_weighted) {
     ASSERT_FLOAT_NEAR(result.mutation_rate, 0.075f, 0.0001f);
 }
 
-TEST(merge_extreme_weight_ratios) {
+TEST(genome_merge_handles_extreme_weight_ratios) {
     Genome a = create_test_genome(0.2f, 0.2f, 0.2f, 0.2f, 0.2f);
     Genome b = create_test_genome(0.8f, 0.8f, 0.8f, 0.8f, 0.8f);
     
@@ -260,7 +260,7 @@ TEST(merge_extreme_weight_ratios) {
            "Result should be close to b's values");
 }
 
-TEST(merge_with_zero_count) {
+TEST(genome_merge_with_zero_count_returns_other) {
     Genome a = create_test_genome(0.3f, 0.3f, 0.3f, 0.3f, 0.3f);
     Genome b = create_test_genome(0.7f, 0.7f, 0.7f, 0.7f, 0.7f);
     
@@ -273,7 +273,7 @@ TEST(merge_with_zero_count) {
     ASSERT_FLOAT_NEAR(result.spread_rate, 0.3f, 0.0001f);
 }
 
-TEST(merge_preserves_color_blending) {
+TEST(genome_merge_blends_body_colors) {
     Genome a = create_test_genome(0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     a.body_color = (Color){255, 0, 0};  // Red
     
@@ -293,7 +293,7 @@ TEST(merge_preserves_color_blending) {
 // Compatibility Tests
 // ============================================================================
 
-TEST(compatibility_threshold_edge_cases) {
+TEST(genome_compatible_respects_threshold) {
     Genome a = create_test_genome(0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     Genome b = create_test_genome(0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     
@@ -312,7 +312,7 @@ TEST(compatibility_threshold_edge_cases) {
     ASSERT_TRUE(!genome_compatible(&a, &c, dist - 0.001f));
 }
 
-TEST(compatibility_null_handling) {
+TEST(genome_compatible_returns_false_for_null) {
     Genome a = create_test_genome(0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     
     ASSERT_TRUE(!genome_compatible(NULL, &a, 0.5f));
@@ -324,7 +324,7 @@ TEST(compatibility_null_handling) {
 // Genome Creation Tests
 // ============================================================================
 
-TEST(genome_creation_valid_spread_weights) {
+TEST(genome_create_produces_valid_spread_weights) {
     rng_seed(42);
     
     for (int i = 0; i < 100; i++) {
@@ -343,7 +343,7 @@ TEST(genome_creation_valid_spread_weights) {
     }
 }
 
-TEST(genome_creation_color_range) {
+TEST(genome_create_produces_valid_color_range) {
     rng_seed(42);
     
     for (int i = 0; i < 100; i++) {
@@ -365,7 +365,7 @@ TEST(genome_creation_color_range) {
 // Genetic Drift Tests
 // ============================================================================
 
-TEST(repeated_mutations_cause_gradual_drift) {
+TEST(genome_mutations_cause_genetic_drift) {
     rng_seed(42);
     
     Genome original = create_test_genome(0.5f, 0.05f, 0.5f, 0.5f, 0.5f);
@@ -386,7 +386,7 @@ TEST(repeated_mutations_cause_gradual_drift) {
     ASSERT(final_distance > 0.0f, "No genetic drift after 1000 mutations");
 }
 
-TEST(zero_mutation_rate_no_change) {
+TEST(genome_zero_mutation_rate_causes_no_change) {
     rng_seed(42);
     
     Genome original = create_test_genome(0.5f, 0.0f, 0.5f, 0.5f, 0.5f);
@@ -407,7 +407,7 @@ TEST(zero_mutation_rate_no_change) {
 // Color Mutation Tests
 // ============================================================================
 
-TEST(color_mutations_stay_valid_rgb) {
+TEST(genome_colors_stay_in_valid_rgb_range) {
     // Note: genome_mutate doesn't mutate colors directly in current implementation
     // but we test that created genomes have valid colors
     rng_seed(42);
@@ -437,37 +437,37 @@ int run_genetics_advanced_tests(void) {
     printf("\n=== Advanced Genetics Tests ===\n\n");
     
     printf("Mutation Range Tests:\n");
-    RUN_TEST(mutation_stays_in_range_many_iterations);
-    RUN_TEST(mutation_at_boundaries);
+    RUN_TEST(mutation_values_stay_in_range_after_10000_iterations);
+    RUN_TEST(mutation_handles_boundary_values_correctly);
     
     printf("\nGenetic Distance Tests:\n");
-    RUN_TEST(genetic_distance_is_symmetric);
-    RUN_TEST(genetic_distance_triangle_inequality);
-    RUN_TEST(genetic_distance_identity);
-    RUN_TEST(genetic_distance_non_negative);
-    RUN_TEST(genetic_distance_max_is_one);
+    RUN_TEST(genome_distance_is_symmetric);
+    RUN_TEST(genome_distance_obeys_triangle_inequality);
+    RUN_TEST(genome_distance_returns_zero_for_same_genome);
+    RUN_TEST(genome_distance_is_always_non_negative);
+    RUN_TEST(genome_distance_max_is_one_for_extreme_diff);
     
     printf("\nGenome Merge Tests:\n");
-    RUN_TEST(merge_equal_weights_produces_average);
-    RUN_TEST(merge_unequal_weights_is_weighted);
-    RUN_TEST(merge_extreme_weight_ratios);
-    RUN_TEST(merge_with_zero_count);
-    RUN_TEST(merge_preserves_color_blending);
+    RUN_TEST(genome_merge_equal_weights_returns_average);
+    RUN_TEST(genome_merge_respects_weight_ratios);
+    RUN_TEST(genome_merge_handles_extreme_weight_ratios);
+    RUN_TEST(genome_merge_with_zero_count_returns_other);
+    RUN_TEST(genome_merge_blends_body_colors);
     
     printf("\nCompatibility Tests:\n");
-    RUN_TEST(compatibility_threshold_edge_cases);
-    RUN_TEST(compatibility_null_handling);
+    RUN_TEST(genome_compatible_respects_threshold);
+    RUN_TEST(genome_compatible_returns_false_for_null);
     
     printf("\nGenome Creation Tests:\n");
-    RUN_TEST(genome_creation_valid_spread_weights);
-    RUN_TEST(genome_creation_color_range);
+    RUN_TEST(genome_create_produces_valid_spread_weights);
+    RUN_TEST(genome_create_produces_valid_color_range);
     
     printf("\nGenetic Drift Tests:\n");
-    RUN_TEST(repeated_mutations_cause_gradual_drift);
-    RUN_TEST(zero_mutation_rate_no_change);
+    RUN_TEST(genome_mutations_cause_genetic_drift);
+    RUN_TEST(genome_zero_mutation_rate_causes_no_change);
     
     printf("\nColor Tests:\n");
-    RUN_TEST(color_mutations_stay_valid_rgb);
+    RUN_TEST(genome_colors_stay_in_valid_rgb_range);
     
     printf("\n--- Genetics Advanced Results ---\n");
     printf("Passed: %d\n", tests_passed);

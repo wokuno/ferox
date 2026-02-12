@@ -38,7 +38,7 @@ static int tests_failed = 0;
 
 // ============ Utility Tests ============
 
-TEST(rng_seed_deterministic) {
+TEST(rng_seed_same_seed_produces_identical_sequence) {
     rng_seed(12345);
     float a1 = rand_float();
     float a2 = rand_float();
@@ -51,7 +51,7 @@ TEST(rng_seed_deterministic) {
     ASSERT_EQ(a2, b2);
 }
 
-TEST(rand_float_range) {
+TEST(rand_float_returns_values_between_zero_and_one) {
     rng_seed(42);
     for (int i = 0; i < 1000; i++) {
         float f = rand_float();
@@ -60,7 +60,7 @@ TEST(rand_float_range) {
     }
 }
 
-TEST(rand_int_range) {
+TEST(rand_int_returns_values_within_max_exclusive) {
     rng_seed(42);
     for (int i = 0; i < 1000; i++) {
         int n = rand_int(100);
@@ -69,12 +69,12 @@ TEST(rand_int_range) {
     }
 }
 
-TEST(rand_int_zero_max) {
+TEST(rand_int_with_zero_max_returns_zero) {
     int n = rand_int(0);
     ASSERT_EQ(n, 0);
 }
 
-TEST(rand_range_bounds) {
+TEST(rand_range_returns_values_within_inclusive_bounds) {
     rng_seed(42);
     for (int i = 0; i < 1000; i++) {
         int n = rand_range(10, 20);
@@ -83,14 +83,14 @@ TEST(rand_range_bounds) {
     }
 }
 
-TEST(rand_range_equal_bounds) {
+TEST(rand_range_with_equal_bounds_returns_that_value) {
     int n = rand_range(5, 5);
     ASSERT_EQ(n, 5);
 }
 
 // ============ Name Generation Tests ============
 
-TEST(name_generation_format) {
+TEST(name_generation_produces_genus_species_format) {
     rng_seed(42);
     char name[64];
     generate_scientific_name(name, sizeof(name));
@@ -102,7 +102,7 @@ TEST(name_generation_format) {
     ASSERT(strlen(name) > 5);
 }
 
-TEST(name_generation_uniqueness) {
+TEST(name_generation_produces_different_names) {
     rng_seed(42);
     char name1[64], name2[64], name3[64];
     
@@ -116,7 +116,7 @@ TEST(name_generation_uniqueness) {
     ASSERT(!all_same);
 }
 
-TEST(name_generation_buffer) {
+TEST(name_generation_null_terminates_output) {
     char name[64];
     memset(name, 'X', sizeof(name));
     
@@ -128,42 +128,42 @@ TEST(name_generation_buffer) {
 
 // ============ Color Tests ============
 
-TEST(hsv_to_rgb_red) {
+TEST(hsv_to_rgb_converts_hue_zero_to_red) {
     Color c = hsv_to_rgb(0, 1.0f, 1.0f);
     ASSERT_EQ(c.r, 255);
     ASSERT_EQ(c.g, 0);
     ASSERT_EQ(c.b, 0);
 }
 
-TEST(hsv_to_rgb_green) {
+TEST(hsv_to_rgb_converts_hue_120_to_green) {
     Color c = hsv_to_rgb(120, 1.0f, 1.0f);
     ASSERT_EQ(c.r, 0);
     ASSERT_EQ(c.g, 255);
     ASSERT_EQ(c.b, 0);
 }
 
-TEST(hsv_to_rgb_blue) {
+TEST(hsv_to_rgb_converts_hue_240_to_blue) {
     Color c = hsv_to_rgb(240, 1.0f, 1.0f);
     ASSERT_EQ(c.r, 0);
     ASSERT_EQ(c.g, 0);
     ASSERT_EQ(c.b, 255);
 }
 
-TEST(hsv_to_rgb_white) {
+TEST(hsv_to_rgb_converts_zero_saturation_to_white) {
     Color c = hsv_to_rgb(0, 0.0f, 1.0f);
     ASSERT_EQ(c.r, 255);
     ASSERT_EQ(c.g, 255);
     ASSERT_EQ(c.b, 255);
 }
 
-TEST(hsv_to_rgb_black) {
+TEST(hsv_to_rgb_converts_zero_value_to_black) {
     Color c = hsv_to_rgb(0, 0.0f, 0.0f);
     ASSERT_EQ(c.r, 0);
     ASSERT_EQ(c.g, 0);
     ASSERT_EQ(c.b, 0);
 }
 
-TEST(body_color_valid_range) {
+TEST(body_color_generates_vibrant_colors) {
     rng_seed(42);
     for (int i = 0; i < 100; i++) {
         Color c = generate_body_color();
@@ -174,7 +174,7 @@ TEST(body_color_valid_range) {
     }
 }
 
-TEST(border_color_contrasting) {
+TEST(border_color_has_visible_contrast_with_body) {
     rng_seed(42);
     for (int i = 0; i < 100; i++) {
         Color body = generate_body_color();
@@ -185,13 +185,13 @@ TEST(border_color_contrasting) {
     }
 }
 
-TEST(color_distance_same) {
+TEST(color_distance_returns_zero_for_identical_colors) {
     Color c = {100, 150, 200};
     float dist = color_distance(c, c);
     ASSERT_EQ(dist, 0.0f);
 }
 
-TEST(color_distance_max) {
+TEST(color_distance_returns_max_for_black_and_white) {
     Color black = {0, 0, 0};
     Color white = {255, 255, 255};
     float dist = color_distance(black, white);
@@ -200,7 +200,7 @@ TEST(color_distance_max) {
     ASSERT_LT(dist, 442.0f);
 }
 
-TEST(clamp_u8_boundaries) {
+TEST(clamp_u8_clamps_to_zero_and_255_at_boundaries) {
     ASSERT_EQ(clamp_u8(-10), 0);
     ASSERT_EQ(clamp_u8(0), 0);
     ASSERT_EQ(clamp_u8(128), 128);
@@ -210,7 +210,7 @@ TEST(clamp_u8_boundaries) {
 
 // ============ Genome Tests ============
 
-TEST(genome_struct_size) {
+TEST(genome_struct_has_eight_spread_weights_and_stores_fields) {
     Genome g;
     // Verify structure has expected fields
     ASSERT_EQ(sizeof(g.spread_weights) / sizeof(float), 8);
@@ -231,7 +231,7 @@ TEST(genome_struct_size) {
     ASSERT_EQ(g.body_color.r, 255);
 }
 
-TEST(colony_struct_init) {
+TEST(colony_struct_stores_id_name_and_count_correctly) {
     Colony colony = {0};
     
     colony.id = 1;
@@ -247,7 +247,7 @@ TEST(colony_struct_init) {
     ASSERT_EQ(colony.parent_id, 0);
 }
 
-TEST(cell_struct_init) {
+TEST(cell_struct_initializes_to_zero_and_stores_values) {
     Cell cell = {0};
     
     ASSERT_EQ(cell.colony_id, 0);
@@ -260,7 +260,7 @@ TEST(cell_struct_init) {
     ASSERT_EQ(cell.is_border, true);
 }
 
-TEST(direction_enum_values) {
+TEST(direction_enum_has_eight_directions_in_order) {
     ASSERT_EQ(DIR_N, 0);
     ASSERT_EQ(DIR_NE, 1);
     ASSERT_EQ(DIR_E, 2);
@@ -278,35 +278,35 @@ int main(void) {
     printf("\n=== Phase 1 Unit Tests ===\n\n");
     
     printf("Random Utility Tests:\n");
-    RUN_TEST(rng_seed_deterministic);
-    RUN_TEST(rand_float_range);
-    RUN_TEST(rand_int_range);
-    RUN_TEST(rand_int_zero_max);
-    RUN_TEST(rand_range_bounds);
-    RUN_TEST(rand_range_equal_bounds);
+    RUN_TEST(rng_seed_same_seed_produces_identical_sequence);
+    RUN_TEST(rand_float_returns_values_between_zero_and_one);
+    RUN_TEST(rand_int_returns_values_within_max_exclusive);
+    RUN_TEST(rand_int_with_zero_max_returns_zero);
+    RUN_TEST(rand_range_returns_values_within_inclusive_bounds);
+    RUN_TEST(rand_range_with_equal_bounds_returns_that_value);
     
     printf("\nName Generation Tests:\n");
-    RUN_TEST(name_generation_format);
-    RUN_TEST(name_generation_uniqueness);
-    RUN_TEST(name_generation_buffer);
+    RUN_TEST(name_generation_produces_genus_species_format);
+    RUN_TEST(name_generation_produces_different_names);
+    RUN_TEST(name_generation_null_terminates_output);
     
     printf("\nColor Tests:\n");
-    RUN_TEST(hsv_to_rgb_red);
-    RUN_TEST(hsv_to_rgb_green);
-    RUN_TEST(hsv_to_rgb_blue);
-    RUN_TEST(hsv_to_rgb_white);
-    RUN_TEST(hsv_to_rgb_black);
-    RUN_TEST(body_color_valid_range);
-    RUN_TEST(border_color_contrasting);
-    RUN_TEST(color_distance_same);
-    RUN_TEST(color_distance_max);
-    RUN_TEST(clamp_u8_boundaries);
+    RUN_TEST(hsv_to_rgb_converts_hue_zero_to_red);
+    RUN_TEST(hsv_to_rgb_converts_hue_120_to_green);
+    RUN_TEST(hsv_to_rgb_converts_hue_240_to_blue);
+    RUN_TEST(hsv_to_rgb_converts_zero_saturation_to_white);
+    RUN_TEST(hsv_to_rgb_converts_zero_value_to_black);
+    RUN_TEST(body_color_generates_vibrant_colors);
+    RUN_TEST(border_color_has_visible_contrast_with_body);
+    RUN_TEST(color_distance_returns_zero_for_identical_colors);
+    RUN_TEST(color_distance_returns_max_for_black_and_white);
+    RUN_TEST(clamp_u8_clamps_to_zero_and_255_at_boundaries);
     
     printf("\nGenome & Colony Tests:\n");
-    RUN_TEST(genome_struct_size);
-    RUN_TEST(colony_struct_init);
-    RUN_TEST(cell_struct_init);
-    RUN_TEST(direction_enum_values);
+    RUN_TEST(genome_struct_has_eight_spread_weights_and_stores_fields);
+    RUN_TEST(colony_struct_stores_id_name_and_count_correctly);
+    RUN_TEST(cell_struct_initializes_to_zero_and_stores_values);
+    RUN_TEST(direction_enum_has_eight_directions_in_order);
     
     printf("\n=== Results ===\n");
     printf("Passed: %d\n", tests_passed);

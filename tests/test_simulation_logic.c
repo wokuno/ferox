@@ -83,7 +83,7 @@ static int count_colony_cells(World* world, uint32_t colony_id) {
 // Division Logic Tests
 // ============================================================================
 
-TEST(division_only_occurs_when_split) {
+TEST(division_requires_disconnected_groups) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -114,7 +114,7 @@ TEST(division_only_occurs_when_split) {
     world_destroy(world);
 }
 
-TEST(division_requires_actual_split) {
+TEST(division_triggers_for_separate_blocks) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -144,7 +144,7 @@ TEST(division_requires_actual_split) {
     world_destroy(world);
 }
 
-TEST(division_minimum_fragment_size) {
+TEST(division_ignores_fragments_under_5_cells) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -174,7 +174,7 @@ TEST(division_minimum_fragment_size) {
     world_destroy(world);
 }
 
-TEST(division_exactly_minimum_fragment_size) {
+TEST(division_triggers_at_exactly_5_cells) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -203,7 +203,7 @@ TEST(division_exactly_minimum_fragment_size) {
     world_destroy(world);
 }
 
-TEST(division_cell_ids_reassigned) {
+TEST(division_reassigns_cells_to_new_colonies) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -243,7 +243,7 @@ TEST(division_cell_ids_reassigned) {
     world_destroy(world);
 }
 
-TEST(division_preserves_cell_count_after_split) {
+TEST(division_preserves_total_cell_count) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -293,7 +293,7 @@ TEST(division_preserves_cell_count_after_split) {
 // Recombination Logic Tests
 // ============================================================================
 
-TEST(recombination_only_compatible_colonies) {
+TEST(recombination_requires_compatible_genomes) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -344,7 +344,7 @@ TEST(recombination_only_compatible_colonies) {
     world_destroy(world);
 }
 
-TEST(recombination_compatible_colonies_merge) {
+TEST(recombination_merges_related_colonies) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -394,7 +394,7 @@ TEST(recombination_compatible_colonies_merge) {
     world_destroy(world);
 }
 
-TEST(recombination_cell_counts_updated) {
+TEST(recombination_updates_cell_counts_correctly) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -444,7 +444,7 @@ TEST(recombination_cell_counts_updated) {
     world_destroy(world);
 }
 
-TEST(recombination_smaller_colony_deactivated) {
+TEST(recombination_deactivates_smaller_colony) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -497,7 +497,7 @@ TEST(recombination_smaller_colony_deactivated) {
 // Colony Stats Tests
 // ============================================================================
 
-TEST(cell_count_matches_actual_cells) {
+TEST(stats_cell_count_matches_grid_cells) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -521,7 +521,7 @@ TEST(cell_count_matches_actual_cells) {
     world_destroy(world);
 }
 
-TEST(max_cell_count_never_decreases) {
+TEST(stats_max_cell_count_never_decreases) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -553,7 +553,7 @@ TEST(max_cell_count_never_decreases) {
     world_destroy(world);
 }
 
-TEST(population_tracking_accuracy) {
+TEST(stats_population_tracking_is_accurate) {
     World* world = world_create(40, 40);
     ASSERT_NOT_NULL(world);
     
@@ -591,7 +591,7 @@ TEST(population_tracking_accuracy) {
     world_destroy(world);
 }
 
-TEST(colony_max_tracks_peak) {
+TEST(stats_max_tracks_peak_population) {
     World* world = world_create(50, 50);
     ASSERT_NOT_NULL(world);
     
@@ -634,7 +634,7 @@ TEST(colony_max_tracks_peak) {
 // Atomic World Sync Tests
 // ============================================================================
 
-TEST(atomic_world_sync_from_world_preserves_data) {
+TEST(atomic_sync_from_world_preserves_data) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -696,7 +696,7 @@ TEST(atomic_world_sync_from_world_preserves_data) {
     world_destroy(world);
 }
 
-TEST(atomic_world_sync_to_world_writes_back) {
+TEST(atomic_sync_to_world_writes_back) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -739,7 +739,7 @@ TEST(atomic_world_sync_to_world_writes_back) {
     world_destroy(world);
 }
 
-TEST(atomic_sync_round_trip) {
+TEST(atomic_sync_roundtrip_preserves_state) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -828,7 +828,7 @@ TEST(atomic_tick_preserves_cell_count) {
 // Cell Count Stability Tests
 // ============================================================================
 
-TEST(cell_count_stable_no_spreading) {
+TEST(cell_count_stable_without_spreading) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -893,7 +893,7 @@ TEST(cell_count_matches_grid_after_tick) {
     world_destroy(world);
 }
 
-TEST(atomic_sync_cell_count_consistency) {
+TEST(atomic_sync_maintains_cell_count) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -938,7 +938,7 @@ TEST(atomic_sync_cell_count_consistency) {
 // Shape Stability Tests
 // ============================================================================
 
-TEST(shape_seed_never_mutates) {
+TEST(shape_seed_never_changes_during_simulation) {
     // shape_seed should NEVER change during simulation - mutations cause visual jumps
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
@@ -965,7 +965,7 @@ TEST(shape_seed_never_mutates) {
     world_destroy(world);
 }
 
-TEST(shape_seed_preserved_across_sync) {
+TEST(shape_seed_preserved_across_atomic_sync) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -1624,39 +1624,39 @@ int run_simulation_logic_tests(void) {
     rng_seed(42);
     
     printf("Division Logic Tests:\n");
-    RUN_TEST(division_only_occurs_when_split);
-    RUN_TEST(division_requires_actual_split);
-    RUN_TEST(division_minimum_fragment_size);
-    RUN_TEST(division_exactly_minimum_fragment_size);
-    RUN_TEST(division_cell_ids_reassigned);
-    RUN_TEST(division_preserves_cell_count_after_split);
+    RUN_TEST(division_requires_disconnected_groups);
+    RUN_TEST(division_triggers_for_separate_blocks);
+    RUN_TEST(division_ignores_fragments_under_5_cells);
+    RUN_TEST(division_triggers_at_exactly_5_cells);
+    RUN_TEST(division_reassigns_cells_to_new_colonies);
+    RUN_TEST(division_preserves_total_cell_count);
     
     printf("\nRecombination Logic Tests:\n");
-    RUN_TEST(recombination_only_compatible_colonies);
-    RUN_TEST(recombination_compatible_colonies_merge);
-    RUN_TEST(recombination_cell_counts_updated);
-    RUN_TEST(recombination_smaller_colony_deactivated);
+    RUN_TEST(recombination_requires_compatible_genomes);
+    RUN_TEST(recombination_merges_related_colonies);
+    RUN_TEST(recombination_updates_cell_counts_correctly);
+    RUN_TEST(recombination_deactivates_smaller_colony);
     
     printf("\nColony Stats Tests:\n");
-    RUN_TEST(cell_count_matches_actual_cells);
-    RUN_TEST(max_cell_count_never_decreases);
-    RUN_TEST(population_tracking_accuracy);
-    RUN_TEST(colony_max_tracks_peak);
+    RUN_TEST(stats_cell_count_matches_grid_cells);
+    RUN_TEST(stats_max_cell_count_never_decreases);
+    RUN_TEST(stats_population_tracking_is_accurate);
+    RUN_TEST(stats_max_tracks_peak_population);
     
     printf("\nAtomic World Sync Tests:\n");
-    RUN_TEST(atomic_world_sync_from_world_preserves_data);
-    RUN_TEST(atomic_world_sync_to_world_writes_back);
-    RUN_TEST(atomic_sync_round_trip);
+    RUN_TEST(atomic_sync_from_world_preserves_data);
+    RUN_TEST(atomic_sync_to_world_writes_back);
+    RUN_TEST(atomic_sync_roundtrip_preserves_state);
     RUN_TEST(atomic_tick_preserves_cell_count);
     
     printf("\nCell Count Stability Tests:\n");
-    RUN_TEST(cell_count_stable_no_spreading);
+    RUN_TEST(cell_count_stable_without_spreading);
     RUN_TEST(cell_count_matches_grid_after_tick);
-    RUN_TEST(atomic_sync_cell_count_consistency);
+    RUN_TEST(atomic_sync_maintains_cell_count);
     
     printf("\nShape Stability Tests:\n");
-    RUN_TEST(shape_seed_never_mutates);
-    RUN_TEST(shape_seed_preserved_across_sync);
+    RUN_TEST(shape_seed_never_changes_during_simulation);
+    RUN_TEST(shape_seed_preserved_across_atomic_sync);
     RUN_TEST(wobble_phase_increments_smoothly);
     RUN_TEST(wobble_phase_preserved_across_sync);
     

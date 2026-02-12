@@ -34,7 +34,7 @@
 } while(0)
 
 // Test: Message header serialization/deserialization roundtrip
-int test_header_roundtrip(void) {
+int test_protocol_header_serialization_roundtrip(void) {
     MessageHeader original = {
         .magic = PROTOCOL_MAGIC,
         .type = MSG_WORLD_STATE,
@@ -59,7 +59,7 @@ int test_header_roundtrip(void) {
 }
 
 // Test: Invalid magic number should fail deserialization
-int test_header_invalid_magic(void) {
+int test_protocol_header_rejects_invalid_magic(void) {
     uint8_t buffer[MESSAGE_HEADER_SIZE] = {0};
     // Set invalid magic
     buffer[0] = 0xFF;
@@ -75,7 +75,7 @@ int test_header_invalid_magic(void) {
 }
 
 // Test: Colony serialization/deserialization roundtrip
-int test_colony_roundtrip(void) {
+int test_protocol_colony_serialization_roundtrip(void) {
     ProtoColony original = {
         .id = 1234,
         .x = 100.5f,
@@ -115,7 +115,7 @@ int test_colony_roundtrip(void) {
 }
 
 // Test: ProtoWorld state serialization/deserialization roundtrip
-int test_world_state_roundtrip(void) {
+int test_protocol_world_state_roundtrip(void) {
     ProtoWorld original;
     memset(&original, 0, sizeof(original));
     original.width = 1920;
@@ -181,7 +181,7 @@ int test_world_state_roundtrip(void) {
 }
 
 // Test: Command serialization/deserialization
-int test_command_roundtrip(void) {
+int test_protocol_command_serialization_roundtrip(void) {
     // Test simple command without data
     uint8_t buffer[128];
     int size = protocol_serialize_command(CMD_PAUSE, NULL, buffer);
@@ -221,7 +221,7 @@ int test_command_roundtrip(void) {
 }
 
 // Test: Server creation on available port
-int test_server_create(void) {
+int test_net_server_creates_on_available_port(void) {
     // Create server on port 0 (let OS assign)
     NetServer* server = net_server_create(0);
     TEST_ASSERT(server != NULL, "Server should be created");
@@ -296,7 +296,7 @@ static void* server_thread_func(void* arg) {
 }
 
 // Test: Client connection to local server
-int test_client_connect(void) {
+int test_net_client_connects_to_local_server(void) {
     ThreadData thread_data = { .port = 0, .result = -1 };
     
     // Create server first to get port
@@ -330,7 +330,7 @@ int test_client_connect(void) {
 }
 
 // Test: Send/receive data integrity
-int test_send_recv_integrity(void) {
+int test_net_send_recv_preserves_data_integrity(void) {
     ThreadData thread_data = { .port = 0, .result = -1 };
     
     // Create server first to get port
@@ -372,7 +372,7 @@ int test_send_recv_integrity(void) {
 }
 
 // Test: net_has_data function
-int test_has_data(void) {
+int test_net_has_data_detects_available_data(void) {
     // Create a socket pair using server/client
     NetServer* server = net_server_create(0);
     TEST_ASSERT(server != NULL, "Server should be created");
@@ -421,7 +421,7 @@ int test_has_data(void) {
 }
 
 // Test: Socket options
-int test_socket_options(void) {
+int test_net_socket_options_do_not_crash(void) {
     NetServer* server = net_server_create(0);
     TEST_ASSERT(server != NULL, "Server should be created");
     
@@ -459,7 +459,7 @@ int test_socket_options(void) {
 }
 
 // Test: NULL pointer handling
-int test_null_handling(void) {
+int test_protocol_and_network_handle_null_safely(void) {
     // Protocol functions should handle NULL
     TEST_ASSERT(protocol_serialize_header(NULL, NULL) < 0, "Should fail with NULL");
     TEST_ASSERT(protocol_deserialize_header(NULL, NULL) < 0, "Should fail with NULL");
@@ -494,23 +494,23 @@ int main(void) {
     
     // Protocol tests
     printf("--- Protocol Tests ---\n");
-    RUN_TEST(test_header_roundtrip);
-    RUN_TEST(test_header_invalid_magic);
-    RUN_TEST(test_colony_roundtrip);
-    RUN_TEST(test_world_state_roundtrip);
-    RUN_TEST(test_command_roundtrip);
+    RUN_TEST(test_protocol_header_serialization_roundtrip);
+    RUN_TEST(test_protocol_header_rejects_invalid_magic);
+    RUN_TEST(test_protocol_colony_serialization_roundtrip);
+    RUN_TEST(test_protocol_world_state_roundtrip);
+    RUN_TEST(test_protocol_command_serialization_roundtrip);
     
     // Network tests
     printf("\n--- Network Tests ---\n");
-    RUN_TEST(test_server_create);
-    RUN_TEST(test_client_connect);
-    RUN_TEST(test_send_recv_integrity);
-    RUN_TEST(test_has_data);
-    RUN_TEST(test_socket_options);
+    RUN_TEST(test_net_server_creates_on_available_port);
+    RUN_TEST(test_net_client_connects_to_local_server);
+    RUN_TEST(test_net_send_recv_preserves_data_integrity);
+    RUN_TEST(test_net_has_data_detects_available_data);
+    RUN_TEST(test_net_socket_options_do_not_crash);
     
     // Edge case tests
     printf("\n--- Edge Case Tests ---\n");
-    RUN_TEST(test_null_handling);
+    RUN_TEST(test_protocol_and_network_handle_null_safely);
     
     printf("\n=== Results ===\n");
     printf("Passed: %d/%d\n", passed, total);

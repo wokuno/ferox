@@ -66,7 +66,7 @@ static void record_thread_id(void* arg) {
 // Thread Pool Tests
 // ============================================================================
 
-static int test_threadpool_create_basic(void) {
+static int test_threadpool_create_returns_valid_pool(void) {
     TEST_START("threadpool_create basic");
     
     ThreadPool* pool = threadpool_create(4);
@@ -82,7 +82,7 @@ static int test_threadpool_create_basic(void) {
     return 0;
 }
 
-static int test_threadpool_create_single_thread(void) {
+static int test_threadpool_create_works_with_one_thread(void) {
     TEST_START("threadpool_create single thread");
     
     ThreadPool* pool = threadpool_create(1);
@@ -94,7 +94,7 @@ static int test_threadpool_create_single_thread(void) {
     return 0;
 }
 
-static int test_threadpool_create_many_threads(void) {
+static int test_threadpool_create_works_with_sixteen_threads(void) {
     TEST_START("threadpool_create many threads");
     
     ThreadPool* pool = threadpool_create(16);
@@ -106,7 +106,7 @@ static int test_threadpool_create_many_threads(void) {
     return 0;
 }
 
-static int test_threadpool_create_invalid(void) {
+static int test_threadpool_create_returns_null_for_invalid(void) {
     TEST_START("threadpool_create invalid");
     
     ThreadPool* pool = threadpool_create(0);
@@ -119,7 +119,7 @@ static int test_threadpool_create_invalid(void) {
     return 0;
 }
 
-static int test_threadpool_submit_single(void) {
+static int test_threadpool_submit_executes_single_task(void) {
     TEST_START("threadpool_submit single task");
     
     ThreadPool* pool = threadpool_create(2);
@@ -136,7 +136,7 @@ static int test_threadpool_submit_single(void) {
     return 0;
 }
 
-static int test_threadpool_submit_multiple(void) {
+static int test_threadpool_submit_executes_100_tasks(void) {
     TEST_START("threadpool_submit multiple tasks");
     
     ThreadPool* pool = threadpool_create(4);
@@ -155,7 +155,7 @@ static int test_threadpool_submit_multiple(void) {
     return 0;
 }
 
-static int test_threadpool_parallel_execution(void) {
+static int test_threadpool_uses_multiple_threads(void) {
     TEST_START("threadpool parallel execution");
     
     ThreadPool* pool = threadpool_create(4);
@@ -200,7 +200,7 @@ static int test_threadpool_parallel_execution(void) {
     return 0;
 }
 
-static int test_threadpool_wait_blocks(void) {
+static int test_threadpool_wait_blocks_until_complete(void) {
     TEST_START("threadpool_wait blocks until completion");
     
     ThreadPool* pool = threadpool_create(2);
@@ -222,7 +222,7 @@ static int test_threadpool_wait_blocks(void) {
     return 0;
 }
 
-static int test_threadpool_empty_queue(void) {
+static int test_threadpool_wait_returns_immediately_when_empty(void) {
     TEST_START("threadpool empty queue");
     
     ThreadPool* pool = threadpool_create(2);
@@ -236,7 +236,7 @@ static int test_threadpool_empty_queue(void) {
     return 0;
 }
 
-static int test_threadpool_shutdown_clean(void) {
+static int test_threadpool_destroy_completes_pending_tasks(void) {
     TEST_START("threadpool shutdown clean");
     
     ThreadPool* pool = threadpool_create(4);
@@ -258,7 +258,7 @@ static int test_threadpool_shutdown_clean(void) {
     return 0;
 }
 
-static int test_threadpool_large_task_count(void) {
+static int test_threadpool_handles_1000_tasks(void) {
     TEST_START("threadpool large task count");
     
     ThreadPool* pool = threadpool_create(8);
@@ -281,7 +281,7 @@ static int test_threadpool_large_task_count(void) {
 // Parallel Context Tests
 // ============================================================================
 
-static int test_parallel_create_basic(void) {
+static int test_parallel_context_creates_four_regions(void) {
     TEST_START("parallel_create basic");
     
     ThreadPool* pool = threadpool_create(4);
@@ -300,7 +300,7 @@ static int test_parallel_create_basic(void) {
     return 0;
 }
 
-static int test_parallel_create_invalid(void) {
+static int test_parallel_context_returns_null_for_invalid(void) {
     TEST_START("parallel_create invalid");
     
     ThreadPool* pool = threadpool_create(4);
@@ -325,7 +325,7 @@ static int test_parallel_create_invalid(void) {
     return 0;
 }
 
-static int test_parallel_init_regions_even(void) {
+static int test_parallel_regions_divide_grid_evenly(void) {
     TEST_START("parallel_init_regions even division");
     
     ThreadPool* pool = threadpool_create(4);
@@ -367,7 +367,7 @@ static int test_parallel_init_regions_even(void) {
     return 0;
 }
 
-static int test_parallel_init_regions_uneven(void) {
+static int test_parallel_regions_handle_uneven_division(void) {
     TEST_START("parallel_init_regions uneven division");
     
     ThreadPool* pool = threadpool_create(4);
@@ -404,7 +404,7 @@ static int test_parallel_init_regions_uneven(void) {
     return 0;
 }
 
-static int test_parallel_init_regions_covers_grid(void) {
+static int test_parallel_regions_cover_entire_grid(void) {
     TEST_START("parallel_init_regions covers entire grid");
     
     ThreadPool* pool = threadpool_create(4);
@@ -440,7 +440,7 @@ static int test_parallel_init_regions_covers_grid(void) {
     return 0;
 }
 
-static int test_parallel_spread_mutate(void) {
+static int test_parallel_spread_and_mutate_complete(void) {
     TEST_START("parallel_spread and parallel_mutate");
     
     ThreadPool* pool = threadpool_create(4);
@@ -464,7 +464,7 @@ static int test_parallel_spread_mutate(void) {
     return 0;
 }
 
-static int test_parallel_barrier(void) {
+static int test_parallel_barrier_synchronizes_threads(void) {
     TEST_START("parallel_barrier synchronization");
     
     ThreadPool* pool = threadpool_create(4);
@@ -488,7 +488,7 @@ static int test_parallel_barrier(void) {
 // Race Condition Tests
 // ============================================================================
 
-static int test_no_race_shared_counter(void) {
+static int test_threadpool_has_no_race_conditions(void) {
     TEST_START("no race conditions with shared counter");
     
     ThreadPool* pool = threadpool_create(8);
@@ -511,7 +511,7 @@ static int test_no_race_shared_counter(void) {
     return 0;
 }
 
-static int test_multiple_wait_calls(void) {
+static int test_threadpool_supports_multiple_wait_calls(void) {
     TEST_START("multiple threadpool_wait calls");
     
     ThreadPool* pool = threadpool_create(4);
@@ -548,30 +548,30 @@ int main(void) {
     printf("\n=== Phase 3: Threading & Concurrency Tests ===\n\n");
     
     printf("[Thread Pool Tests]\n");
-    failed += test_threadpool_create_basic();
-    failed += test_threadpool_create_single_thread();
-    failed += test_threadpool_create_many_threads();
-    failed += test_threadpool_create_invalid();
-    failed += test_threadpool_submit_single();
-    failed += test_threadpool_submit_multiple();
-    failed += test_threadpool_parallel_execution();
-    failed += test_threadpool_wait_blocks();
-    failed += test_threadpool_empty_queue();
-    failed += test_threadpool_shutdown_clean();
-    failed += test_threadpool_large_task_count();
+    failed += test_threadpool_create_returns_valid_pool();
+    failed += test_threadpool_create_works_with_one_thread();
+    failed += test_threadpool_create_works_with_sixteen_threads();
+    failed += test_threadpool_create_returns_null_for_invalid();
+    failed += test_threadpool_submit_executes_single_task();
+    failed += test_threadpool_submit_executes_100_tasks();
+    failed += test_threadpool_uses_multiple_threads();
+    failed += test_threadpool_wait_blocks_until_complete();
+    failed += test_threadpool_wait_returns_immediately_when_empty();
+    failed += test_threadpool_destroy_completes_pending_tasks();
+    failed += test_threadpool_handles_1000_tasks();
     
     printf("\n[Parallel Context Tests]\n");
-    failed += test_parallel_create_basic();
-    failed += test_parallel_create_invalid();
-    failed += test_parallel_init_regions_even();
-    failed += test_parallel_init_regions_uneven();
-    failed += test_parallel_init_regions_covers_grid();
-    failed += test_parallel_spread_mutate();
-    failed += test_parallel_barrier();
+    failed += test_parallel_context_creates_four_regions();
+    failed += test_parallel_context_returns_null_for_invalid();
+    failed += test_parallel_regions_divide_grid_evenly();
+    failed += test_parallel_regions_handle_uneven_division();
+    failed += test_parallel_regions_cover_entire_grid();
+    failed += test_parallel_spread_and_mutate_complete();
+    failed += test_parallel_barrier_synchronizes_threads();
     
     printf("\n[Race Condition Tests]\n");
-    failed += test_no_race_shared_counter();
-    failed += test_multiple_wait_calls();
+    failed += test_threadpool_has_no_race_conditions();
+    failed += test_threadpool_supports_multiple_wait_calls();
     
     printf("\n=== Results ===\n");
     if (failed == 0) {

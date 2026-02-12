@@ -61,7 +61,7 @@ static Colony create_test_colony(void) {
 // Long Running Tests
 // ============================================================================
 
-TEST(thousand_ticks_no_crash) {
+TEST(simulation_runs_1000_ticks_without_crash) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -82,7 +82,7 @@ TEST(thousand_ticks_no_crash) {
     world_destroy(world);
 }
 
-TEST(rapid_growth_death_cycles) {
+TEST(simulation_handles_growth_death_cycles) {
     World* world = world_create(50, 50);
     ASSERT_NOT_NULL(world);
     
@@ -115,7 +115,7 @@ TEST(rapid_growth_death_cycles) {
     world_destroy(world);
 }
 
-TEST(all_colonies_dying_leaves_empty_world) {
+TEST(simulation_empty_after_all_colonies_die) {
     World* world = world_create(30, 30);
     ASSERT_NOT_NULL(world);
     
@@ -153,7 +153,7 @@ TEST(all_colonies_dying_leaves_empty_world) {
 // Single Cell Tests
 // ============================================================================
 
-TEST(single_cell_colony_divides) {
+TEST(simulation_single_cell_colony_can_grow) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -188,7 +188,7 @@ TEST(single_cell_colony_divides) {
 // Large Colony Tests
 // ============================================================================
 
-TEST(large_colony_1000_cells_divides) {
+TEST(simulation_large_colony_triggers_division) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -228,7 +228,7 @@ TEST(large_colony_1000_cells_divides) {
     world_destroy(world);
 }
 
-TEST(large_colony_processing_time) {
+TEST(simulation_large_colony_completes_in_time) {
     World* world = world_create(200, 200);
     ASSERT_NOT_NULL(world);
     
@@ -260,7 +260,7 @@ TEST(large_colony_processing_time) {
 // Many Small Colonies Tests
 // ============================================================================
 
-TEST(many_small_colonies_interact) {
+TEST(simulation_100_colonies_interact_safely) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -296,7 +296,7 @@ TEST(many_small_colonies_interact) {
     world_destroy(world);
 }
 
-TEST(concurrent_divisions_and_mergers) {
+TEST(simulation_handles_concurrent_events) {
     World* world = world_create(50, 50);
     ASSERT_NOT_NULL(world);
     
@@ -337,7 +337,7 @@ TEST(concurrent_divisions_and_mergers) {
 // Memory Stability Tests
 // ============================================================================
 
-TEST(memory_stability_over_time) {
+TEST(simulation_memory_stable_across_cycles) {
     // Run multiple simulation cycles to check for memory issues
     for (int cycle = 0; cycle < 5; cycle++) {
         World* world = world_create(50, 50);
@@ -358,7 +358,7 @@ TEST(memory_stability_over_time) {
     ASSERT_TRUE(1);
 }
 
-TEST(colony_array_growth) {
+TEST(simulation_colony_array_grows_dynamically) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -385,7 +385,7 @@ TEST(colony_array_growth) {
     world_destroy(world);
 }
 
-TEST(world_create_destroy_many_times) {
+TEST(simulation_world_create_destroy_100_times) {
     for (int i = 0; i < 100; i++) {
         World* world = world_create(50 + (i % 50), 50 + (i % 50));
         ASSERT_NOT_NULL(world);
@@ -405,7 +405,7 @@ TEST(world_create_destroy_many_times) {
 // Edge Cases
 // ============================================================================
 
-TEST(minimal_world_size) {
+TEST(simulation_1x1_world_handles_ticks) {
     World* world = world_create(1, 1);
     ASSERT_NOT_NULL(world);
     
@@ -426,7 +426,7 @@ TEST(minimal_world_size) {
     world_destroy(world);
 }
 
-TEST(asymmetric_world) {
+TEST(simulation_wide_asymmetric_world_works) {
     World* world = world_create(200, 5);
     ASSERT_NOT_NULL(world);
     
@@ -442,7 +442,7 @@ TEST(asymmetric_world) {
     world_destroy(world);
 }
 
-TEST(tall_narrow_world) {
+TEST(simulation_tall_narrow_world_works) {
     World* world = world_create(5, 200);
     ASSERT_NOT_NULL(world);
     
@@ -469,30 +469,30 @@ int run_simulation_stress_tests(void) {
     printf("\n=== Simulation Stress Tests ===\n\n");
     
     printf("Long Running Tests:\n");
-    RUN_TEST(thousand_ticks_no_crash);
-    RUN_TEST(rapid_growth_death_cycles);
-    RUN_TEST(all_colonies_dying_leaves_empty_world);
+    RUN_TEST(simulation_runs_1000_ticks_without_crash);
+    RUN_TEST(simulation_handles_growth_death_cycles);
+    RUN_TEST(simulation_empty_after_all_colonies_die);
     
     printf("\nSingle Cell Tests:\n");
-    RUN_TEST(single_cell_colony_divides);
+    RUN_TEST(simulation_single_cell_colony_can_grow);
     
     printf("\nLarge Colony Tests:\n");
-    RUN_TEST(large_colony_1000_cells_divides);
-    RUN_TEST(large_colony_processing_time);
+    RUN_TEST(simulation_large_colony_triggers_division);
+    RUN_TEST(simulation_large_colony_completes_in_time);
     
     printf("\nMany Small Colonies Tests:\n");
-    RUN_TEST(many_small_colonies_interact);
-    RUN_TEST(concurrent_divisions_and_mergers);
+    RUN_TEST(simulation_100_colonies_interact_safely);
+    RUN_TEST(simulation_handles_concurrent_events);
     
     printf("\nMemory Stability Tests:\n");
-    RUN_TEST(memory_stability_over_time);
-    RUN_TEST(colony_array_growth);
-    RUN_TEST(world_create_destroy_many_times);
+    RUN_TEST(simulation_memory_stable_across_cycles);
+    RUN_TEST(simulation_colony_array_grows_dynamically);
+    RUN_TEST(simulation_world_create_destroy_100_times);
     
     printf("\nEdge Cases:\n");
-    RUN_TEST(minimal_world_size);
-    RUN_TEST(asymmetric_world);
-    RUN_TEST(tall_narrow_world);
+    RUN_TEST(simulation_1x1_world_handles_ticks);
+    RUN_TEST(simulation_wide_asymmetric_world_works);
+    RUN_TEST(simulation_tall_narrow_world_works);
     
     printf("\n--- Simulation Stress Results ---\n");
     printf("Passed: %d\n", tests_passed);

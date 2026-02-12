@@ -57,7 +57,7 @@ static void* run_server_briefly(void* arg) {
 }
 
 // Test: Server creation with valid parameters
-int test_server_create_valid(void) {
+int test_server_creates_with_valid_parameters(void) {
     Server* server = server_create(0, 50, 50, 2);
     TEST_ASSERT(server != NULL, "Server should be created");
     TEST_ASSERT(server->listener != NULL, "Listener should be created");
@@ -73,7 +73,7 @@ int test_server_create_valid(void) {
 }
 
 // Test: Server creation with invalid parameters
-int test_server_create_invalid(void) {
+int test_server_returns_null_for_invalid_params(void) {
     TEST_ASSERT(server_create(0, 0, 50, 2) == NULL, "Should fail with zero width");
     TEST_ASSERT(server_create(0, 50, 0, 2) == NULL, "Should fail with zero height");
     TEST_ASSERT(server_create(0, 50, 50, 0) == NULL, "Should fail with zero threads");
@@ -83,7 +83,7 @@ int test_server_create_invalid(void) {
 }
 
 // Test: Server destruction (including NULL)
-int test_server_destroy(void) {
+int test_server_destroy_handles_null_safely(void) {
     Server* server = server_create(0, 50, 50, 2);
     TEST_ASSERT(server != NULL, "Server should be created");
     
@@ -99,7 +99,7 @@ int test_server_destroy(void) {
 }
 
 // Test: Client add and remove
-int test_client_management(void) {
+int test_server_adds_and_removes_clients(void) {
     Server* server = server_create(0, 50, 50, 2);
     TEST_ASSERT(server != NULL, "Server should be created");
     
@@ -144,7 +144,7 @@ int test_client_management(void) {
 }
 
 // Test: Command handling
-int test_command_handling(void) {
+int test_server_handles_pause_resume_commands(void) {
     Server* server = server_create(0, 50, 50, 2);
     TEST_ASSERT(server != NULL, "Server should be created");
     
@@ -185,7 +185,7 @@ int test_command_handling(void) {
 }
 
 // Test: Server port assignment
-int test_server_port_assignment(void) {
+int test_server_assigns_unique_ports(void) {
     // Create server on port 0 (auto-assign)
     Server* server1 = server_create(0, 50, 50, 2);
     TEST_ASSERT(server1 != NULL, "Server1 should be created");
@@ -207,7 +207,7 @@ int test_server_port_assignment(void) {
 }
 
 // Test: World initialization
-int test_world_initialization(void) {
+int test_server_initializes_world_with_colonies(void) {
     Server* server = server_create(0, 100, 100, 2);
     TEST_ASSERT(server != NULL, "Server should be created");
     TEST_ASSERT(server->world != NULL, "World should exist");
@@ -273,7 +273,7 @@ static void* client_connect_thread(void* arg) {
 }
 
 // Test: Client connection and world state broadcasting
-int test_client_connection(void) {
+int test_server_accepts_client_connection(void) {
     Server* server = server_create(0, 50, 50, 2);
     TEST_ASSERT(server != NULL, "Server should be created");
     
@@ -308,7 +308,7 @@ int test_client_connection(void) {
 }
 
 // Test: NULL handling for all server functions
-int test_null_handling(void) {
+int test_server_functions_handle_null_safely(void) {
     // All these should not crash
     server_destroy(NULL);
     server_run(NULL);
@@ -326,7 +326,7 @@ int test_null_handling(void) {
 }
 
 // Test: Tick rate and speed multiplier
-int test_tick_rate(void) {
+int test_server_uses_default_tick_rate(void) {
     Server* server = server_create(0, 50, 50, 2);
     TEST_ASSERT(server != NULL, "Server should be created");
     
@@ -357,31 +357,31 @@ int main(void) {
     
     // Server creation tests
     printf("--- Server Creation Tests ---\n");
-    RUN_TEST(test_server_create_valid);
-    RUN_TEST(test_server_create_invalid);
-    RUN_TEST(test_server_destroy);
-    RUN_TEST(test_server_port_assignment);
+    RUN_TEST(test_server_creates_with_valid_parameters);
+    RUN_TEST(test_server_returns_null_for_invalid_params);
+    RUN_TEST(test_server_destroy_handles_null_safely);
+    RUN_TEST(test_server_assigns_unique_ports);
     
     // Client management tests
     printf("\n--- Client Management Tests ---\n");
-    RUN_TEST(test_client_management);
+    RUN_TEST(test_server_adds_and_removes_clients);
     
     // Command handling tests
     printf("\n--- Command Handling Tests ---\n");
-    RUN_TEST(test_command_handling);
+    RUN_TEST(test_server_handles_pause_resume_commands);
     
     // World tests
     printf("\n--- World Tests ---\n");
-    RUN_TEST(test_world_initialization);
-    RUN_TEST(test_tick_rate);
+    RUN_TEST(test_server_initializes_world_with_colonies);
+    RUN_TEST(test_server_uses_default_tick_rate);
     
     // Integration tests
     printf("\n--- Integration Tests ---\n");
-    RUN_TEST(test_client_connection);
+    RUN_TEST(test_server_accepts_client_connection);
     
     // Edge case tests
     printf("\n--- Edge Case Tests ---\n");
-    RUN_TEST(test_null_handling);
+    RUN_TEST(test_server_functions_handle_null_safely);
     
     printf("\n=== Results ===\n");
     printf("Passed: %d/%d\n", passed, total);

@@ -82,7 +82,7 @@ static Genome create_test_genome(float spread, float mutation, float aggr, float
 // World Tests
 // ============================================================================
 
-TEST(world_create_destroy) {
+TEST(world_create_and_destroy_succeeds) {
     World* world = world_create(100, 50);
     ASSERT_NOT_NULL(world);
     ASSERT_EQ(world->width, 100);
@@ -95,7 +95,7 @@ TEST(world_create_destroy) {
     world_destroy(world);
 }
 
-TEST(world_create_invalid) {
+TEST(world_create_returns_null_for_invalid_dimensions) {
     World* world = world_create(-1, 10);
     ASSERT_NULL(world);
     
@@ -103,7 +103,7 @@ TEST(world_create_invalid) {
     ASSERT_NULL(world);
 }
 
-TEST(world_get_cell) {
+TEST(world_get_cell_returns_cell_or_null_for_bounds) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -120,7 +120,7 @@ TEST(world_get_cell) {
     world_destroy(world);
 }
 
-TEST(world_add_colony) {
+TEST(world_add_colony_returns_id_and_increments_count) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -141,7 +141,7 @@ TEST(world_add_colony) {
     world_destroy(world);
 }
 
-TEST(world_remove_colony) {
+TEST(world_remove_colony_deactivates_and_clears_cells) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -170,7 +170,7 @@ TEST(world_remove_colony) {
     world_destroy(world);
 }
 
-TEST(world_init_random_colonies) {
+TEST(world_init_random_colonies_creates_active_colonies) {
     World* world = world_create(50, 50);
     ASSERT_NOT_NULL(world);
     
@@ -190,7 +190,7 @@ TEST(world_init_random_colonies) {
 // Genetics Tests
 // ============================================================================
 
-TEST(genome_create_random_valid_ranges) {
+TEST(genome_create_random_produces_values_in_valid_ranges) {
     for (int i = 0; i < 100; i++) {
         Genome g = genome_create_random();
         ASSERT_TRUE(g.spread_rate >= 0.0f && g.spread_rate <= 1.0f);
@@ -201,7 +201,7 @@ TEST(genome_create_random_valid_ranges) {
     }
 }
 
-TEST(genome_mutate_changes_values) {
+TEST(genome_mutate_modifies_at_least_one_value) {
     // Use high mutation rate to ensure changes
     Genome g = create_test_genome(0.5f, 1.0f, 0.5f, 0.5f, 0.5f);
     Genome original = g;
@@ -224,7 +224,7 @@ TEST(genome_mutate_changes_values) {
     ASSERT_TRUE(changed);
 }
 
-TEST(genome_mutate_stays_in_range) {
+TEST(genome_mutate_keeps_values_within_valid_range) {
     // Test edge cases
     Genome g = create_test_genome(0.0f, 1.0f, 1.0f, 0.0f, 1.0f);
     
@@ -238,7 +238,7 @@ TEST(genome_mutate_stays_in_range) {
     }
 }
 
-TEST(genome_distance_identical) {
+TEST(genome_distance_returns_zero_for_identical_genomes) {
     Genome a = create_test_genome(0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     Genome b = create_test_genome(0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     
@@ -246,7 +246,7 @@ TEST(genome_distance_identical) {
     ASSERT_FLOAT_EQ(dist, 0.0f, 0.0001f);
 }
 
-TEST(genome_distance_max) {
+TEST(genome_distance_returns_one_for_maximally_different) {
     Genome a = create_test_genome(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     Genome b = create_test_genome(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
     
@@ -254,7 +254,7 @@ TEST(genome_distance_max) {
     ASSERT_FLOAT_EQ(dist, 1.0f, 0.0001f);
 }
 
-TEST(genome_distance_partial) {
+TEST(genome_distance_returns_half_for_halfway_different) {
     Genome a = create_test_genome(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     Genome b = create_test_genome(0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     
@@ -263,7 +263,7 @@ TEST(genome_distance_partial) {
     ASSERT_FLOAT_EQ(dist, 0.5f, 0.01f);
 }
 
-TEST(genome_merge_equal_weights) {
+TEST(genome_merge_with_equal_weights_returns_average) {
     Genome a = create_test_genome(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     Genome b = create_test_genome(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
     
@@ -277,7 +277,7 @@ TEST(genome_merge_equal_weights) {
     ASSERT_FLOAT_EQ(result.metabolism, 0.5f, 0.0001f);
 }
 
-TEST(genome_merge_weighted) {
+TEST(genome_merge_respects_weight_ratio) {
     Genome a = create_test_genome(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     Genome b = create_test_genome(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
     
@@ -289,7 +289,7 @@ TEST(genome_merge_weighted) {
     ASSERT_FLOAT_EQ(result.mutation_rate, 0.025f, 0.0001f);
 }
 
-TEST(genome_compatible) {
+TEST(genome_compatible_returns_true_for_similar_genomes) {
     Genome a = create_test_genome(0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     Genome b = create_test_genome(0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     
@@ -303,7 +303,7 @@ TEST(genome_compatible) {
 // Simulation Tests
 // ============================================================================
 
-TEST(find_connected_components_single) {
+TEST(connected_components_finds_single_block) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -331,7 +331,7 @@ TEST(find_connected_components_single) {
     world_destroy(world);
 }
 
-TEST(find_connected_components_multiple) {
+TEST(connected_components_finds_separate_blocks) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -370,7 +370,7 @@ TEST(find_connected_components_multiple) {
     world_destroy(world);
 }
 
-TEST(simulation_spread_expands) {
+TEST(simulation_spread_expands_colony_cells) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -408,7 +408,7 @@ TEST(simulation_spread_expands) {
     world_destroy(world);
 }
 
-TEST(simulation_tick_advances) {
+TEST(simulation_tick_increments_world_tick_counter) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -434,29 +434,29 @@ int main(void) {
     printf("=====================\n\n");
     
     printf("World Tests:\n");
-    RUN_TEST(world_create_destroy);
-    RUN_TEST(world_create_invalid);
-    RUN_TEST(world_get_cell);
-    RUN_TEST(world_add_colony);
-    RUN_TEST(world_remove_colony);
-    RUN_TEST(world_init_random_colonies);
+    RUN_TEST(world_create_and_destroy_succeeds);
+    RUN_TEST(world_create_returns_null_for_invalid_dimensions);
+    RUN_TEST(world_get_cell_returns_cell_or_null_for_bounds);
+    RUN_TEST(world_add_colony_returns_id_and_increments_count);
+    RUN_TEST(world_remove_colony_deactivates_and_clears_cells);
+    RUN_TEST(world_init_random_colonies_creates_active_colonies);
     
     printf("\nGenetics Tests:\n");
-    RUN_TEST(genome_create_random_valid_ranges);
-    RUN_TEST(genome_mutate_changes_values);
-    RUN_TEST(genome_mutate_stays_in_range);
-    RUN_TEST(genome_distance_identical);
-    RUN_TEST(genome_distance_max);
-    RUN_TEST(genome_distance_partial);
-    RUN_TEST(genome_merge_equal_weights);
-    RUN_TEST(genome_merge_weighted);
-    RUN_TEST(genome_compatible);
+    RUN_TEST(genome_create_random_produces_values_in_valid_ranges);
+    RUN_TEST(genome_mutate_modifies_at_least_one_value);
+    RUN_TEST(genome_mutate_keeps_values_within_valid_range);
+    RUN_TEST(genome_distance_returns_zero_for_identical_genomes);
+    RUN_TEST(genome_distance_returns_one_for_maximally_different);
+    RUN_TEST(genome_distance_returns_half_for_halfway_different);
+    RUN_TEST(genome_merge_with_equal_weights_returns_average);
+    RUN_TEST(genome_merge_respects_weight_ratio);
+    RUN_TEST(genome_compatible_returns_true_for_similar_genomes);
     
     printf("\nSimulation Tests:\n");
-    RUN_TEST(find_connected_components_single);
-    RUN_TEST(find_connected_components_multiple);
-    RUN_TEST(simulation_spread_expands);
-    RUN_TEST(simulation_tick_advances);
+    RUN_TEST(connected_components_finds_single_block);
+    RUN_TEST(connected_components_finds_separate_blocks);
+    RUN_TEST(simulation_spread_expands_colony_cells);
+    RUN_TEST(simulation_tick_increments_world_tick_counter);
     
     printf("\n=====================\n");
     printf("All tests passed!\n");

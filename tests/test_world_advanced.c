@@ -65,7 +65,7 @@ static Colony create_test_colony(void) {
 // World Boundary Tests
 // ============================================================================
 
-TEST(world_boundary_corner_cells) {
+TEST(world_get_cell_returns_valid_corner_cells) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -88,7 +88,7 @@ TEST(world_boundary_corner_cells) {
     world_destroy(world);
 }
 
-TEST(world_boundary_edge_cells) {
+TEST(world_get_cell_returns_valid_edge_cells) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -113,7 +113,7 @@ TEST(world_boundary_edge_cells) {
     world_destroy(world);
 }
 
-TEST(world_boundary_cell_operations) {
+TEST(world_boundary_cells_can_be_assigned) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -137,7 +137,7 @@ TEST(world_boundary_cell_operations) {
 // Colony Removal Tests
 // ============================================================================
 
-TEST(colony_removal_cleans_all_cells) {
+TEST(world_remove_colony_clears_all_cells) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -168,7 +168,7 @@ TEST(colony_removal_cleans_all_cells) {
     world_destroy(world);
 }
 
-TEST(colony_removal_doesnt_affect_other_colonies) {
+TEST(world_remove_colony_preserves_other_colonies) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -204,7 +204,7 @@ TEST(colony_removal_doesnt_affect_other_colonies) {
 // Multiple Colony Tests
 // ============================================================================
 
-TEST(multiple_colonies_dont_overlap) {
+TEST(world_init_colonies_do_not_overlap) {
     World* world = world_create(50, 50);
     ASSERT_NOT_NULL(world);
     
@@ -225,7 +225,7 @@ TEST(multiple_colonies_dont_overlap) {
     world_destroy(world);
 }
 
-TEST(world_maximum_colonies) {
+TEST(world_supports_200_colonies) {
     World* world = world_create(100, 100);
     ASSERT_NOT_NULL(world);
     
@@ -242,7 +242,7 @@ TEST(world_maximum_colonies) {
     world_destroy(world);
 }
 
-TEST(colony_ids_are_unique) {
+TEST(world_assigns_unique_colony_ids) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -266,7 +266,7 @@ TEST(colony_ids_are_unique) {
 // World Tick Tests
 // ============================================================================
 
-TEST(world_tick_advances_colony_ages) {
+TEST(simulation_tick_increases_cell_age) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -291,7 +291,7 @@ TEST(world_tick_advances_colony_ages) {
     world_destroy(world);
 }
 
-TEST(world_tick_counter_increments) {
+TEST(simulation_tick_increments_world_counter) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -309,7 +309,7 @@ TEST(world_tick_counter_increments) {
 // Spreading Tests
 // ============================================================================
 
-TEST(spreading_respects_boundaries) {
+TEST(simulation_spread_stays_within_bounds) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -345,7 +345,7 @@ TEST(spreading_respects_boundaries) {
     world_destroy(world);
 }
 
-TEST(spreading_fills_enclosed_area) {
+TEST(simulation_spread_expands_from_center) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -381,7 +381,7 @@ TEST(spreading_fills_enclosed_area) {
 // Division Tests
 // ============================================================================
 
-TEST(division_creates_unique_id) {
+TEST(simulation_division_creates_new_colony) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -412,7 +412,7 @@ TEST(division_creates_unique_id) {
     world_destroy(world);
 }
 
-TEST(division_preserves_total_cells) {
+TEST(simulation_division_preserves_cell_count) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -452,7 +452,7 @@ TEST(division_preserves_total_cells) {
 // Recombination Tests
 // ============================================================================
 
-TEST(recombination_reduces_colony_count) {
+TEST(simulation_recombination_merges_colonies) {
     World* world = world_create(20, 20);
     ASSERT_NOT_NULL(world);
     
@@ -503,7 +503,7 @@ TEST(recombination_reduces_colony_count) {
 // Empty World Tests
 // ============================================================================
 
-TEST(empty_world_handles_tick) {
+TEST(simulation_empty_world_handles_tick_safely) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -518,7 +518,7 @@ TEST(empty_world_handles_tick) {
     world_destroy(world);
 }
 
-TEST(empty_world_spread_safe) {
+TEST(simulation_empty_world_spread_is_safe) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -530,7 +530,7 @@ TEST(empty_world_spread_safe) {
     world_destroy(world);
 }
 
-TEST(empty_world_divisions_safe) {
+TEST(simulation_empty_world_divisions_is_safe) {
     World* world = world_create(10, 10);
     ASSERT_NOT_NULL(world);
     
@@ -555,38 +555,38 @@ int run_world_advanced_tests(void) {
     rng_seed(42);
     
     printf("Boundary Tests:\n");
-    RUN_TEST(world_boundary_corner_cells);
-    RUN_TEST(world_boundary_edge_cells);
-    RUN_TEST(world_boundary_cell_operations);
+    RUN_TEST(world_get_cell_returns_valid_corner_cells);
+    RUN_TEST(world_get_cell_returns_valid_edge_cells);
+    RUN_TEST(world_boundary_cells_can_be_assigned);
     
     printf("\nColony Removal Tests:\n");
-    RUN_TEST(colony_removal_cleans_all_cells);
-    RUN_TEST(colony_removal_doesnt_affect_other_colonies);
+    RUN_TEST(world_remove_colony_clears_all_cells);
+    RUN_TEST(world_remove_colony_preserves_other_colonies);
     
     printf("\nMultiple Colony Tests:\n");
-    RUN_TEST(multiple_colonies_dont_overlap);
-    RUN_TEST(world_maximum_colonies);
-    RUN_TEST(colony_ids_are_unique);
+    RUN_TEST(world_init_colonies_do_not_overlap);
+    RUN_TEST(world_supports_200_colonies);
+    RUN_TEST(world_assigns_unique_colony_ids);
     
     printf("\nWorld Tick Tests:\n");
-    RUN_TEST(world_tick_advances_colony_ages);
-    RUN_TEST(world_tick_counter_increments);
+    RUN_TEST(simulation_tick_increases_cell_age);
+    RUN_TEST(simulation_tick_increments_world_counter);
     
     printf("\nSpreading Tests:\n");
-    RUN_TEST(spreading_respects_boundaries);
-    RUN_TEST(spreading_fills_enclosed_area);
+    RUN_TEST(simulation_spread_stays_within_bounds);
+    RUN_TEST(simulation_spread_expands_from_center);
     
     printf("\nDivision Tests:\n");
-    RUN_TEST(division_creates_unique_id);
-    RUN_TEST(division_preserves_total_cells);
+    RUN_TEST(simulation_division_creates_new_colony);
+    RUN_TEST(simulation_division_preserves_cell_count);
     
     printf("\nRecombination Tests:\n");
-    RUN_TEST(recombination_reduces_colony_count);
+    RUN_TEST(simulation_recombination_merges_colonies);
     
     printf("\nEmpty World Tests:\n");
-    RUN_TEST(empty_world_handles_tick);
-    RUN_TEST(empty_world_spread_safe);
-    RUN_TEST(empty_world_divisions_safe);
+    RUN_TEST(simulation_empty_world_handles_tick_safely);
+    RUN_TEST(simulation_empty_world_spread_is_safe);
+    RUN_TEST(simulation_empty_world_divisions_is_safe);
     
     printf("\n--- World Advanced Results ---\n");
     printf("Passed: %d\n", tests_passed);

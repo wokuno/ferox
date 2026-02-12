@@ -22,7 +22,7 @@ static int tests_passed = 0;
 } while(0)
 
 // Test ANSI color formatting
-static int test_ansi_color_formatting(void) {
+static int test_ansi_format_produces_valid_escape_codes(void) {
     char buf[64];
     
     // Test foreground color
@@ -49,7 +49,7 @@ static int test_ansi_color_formatting(void) {
 }
 
 // Test renderer creation
-static int test_renderer_create(void) {
+static int test_renderer_creates_with_valid_buffer(void) {
     Renderer* r = renderer_create();
     if (!r) return 0;
     
@@ -74,7 +74,7 @@ static int test_renderer_create(void) {
 }
 
 // Test renderer scroll
-static int test_renderer_scroll(void) {
+static int test_renderer_scroll_moves_view_position(void) {
     Renderer* r = renderer_create();
     if (!r) return 0;
     
@@ -104,7 +104,7 @@ static int test_renderer_scroll(void) {
 }
 
 // Test renderer center on
-static int test_renderer_center_on(void) {
+static int test_renderer_center_on_sets_view_position(void) {
     Renderer* r = renderer_create();
     if (!r) return 0;
     
@@ -130,7 +130,7 @@ static int test_renderer_center_on(void) {
 }
 
 // Test renderer write functions
-static int test_renderer_write(void) {
+static int test_renderer_write_adds_text_to_buffer(void) {
     Renderer* r = renderer_create();
     if (!r) return 0;
     
@@ -154,7 +154,7 @@ static int test_renderer_write(void) {
 }
 
 // Test client creation
-static int test_client_create(void) {
+static int test_client_creates_with_default_state(void) {
     Client* c = client_create();
     if (!c) return 0;
     
@@ -184,7 +184,7 @@ static int test_client_create(void) {
 }
 
 // Test client colony selection
-static int test_client_colony_selection(void) {
+static int test_client_selects_next_alive_colony(void) {
     Client* c = client_create();
     if (!c) return 0;
     
@@ -226,7 +226,7 @@ static int test_client_colony_selection(void) {
 }
 
 // Test get selected colony
-static int test_client_get_selected(void) {
+static int test_client_get_selected_returns_correct_colony(void) {
     Client* c = client_create();
     if (!c) return 0;
     
@@ -271,7 +271,7 @@ static int test_client_get_selected(void) {
 }
 
 // Test input initialization status
-static int test_input_init_status(void) {
+static int test_input_is_not_initialized_by_default(void) {
     // Initially should not be initialized
     if (input_is_initialized()) return 0;
     
@@ -282,7 +282,7 @@ static int test_input_init_status(void) {
 }
 
 // Test color output produces valid escape sequences
-static int test_color_escape_sequences(void) {
+static int test_color_escape_sequences_are_valid(void) {
     char buf[64];
     
     // Test various colors
@@ -314,7 +314,7 @@ static int test_color_escape_sequences(void) {
 }
 
 // Test world update
-static int test_client_world_update(void) {
+static int test_client_world_state_can_be_updated(void) {
     Client* c = client_create();
     if (!c) return 0;
     
@@ -353,23 +353,23 @@ int main(void) {
     printf("=====================================\n\n");
     
     printf("Renderer Tests:\n");
-    TEST(renderer_create);
-    TEST(renderer_scroll);
-    TEST(renderer_center_on);
-    TEST(renderer_write);
+    TEST(renderer_creates_with_valid_buffer);
+    TEST(renderer_scroll_moves_view_position);
+    TEST(renderer_center_on_sets_view_position);
+    TEST(renderer_write_adds_text_to_buffer);
     
     printf("\nColor Tests:\n");
-    TEST(ansi_color_formatting);
-    TEST(color_escape_sequences);
+    TEST(ansi_format_produces_valid_escape_codes);
+    TEST(color_escape_sequences_are_valid);
     
     printf("\nClient Tests:\n");
-    TEST(client_create);
-    TEST(client_colony_selection);
-    TEST(client_get_selected);
-    TEST(client_world_update);
+    TEST(client_creates_with_default_state);
+    TEST(client_selects_next_alive_colony);
+    TEST(client_get_selected_returns_correct_colony);
+    TEST(client_world_state_can_be_updated);
     
     printf("\nInput Tests:\n");
-    TEST(input_init_status);
+    TEST(input_is_not_initialized_by_default);
     
     printf("\n=====================================\n");
     printf("Results: %d/%d tests passed\n", tests_passed, tests_run);
