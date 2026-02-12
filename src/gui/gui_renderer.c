@@ -563,7 +563,7 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
     // Draw petri dish background
     gui_renderer_draw_petri_dish(renderer, world->width, world->height);
     
-    // Draw grid if enabled
+    // Draw grid lines if enabled (low zoom)
     gui_renderer_draw_grid(renderer, world->width, world->height);
     
     // Get visible world bounds
@@ -573,18 +573,93 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
                                   &world_right, &world_bottom);
     
     // Clamp to world bounds
-    if (world_left < 0) world_left = 0;
-    if (world_top < 0) world_top = 0;
-    if (world_right > world->width) world_right = (float)world->width;
-    if (world_bottom > world->height) world_bottom = (float)world->height;
+    int start_x = (int)world_left;
+    int start_y = (int)world_top;
+    int end_x = (int)world_right + 1;
+    int end_y = (int)world_bottom + 1;
+    if (start_x < 0) start_x = 0;
+    if (start_y < 0) start_y = 0;
+    if (end_x > (int)world->width) end_x = (int)world->width;
+    if (end_y > (int)world->height) end_y = (int)world->height;
     
-    // For each visible world cell, determine which colony owns it and draw
-    // This ensures no overlap - each cell belongs to exactly one colony
     float cell_size_pixels = renderer->zoom;
     
-    // Skip if cells are too small to see
-    if (cell_size_pixels < 0.5f) {
-        // Fall back to simple colony rendering at very low zoom
+    // Use grid-based rendering if grid data is available
+    if (world->has_grid && world->grid && world->grid_size > 0) {
+        // Direct cell rendering from grid data
+        for (int wy = start_y; wy < end_y; wy++) {
+            for (int wx = start_x; wx < end_x; wx++) {
+                int idx = wy * (int)world->width + wx;
+                if (idx < 0 || idx >= (int)world->grid_size) continue;
+                
+                uint16_t colony_id = world->grid[idx];
+                if (colony_id == 0) continue;  // Empty cell
+                
+                // Find colony data
+                const ProtoColony* colony = NULL;
+                for (uint32_t i = 0; i < world->colony_count; i++) {
+                    if (world->colonies[i].id == colony_id && world->colonies[i].alive) {
+                        colony = &world->colonies[i];
+                        break;
+                    }
+                }
+                if (!colony) continue;
+                
+                // Check if this is a border cell (adjacent to empty or different colony)
+                bool is_border = false;
+                const int dx[] = {0, 1, 0, -1};
+                const int dy[] = {-1, 0, 1, 0};
+                for (int d = 0; d < 4; d++) {
+                    int nx = wx + dx[d];
+                    int ny = wy + dy[d];
+                    if (nx < 0 || nx >= (int)world->width || ny < 0 || ny >= (int)world->height) {
+                        is_border = true;
+                        break;
+                    }
+                    int nidx = ny * (int)world->width + nx;
+                    if (world->grid[nidx] != colony_id) {
+                        is_border = true;
+                        break;
+                    }
+                }
+                
+                // Get screen position
+                int sx, sy;
+                gui_renderer_world_to_screen(renderer, (float)wx, (float)wy, &sx, &sy);
+                
+                // Calculate cell size
+                int cell_w = (int)(cell_size_pixels + 0.5f);
+                int cell_h = (int)(cell_size_pixels + 0.5f);
+                if (cell_w < 1) cell_w = 1;
+                if (cell_h < 1) cell_h = 1;
+                
+                // Color selection
+                uint8_t col_r = colony->color_r;
+                uint8_t col_g = colony->color_g;
+                uint8_t col_b = colony->color_b;
+                
+                if (is_border) {
+                    // Darker border color
+                    col_r = (uint8_t)(col_r * 0.6f);
+                    col_g = (uint8_t)(col_g * 0.6f);
+                    col_b = (uint8_t)(col_b * 0.6f);
+                }
+                
+                // Highlight selected colony
+                if (colony->id == renderer->selected_colony) {
+                    float pulse = (sinf(renderer->time * 4.0f) + 1.0f) * 0.5f;
+                    col_r = (uint8_t)fminf(255, col_r + 40 * pulse);
+                    col_g = (uint8_t)fminf(255, col_g + 40 * pulse);
+                    col_b = (uint8_t)fminf(255, col_b + 40 * pulse);
+                }
+                
+                SDL_SetRenderDrawColor(r, col_r, col_g, col_b, 255);
+                SDL_Rect cell_rect = { sx, sy, cell_w, cell_h };
+                SDL_RenderFillRect(r, &cell_rect);
+            }
+        }
+    } else {
+        // Fallback: simple colony center rendering (no grid data)
         for (uint32_t i = 0; i < world->colony_count; i++) {
             const ProtoColony* colony = &world->colonies[i];
             if (!colony->alive) continue;
@@ -598,101 +673,6 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
             SDL_Rect rect = { cx - screen_radius, cy - screen_radius, 
                              screen_radius * 2, screen_radius * 2 };
             SDL_RenderFillRect(r, &rect);
-        }
-        return;
-    }
-    
-    // Draw cells - iterate through visible world coordinates
-    for (float wy = world_top; wy < world_bottom; wy += 1.0f) {
-        for (float wx = world_left; wx < world_right; wx += 1.0f) {
-            
-            // Find which colony owns this cell (if any)
-            // Check each colony and find the one whose shape contains this point
-            const ProtoColony* owner = NULL;
-            float owner_depth = 0.0f;  // How deep inside the colony (for border detection)
-            
-            for (uint32_t i = 0; i < world->colony_count; i++) {
-                const ProtoColony* colony = &world->colonies[i];
-                if (!colony->alive) continue;
-                
-                // Calculate distance and angle from colony center
-                float dx = wx - colony->x;
-                float dy = wy - colony->y;
-                float dist = sqrtf(dx * dx + dy * dy);
-                
-                // Quick reject if too far
-                if (dist > colony->radius * 1.6f) continue;
-                
-                // Calculate angle
-                float angle = atan2f(dy, dx);
-                if (angle < 0) angle += 2.0f * M_PI;
-                
-                // Get shape multiplier at this angle
-                float shape_mult = colony_shape_at_angle_evolved(colony->shape_seed, angle, 
-                                                          colony->wobble_phase + renderer->time * 0.5f,
-                                                          colony->shape_evolution);
-                float effective_radius = colony->radius * shape_mult;
-                
-                if (dist <= effective_radius) {
-                    // This cell is inside this colony
-                    float depth = effective_radius - dist;
-                    
-                    // If multiple colonies claim this cell, use the one we're deepest in
-                    if (owner == NULL || depth > owner_depth) {
-                        owner = colony;
-                        owner_depth = depth;
-                    }
-                }
-            }
-            
-            if (owner != NULL) {
-                // Determine if this is a border cell
-                bool is_border = owner_depth < 1.2f;
-                
-                // Get screen position
-                int sx, sy;
-                gui_renderer_world_to_screen(renderer, wx, wy, &sx, &sy);
-                
-                // Calculate cell size in pixels
-                int cell_w = (int)(cell_size_pixels + 0.5f);
-                int cell_h = (int)(cell_size_pixels + 0.5f);
-                if (cell_w < 1) cell_w = 1;
-                if (cell_h < 1) cell_h = 1;
-                
-                // Calculate color with gradient (lighter in center)
-                float dist_from_center = sqrtf((wx - owner->x) * (wx - owner->x) + 
-                                               (wy - owner->y) * (wy - owner->y));
-                float t = dist_from_center / (owner->radius + 1.0f);
-                if (t > 1.0f) t = 1.0f;
-                
-                uint8_t col_r = owner->color_r;
-                uint8_t col_g = owner->color_g;
-                uint8_t col_b = owner->color_b;
-                
-                if (is_border) {
-                    // Darker border
-                    col_r = (uint8_t)(col_r * 0.6f);
-                    col_g = (uint8_t)(col_g * 0.6f);
-                    col_b = (uint8_t)(col_b * 0.6f);
-                } else {
-                    // Gradient: lighter in center
-                    col_r = (uint8_t)(col_r * (1.0f - t * 0.25f));
-                    col_g = (uint8_t)(col_g * (1.0f - t * 0.25f));
-                    col_b = (uint8_t)(col_b * (1.0f - t * 0.25f));
-                }
-                
-                // Highlight selected colony
-                if (owner->id == renderer->selected_colony) {
-                    float pulse = (sinf(renderer->time * 4.0f) + 1.0f) * 0.5f;
-                    col_r = (uint8_t)fminf(255, col_r + 40 * pulse);
-                    col_g = (uint8_t)fminf(255, col_g + 40 * pulse);
-                    col_b = (uint8_t)fminf(255, col_b + 40 * pulse);
-                }
-                
-                SDL_SetRenderDrawColor(r, col_r, col_g, col_b, 255);
-                SDL_Rect cell_rect = { sx, sy, cell_w, cell_h };
-                SDL_RenderFillRect(r, &cell_rect);
-            }
         }
     }
 }

@@ -1093,125 +1093,74 @@ colony.parent_id  // 0 if original, else parent colony ID
 
 This enables future features like family trees and ancestry analysis.
 
-## Organic Border System
+## Colony Visualization System
 
-Colonies in Ferox have organic, blob-like borders instead of perfect circles. This is achieved through **procedural shape generation** using fractal noise seeded by a unique `shape_seed` per colony.
+Colonies in Ferox are rendered using **cell-based rendering**, where each cell in the simulation grid is drawn directly. This provides accurate territory visualization.
 
-### Procedural Shape Generation
+### Cell-Based Rendering (Current)
 
-Each colony has a `shape_seed` that deterministically generates its unique organic shape:
+The client receives the actual grid data and renders each cell:
 
 ```c
-typedef struct Colony {
+typedef struct Genome {
     // ... other fields ...
-    uint32_t shape_seed;   // Seed for procedural shape generation
-    float wobble_phase;    // Animation phase for border movement
-} Colony;
+    Color body_color;    // Interior cell color
+    Color border_color;  // Border cell color (adjacent to empty/enemy)
+} Genome;
 ```
 
-The shape is generated procedurally using multi-octave fractal noise:
+**Rendering process:**
+1. Server sends RLE-compressed grid with cell `colony_id` values
+2. Client decompresses grid to `uint32_t` array
+3. For each cell, look up colony color and draw as colored square
+4. Border cells (adjacent to different/empty cells) use `border_color`
 
 ```c
-#define SHAPE_SEED_OCTAVES 4  // Number of noise octaves for shape generation
-
-// Get colony shape radius multiplier at a given angle
-// Returns a value typically in range [0.4, 1.6] for organic blob shapes
-float colony_shape_at_angle(uint32_t shape_seed, float angle, float phase);
-```
-
-### How Procedural Shapes Work
-
-The `colony_shape_at_angle()` function computes a radius multiplier for any angle around the colony:
-
-1. **Fractal Noise Base**: Uses 4 octaves of 1D noise sampled around the circle
-2. **Harmonic Variation**: Adds 2-5 lobes based on the seed for variety
-3. **Elongation**: Applies elliptical stretching at a seed-determined angle
-4. **Animation**: Subtle pulsing effect driven by `wobble_phase`
-
-```c
-// Simplified pseudocode
-float colony_shape_at_angle(uint32_t shape_seed, float angle, float phase) {
-    float pos = angle / TWO_PI * 8.0f;  // 8 "units" around the circle
+// Determine if cell is a border cell
+bool is_border_cell(const uint32_t* grid, int w, int h, int x, int y) {
+    uint32_t my_id = grid[y * w + x];
+    if (my_id == 0) return false;
     
-    // Base shape from fractal noise (4 octaves)
-    float shape = fractal_noise1d(shape_seed, pos, 4);
-    
-    // Add harmonics (2-5 lobes based on seed)
-    uint32_t harmonic_count = 2 + (hash(shape_seed) % 4);
-    shape += sin(angle * harmonic_count + phase) * harmonic_strength;
-    
-    // Apply elongation based on seed
-    float elong_factor = compute_elongation(shape_seed, angle);
-    
-    // Add animation and scale to [0.4, 1.6] range
-    return 1.0f + shape * 0.35f * elong_factor + sin(phase * 2.0f) * 0.05f;
+    // Check 4-connected neighbors
+    int dx[] = {0, 1, 0, -1};
+    int dy[] = {-1, 0, 1, 0};
+    for (int i = 0; i < 4; i++) {
+        int nx = x + dx[i], ny = y + dy[i];
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h) return true;
+        if (grid[ny * w + nx] != my_id) return true;
+    }
+    return false;
 }
 ```
 
-### Benefits of Procedural Generation
+### Benefits of Cell-Based Rendering
 
 | Benefit | Description |
 |---------|-------------|
-| **Memory Efficient** | Only 4 bytes (seed) instead of 32+ bytes (wobble array) |
-| **Deterministic** | Same seed always produces same shape |
-| **Infinite Resolution** | Shape can be sampled at any angle |
-| **MPI/SHMEM Friendly** | Minimal data transfer for distributed systems |
-| **Reproducible** | Simulation state can be replicated across nodes |
+| **Accurate** | Shows actual cell ownership from simulation |
+| **Consistent** | All clients render identically |
+| **Simple** | No complex shape computation needed |
+| **GPU-Friendly** | Grid maps directly to texture/buffer |
 
-### Wobble Phase Animation
+### Deprecated: Procedural Shape System
 
-The `wobble_phase` field drives the pulsing animation effect:
+> **Note:** The following system has been deprecated in favor of cell-based rendering. This documentation is preserved for historical reference.
 
-```c
-// wobble_phase ranges from 0 to 2π (approximately 6.28318)
-colony->wobble_phase  // Animation phase for border movement
-```
-
-**Phase evolution per tick:**
-```c
-colony->wobble_phase += 0.03f;
-if (colony->wobble_phase > 6.28318f) colony->wobble_phase -= 6.28318f;
-```
-
-This creates a subtle pulsing effect as the borders shift slightly each tick.
-
-### Shape Seed Evolution
-
-Unlike the old wobble array that evolved continuously, the shape seed evolves through rare **bit-flip mutations**:
+The previous system used `shape_seed` and `wobble_phase` fields to procedurally generate blob shapes:
 
 ```c
-// Occasional mutation (small probability per tick)
-if (rand_float() < SHAPE_MUTATION_RATE) {
-    // Flip a random bit in the seed
-    int bit = rand_int(32);
-    colony->shape_seed ^= (1u << bit);
-}
+// DEPRECATED - no longer used
+uint32_t shape_seed;   // Was: Seed for procedural shape generation
+float wobble_phase;    // Was: Animation phase for border movement
+
+// DEPRECATED function
+float colony_shape_at_angle(uint32_t shape_seed, float angle, float phase);
 ```
 
-This results in:
-- Stable shapes most of the time
-- Sudden (but minor) shape changes when mutations occur
-- Gradual morphological drift over many generations
-
-### Shape Seed Inheritance
-
-When colonies divide, child colonies inherit the parent's seed with a mutation:
-
-```c
-// Initialize shape_seed for new colony (during division)
-new_colony.shape_seed = parent->shape_seed;
-
-// Apply immediate mutation for visual differentiation
-int bit = rand_int(32);
-new_colony.shape_seed ^= (1u << bit);
-
-new_colony.wobble_phase = rand_float() * 6.28318f;  // Random starting phase
-```
-
-This ensures:
-- Child colonies look similar to parents (related shapes)
-- Each child has a slightly different silhouette
-- Lineages can be visually tracked through shape similarity
+This approach generated approximate organic shapes using fractal noise, but did not accurately represent actual cell positions. The new cell-based rendering provides:
+- True territory boundaries
+- No approximation errors
+- Direct correspondence with simulation state
 
 ## API Reference
 

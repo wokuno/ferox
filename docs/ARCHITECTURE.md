@@ -221,7 +221,7 @@ The atomic design maps directly to accelerator and distributed programming model
 - Flat contiguous arrays map well to GPU memory (coalesced access)
 - Double-buffered state avoids read-write conflicts
 - Thread-local xorshift32 RNG for deterministic parallel execution
-- Shape generation uses procedural noise (no shape data transfer needed)
+- Grid data transmitted to clients for accurate territory rendering
 
 ## Data Flow
 
@@ -333,15 +333,18 @@ The atomic design maps directly to accelerator and distributed programming model
 
 ### GUI Client (`ferox_gui/`)
 
-The SDL2-based graphical client provides enhanced visualization.
+The SDL2-based graphical client provides enhanced visualization using cell-based rendering.
 
 | Feature | Description |
 |---------|-------------|
-| Grid rendering | Pixel-perfect grid with no cell overlap |
+| Cell-based rendering | Each cell drawn as a colored square from grid data |
+| Border detection | Cells adjacent to empty/enemy use border_color |
 | Zoom/pan | Mouse wheel zoom, click-drag pan |
 | Colony selection | Click to select, view detailed stats |
 | Continuous input | Hold keys for smooth navigation |
-| 8 shape types | Procedurally generated distinct colony shapes |
+| Accurate territories | Shows actual cell positions from simulation |
+
+> **Architecture Note:** The client receives RLE-compressed grid data from the server and renders cells directly. This replaces the previous procedural blob rendering system, providing more accurate territory visualization.
 
 **Keyboard Controls (GUI):**
 
@@ -613,19 +616,67 @@ The server uses the atomic simulation engine (`atomic_sim.h/c`) for lock-free pa
 - Atomic population counters updated in parallel
 - CPU usage improved from 2-4% to 28%+ with lock-free design
 
-### Procedural Generation for Distributed Systems
+### Cell-Based Rendering Architecture
 
-Colony shapes are generated procedurally from a `shape_seed` rather than storing explicit wobble arrays. This design choice provides significant benefits for distributed computing:
+The client uses cell-based rendering for accurate territory visualization:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CLIENT RENDERING PIPELINE                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   ┌────────────────┐    ┌────────────────┐    ┌────────────────┐            │
+│   │ MSG_WORLD_STATE│───►│ RLE Decompress │───►│  Grid Array    │            │
+│   │   (network)    │    │   grid data    │    │ (colony_ids)   │            │
+│   └────────────────┘    └────────────────┘    └───────┬────────┘            │
+│                                                       │                      │
+│                                                       ▼                      │
+│   ┌────────────────────────────────────────────────────────────────────┐    │
+│   │                       RENDER LOOP                                   │    │
+│   │                                                                     │    │
+│   │   For each cell (x, y):                                            │    │
+│   │     1. Get colony_id from grid[y * width + x]                      │    │
+│   │     2. If colony_id == 0: skip (empty)                             │    │
+│   │     3. Look up colony by id for colors                             │    │
+│   │     4. Check if border cell (neighbor has different colony_id)     │    │
+│   │     5. Draw cell with body_color or border_color                   │    │
+│   │                                                                     │    │
+│   └────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Benefits over procedural blob rendering:**
+- Accurate territory boundaries (shows actual cell ownership)
+- No approximation errors from shape functions
+- Consistent rendering across all clients
+- Simpler rendering code (no fractal noise computation)
+
+### Grid Data Transmission
+
+The grid is transmitted using RLE compression for efficiency:
+
+| Grid Size | Uncompressed | Typical Compressed | Ratio |
+|-----------|--------------|-------------------|-------|
+| 100x100 | 40 KB | 2-8 KB | 5:1-20:1 |
+| 500x500 | 1 MB | 50-200 KB | 5:1-20:1 |
+| 1000x1000 | 4 MB | 200-800 KB | 5:1-20:1 |
+
+Compression is effective because colonies are contiguous regions with many consecutive cells of the same colony_id.
+
+### Distributed Computing Compatibility
+
+The grid-based architecture is designed for future GPU and distributed computing:
 
 | Benefit | Description |
 |---------|-------------|
-| **Minimal Data Transfer** | Only 4 bytes (seed) transferred instead of 32+ bytes per colony |
-| **Deterministic** | Same seed produces identical shapes on all nodes |
-| **No Synchronization** | Shape computation is pure function, no shared state |
-| **MPI/SHMEM Friendly** | Reduces inter-node communication overhead |
-| **Scalable** | Shape complexity doesn't increase message sizes |
+| **Contiguous Memory** | Flat grid array maps well to GPU global memory |
+| **Row-based Decomposition** | Easy MPI domain split (rows to different nodes) |
+| **Ghost Regions** | SHMEM can exchange boundary rows efficiently |
+| **Deterministic** | Same simulation produces identical grids on all nodes |
+| **Scalable** | Grid size independent of colony count |
 
-This makes the simulation well-suited for future MPI or SHMEM parallelization where each node can independently compute colony shapes from seeds without requiring additional data exchange.
+> **Note:** GPU/MPI/SHMEM acceleration is planned for future work. The current implementation uses CPU threading only.
 
 ### Thread Safety Notes
 

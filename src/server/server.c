@@ -253,13 +253,28 @@ void server_stop(Server* server) {
 
 // Convert internal World/Colony to protocol ProtoWorld for serialization
 static void build_protocol_world(Server* server, ProtoWorld* proto_world) {
-    memset(proto_world, 0, sizeof(ProtoWorld));
+    proto_world_init(proto_world);
     
     proto_world->width = (uint32_t)server->world->width;
     proto_world->height = (uint32_t)server->world->height;
     proto_world->tick = (uint32_t)server->world->tick;
     proto_world->paused = server->paused;
     proto_world->speed_multiplier = server->speed_multiplier;
+    
+    // Build grid data from world cells
+    uint32_t grid_size = proto_world->width * proto_world->height;
+    if (grid_size > 0 && grid_size <= MAX_GRID_SIZE) {
+        proto_world_alloc_grid(proto_world, proto_world->width, proto_world->height);
+        if (proto_world->grid) {
+            for (int y = 0; y < server->world->height; y++) {
+                for (int x = 0; x < server->world->width; x++) {
+                    Cell* cell = world_get_cell(server->world, x, y);
+                    int idx = y * server->world->width + x;
+                    proto_world->grid[idx] = cell ? (uint16_t)cell->colony_id : 0;
+                }
+            }
+        }
+    }
     
     // Count active colonies
     uint32_t count = 0;
@@ -300,7 +315,7 @@ static void build_protocol_world(Server* server, ProtoWorld* proto_world) {
             proto_colony->color_b = server->world->colonies[i].color.b;
             proto_colony->alive = server->world->colonies[i].active;
             
-            // Copy shape data for procedural organic borders
+            // Copy shape data (kept for compatibility, may be removed later)
             proto_colony->shape_seed = server->world->colonies[i].shape_seed;
             proto_colony->wobble_phase = server->world->colonies[i].wobble_phase;
             proto_colony->shape_evolution = server->world->colonies[i].shape_evolution;
@@ -322,6 +337,7 @@ void server_broadcast_world_state(Server* server) {
     uint8_t* buffer = NULL;
     size_t len = 0;
     if (protocol_serialize_world_state(&proto_world, &buffer, &len) < 0) {
+        proto_world_free(&proto_world);
         return;
     }
     
@@ -362,6 +378,7 @@ void server_broadcast_world_state(Server* server) {
     pthread_mutex_unlock(&server->clients_mutex);
     
     free(buffer);
+    proto_world_free(&proto_world);
 }
 
 void server_send_colony_info(Server* server, ClientSession* client, uint32_t colony_id) {

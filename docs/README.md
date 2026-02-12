@@ -31,7 +31,7 @@
 - **Social Behavior (Chemotaxis)** - Colonies detect nearby neighbors and exhibit attraction or repulsion based on social_factor genes
 - **Family-Based Recombination** - Only related colonies (parent-child or siblings) can merge, creating stable ecosystems
 - **Cascade-Free Growth** - Newly claimed cells wait one tick before spreading, ensuring smooth realistic expansion
-- **Organic Colony Borders** - 8 distinct procedural shape types with animated pulsing borders
+- **Organic Colony Borders** - Cell-based rendering shows actual territory with distinct border colors
 - **Territorial Competition** - Colonies compete for space based on aggression vs. resilience mechanics
 - **Colony Lifecycle** - Colonies track their peak population history and die when population reaches 0
 - **Colony Division** - When colonies split geographically, they divide into separate species with mutated genomes

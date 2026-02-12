@@ -32,7 +32,7 @@ GuiClient* gui_client_create(void) {
     client->selected_index = 0;
     
     // Initialize local world
-    memset(&client->local_world, 0, sizeof(ProtoWorld));
+    proto_world_init(&client->local_world);
     client->local_world.speed_multiplier = 1.0f;
     client->local_world.width = 100;
     client->local_world.height = 100;
@@ -50,6 +50,8 @@ void gui_client_destroy(GuiClient* client) {
     if (client->renderer) {
         gui_renderer_destroy(client->renderer);
     }
+    
+    proto_world_free(&client->local_world);
     
     free(client);
 }
@@ -118,6 +120,9 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
 
 void gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len) {
     if (!client || !data) return;
+    
+    // Free old grid before deserializing new one
+    proto_world_free(&client->local_world);
     
     if (protocol_deserialize_world_state(data, len, &client->local_world) < 0) {
         return;

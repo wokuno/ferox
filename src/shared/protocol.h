@@ -66,6 +66,14 @@ typedef struct ProtoColony {
 //                        shape_seed(4) + wobble_phase(4) + shape_evolution(4) = 76 bytes
 #define COLONY_SERIALIZED_SIZE 76
 
+// Grid cell for transmission (just colony ownership)
+typedef struct ProtoCell {
+    uint16_t colony_id;  // 0 = empty
+} ProtoCell;
+
+// Maximum grid size
+#define MAX_GRID_SIZE (800 * 400)  // 320,000 cells max
+
 // World data structure for serialization (prefixed to avoid conflict with types.h)
 typedef struct ProtoWorld {
     uint32_t width;
@@ -75,6 +83,11 @@ typedef struct ProtoWorld {
     ProtoColony colonies[MAX_COLONIES];
     bool paused;
     float speed_multiplier;
+    
+    // Grid data - actual cell ownership
+    uint16_t* grid;           // Dynamically allocated [width * height]
+    uint32_t grid_size;       // width * height
+    bool has_grid;            // Whether grid data is included
 } ProtoWorld;
 
 // Command data structures
@@ -99,6 +112,15 @@ int protocol_deserialize_colony(const uint8_t* buffer, ProtoColony* colony);
 
 int protocol_serialize_command(CommandType cmd, const void* data, uint8_t* buffer);
 int protocol_deserialize_command(const uint8_t* buffer, CommandType* cmd, void* data);
+
+// Grid serialization with RLE compression
+int protocol_serialize_grid_rle(const uint16_t* grid, uint32_t size, uint8_t** buffer, size_t* len);
+int protocol_deserialize_grid_rle(const uint8_t* buffer, size_t len, uint16_t* grid, uint32_t max_size);
+
+// ProtoWorld grid memory management
+void proto_world_init(ProtoWorld* world);
+void proto_world_free(ProtoWorld* world);
+void proto_world_alloc_grid(ProtoWorld* world, uint32_t width, uint32_t height);
 
 // Helper to send/receive complete messages
 int protocol_send_message(int socket, MessageType type, const uint8_t* payload, size_t len);

@@ -599,8 +599,8 @@ Lower thresholds create more species diversity; higher thresholds lead to more m
 │     │   GROWTH    │ ◄── simulation_spread()                       │
 │     │  (active)   │                                               │
 │     │             │     Tracks max_cell_count (peak population)   │
-│     │ Spreading   │     Animates wobble_phase for organic look    │
-│     │ Competing   │     Occasionally mutates shape_seed           │
+│     │ Spreading   │     Grid data sent to clients for rendering   │
+│     │ Competing   │                                               │
 │     │ Mutating    │                                               │
 │     └──────┬──────┘                                               │
 │            │                                                      │
@@ -673,24 +673,18 @@ This enables:
 - Tracking colony prosperity over time
 - Identifying dominant colonies
 
-### Shape Animation and Evolution
+### Colony Stats Update
 
-Each tick, active colonies update their organic border animation and occasionally evolve their shape:
+Each tick, active colonies update their statistics:
 
 ```c
-// Animate wobble phase (pulsing effect)
-colony->wobble_phase += 0.03f;
-if (colony->wobble_phase > 6.28318f) colony->wobble_phase -= 6.28318f;
-
-// Occasionally mutate shape_seed (rare bit-flip mutation)
-// This causes gradual shape evolution over time
-if (rand_float() < SHAPE_MUTATION_RATE) {
-    int bit = rand_int(32);
-    colony->shape_seed ^= (1u << bit);
+// Update population tracking
+if (colony->cell_count > colony->max_cell_count) {
+    colony->max_cell_count = colony->cell_count;
 }
 ```
 
-Colony shapes are generated procedurally from `shape_seed` using fractal noise. See [GENETICS.md](GENETICS.md) for detailed shape generation documentation.
+The grid data (cell ownership) is sent to clients via RLE-compressed grid transmission, allowing accurate cell-based rendering of territories. See [PROTOCOL.md](PROTOCOL.md) for grid serialization details.
 
 ## Colony States
 

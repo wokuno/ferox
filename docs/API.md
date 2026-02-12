@@ -80,11 +80,11 @@ typedef struct Colony {
     uint32_t parent_id;
     bool active;
     Color color;
-    uint32_t shape_seed;     // Seed for procedural shape generation
-    float wobble_phase;      // Animation phase for border movement
 } Colony;
 typedef struct World { ... } World;
 ```
+
+> **Note:** The `shape_seed` and `wobble_phase` fields have been removed. Colony visualization now uses cell-based rendering from grid data.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed structure documentation.
 

@@ -127,6 +127,11 @@ Complete world state broadcast. Sent after each simulation tick.
 |                     (colony_count entries)                    |
 |                                                               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+|                     Grid Data (RLE Compressed)                |
+|                     (width * height cells)                    |
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 
 | Field | Size | Description |
@@ -138,6 +143,7 @@ Complete world state broadcast. Sent after each simulation tick.
 | paused | 1 byte | 0 = running, 1 = paused |
 | speed_multiplier | 4 bytes | Speed factor (IEEE 754 float) |
 | colonies | variable | Array of colony structures |
+| grid_data | variable | RLE-compressed grid (see Grid Serialization) |
 
 **Colony Data Structure (per colony):**
 
@@ -165,9 +171,7 @@ Complete world state broadcast. Sent after each simulation tick.
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |  Red  | Green | Blue  | Alive |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         Shape Seed                            |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      Wobble Phase (float)                     |
+| Border Red | Border Green | Border Blue | (padding) |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 
@@ -181,19 +185,22 @@ Complete world state broadcast. Sent after each simulation tick.
 | population | 4 bytes | Current cell count |
 | max_population | 4 bytes | Historical peak population |
 | growth_rate | 4 bytes | Growth rate (float) |
-| color_r | 1 byte | Red component (0-255) |
-| color_g | 1 byte | Green component (0-255) |
-| color_b | 1 byte | Blue component (0-255) |
+| color_r | 1 byte | Body color red component (0-255) |
+| color_g | 1 byte | Body color green component (0-255) |
+| color_b | 1 byte | Body color blue component (0-255) |
 | alive | 1 byte | 0 = inactive/dead, 1 = active |
-| shape_seed | 4 bytes | Seed for procedural shape generation |
-| wobble_phase | 4 bytes | Animation phase for border pulsing (float) |
+| border_r | 1 byte | Border color red component (0-255) |
+| border_g | 1 byte | Border color green component (0-255) |
+| border_b | 1 byte | Border color blue component (0-255) |
 | detection_range | 4 bytes | Social detection range (float) |
 | max_tracked | 1 byte | Max neighbor colonies to track |
 | social_factor | 4 bytes | Attraction/repulsion factor (float) |
 | merge_affinity | 4 bytes | Merge compatibility bonus (float) |
-| padding | 3 bytes | Alignment padding |
+| padding | 2 bytes | Alignment padding |
 
-**Colony serialized size: 104 bytes**
+**Colony serialized size: 96 bytes**
+
+> **Note:** The `shape_seed` and `wobble_phase` fields have been removed. Colony shapes are now rendered directly from actual cell positions transmitted via the grid data, providing much more accurate territory visualization.
 
 ### C Structure (ProtoColony)
 
@@ -206,10 +213,9 @@ typedef struct ProtoColony {
     uint32_t population;
     uint32_t max_population;         // Historical max population
     float growth_rate;
-    uint8_t color_r, color_g, color_b;
+    uint8_t color_r, color_g, color_b;  // Body color
     bool alive;
-    uint32_t shape_seed;             // Seed for procedural shape generation
-    float wobble_phase;              // Animation phase for border movement
+    uint8_t border_r, border_g, border_b;  // Border color
     
     // Social behavior fields
     float detection_range;           // How far to detect neighbors (0.1-0.5)
@@ -219,15 +225,36 @@ typedef struct ProtoColony {
 } ProtoColony;
 ```
 
-### Procedural Shape Generation
-
-Colony shapes are generated procedurally from `shape_seed` using fractal noise, rather than storing explicit wobble points. The client computes the shape at any angle using:
+### C Structure (ProtoWorld)
 
 ```c
-float colony_shape_at_angle(uint32_t shape_seed, float angle, float phase);
+typedef struct ProtoWorld {
+    int width;
+    int height;
+    uint64_t tick;
+    bool paused;
+    float speed_multiplier;
+    ProtoColony* colonies;
+    size_t colony_count;
+    
+    // Grid data for cell-based rendering
+    uint32_t* grid;                  // colony_id for each cell (width * height)
+    size_t grid_size;                // Size in bytes of uncompressed grid
+} ProtoWorld;
 ```
 
-This approach is more memory efficient (4 bytes vs 32 bytes) and produces shapes with infinite angular resolution. See [GENETICS.md](GENETICS.md) for details on the procedural generation algorithm.
+### Memory Management Functions
+
+```c
+// Initialize ProtoWorld with default values
+void proto_world_init(ProtoWorld* world);
+
+// Free allocated memory in ProtoWorld
+void proto_world_free(ProtoWorld* world);
+
+// Allocate grid array for given dimensions
+int proto_world_alloc_grid(ProtoWorld* world, int width, int height);
+```
 
 ---
 
@@ -313,6 +340,107 @@ Error response from server.
 
 **Direction:** Server → Client  
 **Payload:** Error code (4 bytes) + error message (variable, null-terminated)
+
+## Grid Serialization
+
+The world grid is transmitted using Run-Length Encoding (RLE) compression to efficiently send cell ownership data.
+
+### Grid Data Format
+
+The grid contains `colony_id` values for each cell, where 0 = empty and 1+ = owned by that colony.
+
+**Uncompressed format:** `width * height * sizeof(uint32_t)` bytes
+
+**RLE Compressed format:** Series of (count, colony_id) pairs
+
+```
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                      Uncompressed Size                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                      Compressed Size                          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+|                   RLE Data (variable length)                  |
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+### RLE Encoding
+
+Each run is encoded as:
+- **Run length** (2 bytes, uint16_t): Number of consecutive cells with same colony_id (1-65535)
+- **Colony ID** (4 bytes, uint32_t): The colony_id value for this run
+
+```c
+// RLE run structure
+typedef struct {
+    uint16_t count;     // Number of cells in this run
+    uint32_t colony_id; // Colony ID (0 = empty)
+} RLERun;
+```
+
+### Compression Example
+
+For a 10x10 grid with colonies A (id=1) and B (id=2):
+```
+Original:  0 0 0 1 1 1 1 0 0 2 2 2 0 0 0 0 ...
+Encoded:   (3, 0) (4, 1) (2, 0) (3, 2) (4, 0) ...
+```
+
+Typical compression ratios:
+- Sparse grids (few colonies): 10:1 to 50:1
+- Dense grids (many colonies): 2:1 to 5:1
+
+### Serialization Functions
+
+```c
+// Serialize grid to RLE-compressed buffer
+// Returns compressed size, or -1 on error
+int protocol_serialize_grid_rle(const uint32_t* grid, int width, int height,
+                                uint8_t** buffer, size_t* len);
+
+// Deserialize RLE-compressed buffer to grid
+// Grid must be pre-allocated to width * height
+int protocol_deserialize_grid_rle(const uint8_t* buffer, size_t len,
+                                  uint32_t* grid, int width, int height);
+```
+
+### Client-Side Rendering
+
+With the grid data, clients render colonies by:
+1. Drawing each cell as a colored square based on its `colony_id`
+2. Using `body_color` for interior cells
+3. Using `border_color` for cells adjacent to empty/enemy cells
+4. Border detection: cell is border if any neighbor has different `colony_id`
+
+```c
+// Determine if cell at (x, y) is a border cell
+bool is_border_cell(const uint32_t* grid, int width, int height, int x, int y) {
+    uint32_t my_id = grid[y * width + x];
+    if (my_id == 0) return false;  // Empty cells aren't borders
+    
+    // Check 4 cardinal neighbors
+    int dx[] = {0, 1, 0, -1};
+    int dy[] = {-1, 0, 1, 0};
+    for (int i = 0; i < 4; i++) {
+        int nx = x + dx[i];
+        int ny = y + dy[i];
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+            return true;  // Edge of world = border
+        }
+        if (grid[ny * width + nx] != my_id) {
+            return true;  // Different colony = border
+        }
+    }
+    return false;
+}
+```
+
+This cell-based rendering is more accurate than the previous procedural blob shapes, showing actual territory boundaries as they exist in the simulation.
+
+---
 
 ## Serialization Details
 
@@ -488,6 +616,31 @@ int protocol_send_message(int socket, MessageType type,
                           const uint8_t* payload, size_t len);
 int protocol_recv_message(int socket, MessageHeader* header, 
                           uint8_t** payload);
+```
+
+### Grid Compression
+
+```c
+// Compress grid data using RLE
+int protocol_serialize_grid_rle(const uint32_t* grid, int width, int height,
+                                uint8_t** buffer, size_t* len);
+
+// Decompress RLE grid data
+int protocol_deserialize_grid_rle(const uint8_t* buffer, size_t len,
+                                  uint32_t* grid, int width, int height);
+```
+
+### ProtoWorld Management
+
+```c
+// Initialize ProtoWorld structure
+void proto_world_init(ProtoWorld* world);
+
+// Free ProtoWorld allocated memory
+void proto_world_free(ProtoWorld* world);
+
+// Allocate grid array in ProtoWorld
+int proto_world_alloc_grid(ProtoWorld* world, int width, int height);
 ```
 
 ## Wire Examples

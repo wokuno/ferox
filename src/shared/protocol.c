@@ -169,13 +169,27 @@ int protocol_deserialize_colony(const uint8_t* buffer, ProtoColony* colony) {
 int protocol_serialize_world_state(const ProtoWorld* world, uint8_t** buffer, size_t* len) {
     if (!world || !buffer || !len) return -1;
     
+    // First, serialize grid if present
+    uint8_t* grid_buffer = NULL;
+    size_t grid_len = 0;
+    if (world->has_grid && world->grid && world->grid_size > 0) {
+        if (protocol_serialize_grid_rle(world->grid, world->grid_size, &grid_buffer, &grid_len) < 0) {
+            grid_buffer = NULL;
+            grid_len = 0;
+        }
+    }
+    
     // Calculate required size
-    size_t header_size = 4 + 4 + 4 + 4 + 1 + 4;  // width, height, tick, colony_count, paused, speed
+    // Header: width(4) + height(4) + tick(4) + colony_count(4) + paused(1) + speed(4) + has_grid(1) + grid_len(4)
+    size_t header_size = 4 + 4 + 4 + 4 + 1 + 4 + 1 + 4;
     size_t colonies_size = world->colony_count * COLONY_SERIALIZED_SIZE;
-    size_t total_size = header_size + colonies_size;
+    size_t total_size = header_size + colonies_size + grid_len;
     
     *buffer = (uint8_t*)malloc(total_size);
-    if (!*buffer) return -1;
+    if (!*buffer) {
+        free(grid_buffer);
+        return -1;
+    }
     
     int offset = 0;
     
@@ -196,14 +210,27 @@ int protocol_serialize_world_state(const ProtoWorld* world, uint8_t** buffer, si
     write_float(*buffer + offset, world->speed_multiplier);
     offset += 4;
     
+    // Grid metadata
+    (*buffer)[offset++] = (grid_buffer != NULL) ? 1 : 0;
+    write_u32(*buffer + offset, (uint32_t)grid_len);
+    offset += 4;
+    
     for (uint32_t i = 0; i < world->colony_count && i < MAX_COLONIES; i++) {
         int colony_size = protocol_serialize_colony(&world->colonies[i], *buffer + offset);
         if (colony_size < 0) {
             free(*buffer);
             *buffer = NULL;
+            free(grid_buffer);
             return -1;
         }
         offset += colony_size;
+    }
+    
+    // Append grid data
+    if (grid_buffer && grid_len > 0) {
+        memcpy(*buffer + offset, grid_buffer, grid_len);
+        offset += grid_len;
+        free(grid_buffer);
     }
     
     *len = offset;
@@ -211,7 +238,7 @@ int protocol_serialize_world_state(const ProtoWorld* world, uint8_t** buffer, si
 }
 
 int protocol_deserialize_world_state(const uint8_t* buffer, size_t len, ProtoWorld* world) {
-    if (!buffer || !world || len < 21) return -1;
+    if (!buffer || !world || len < 26) return -1;  // Minimum header size now 26 bytes
     
     int offset = 0;
     
@@ -236,6 +263,11 @@ int protocol_deserialize_world_state(const uint8_t* buffer, size_t len, ProtoWor
     world->speed_multiplier = read_float(buffer + offset);
     offset += 4;
     
+    // Grid metadata
+    bool has_grid = buffer[offset++] != 0;
+    uint32_t grid_len = read_u32(buffer + offset);
+    offset += 4;
+    
     for (uint32_t i = 0; i < world->colony_count; i++) {
         if ((size_t)offset + COLONY_SERIALIZED_SIZE > len) {
             return -1;
@@ -245,6 +277,25 @@ int protocol_deserialize_world_state(const uint8_t* buffer, size_t len, ProtoWor
             return -1;
         }
         offset += colony_size;
+    }
+    
+    // Deserialize grid if present
+    if (has_grid && grid_len > 0 && (size_t)offset + grid_len <= len) {
+        uint32_t grid_size = world->width * world->height;
+        if (grid_size > 0 && grid_size <= MAX_GRID_SIZE) {
+            proto_world_alloc_grid(world, world->width, world->height);
+            if (world->grid) {
+                if (protocol_deserialize_grid_rle(buffer + offset, grid_len, world->grid, grid_size) < 0) {
+                    // Grid decompression failed, but continue without grid
+                    world->has_grid = false;
+                }
+            }
+        }
+        offset += grid_len;
+    } else {
+        world->has_grid = false;
+        world->grid = NULL;
+        world->grid_size = 0;
     }
     
     return 0;
@@ -418,6 +469,120 @@ int protocol_recv_message(int socket, MessageHeader* header, uint8_t** payload) 
         }
     } else if (payload) {
         *payload = NULL;
+    }
+    
+    return 0;
+}
+
+// ProtoWorld grid memory management
+void proto_world_init(ProtoWorld* world) {
+    if (!world) return;
+    memset(world, 0, sizeof(ProtoWorld));
+    world->grid = NULL;
+    world->grid_size = 0;
+    world->has_grid = false;
+}
+
+void proto_world_free(ProtoWorld* world) {
+    if (!world) return;
+    if (world->grid) {
+        free(world->grid);
+        world->grid = NULL;
+    }
+    world->grid_size = 0;
+    world->has_grid = false;
+}
+
+void proto_world_alloc_grid(ProtoWorld* world, uint32_t width, uint32_t height) {
+    if (!world) return;
+    
+    uint32_t size = width * height;
+    if (size > MAX_GRID_SIZE) return;
+    
+    if (world->grid) free(world->grid);
+    
+    world->grid = (uint16_t*)malloc(size * sizeof(uint16_t));
+    if (world->grid) {
+        memset(world->grid, 0, size * sizeof(uint16_t));
+        world->grid_size = size;
+        world->has_grid = true;
+    }
+}
+
+// RLE compression for grid data
+// Format: [count:uint16][value:uint16] pairs
+// If count == 0, it's a special marker for end
+int protocol_serialize_grid_rle(const uint16_t* grid, uint32_t size, uint8_t** buffer, size_t* len) {
+    if (!grid || !buffer || !len || size == 0) return -1;
+    
+    // Worst case: no compression, each cell is unique
+    // Each run is 4 bytes (count + value), plus 4 bytes header for total size
+    size_t max_size = 4 + (size * 4);
+    *buffer = (uint8_t*)malloc(max_size);
+    if (!*buffer) return -1;
+    
+    int offset = 0;
+    
+    // Write uncompressed size first
+    write_u32(*buffer + offset, size);
+    offset += 4;
+    
+    uint32_t i = 0;
+    while (i < size) {
+        uint16_t value = grid[i];
+        uint16_t count = 1;
+        
+        // Count consecutive cells with same value (max 65535)
+        while (i + count < size && grid[i + count] == value && count < 65535) {
+            count++;
+        }
+        
+        write_u16(*buffer + offset, count);
+        offset += 2;
+        write_u16(*buffer + offset, value);
+        offset += 2;
+        
+        i += count;
+    }
+    
+    *len = offset;
+    
+    // Shrink buffer to actual size
+    *buffer = (uint8_t*)realloc(*buffer, *len);
+    
+    return 0;
+}
+
+int protocol_deserialize_grid_rle(const uint8_t* buffer, size_t len, uint16_t* grid, uint32_t max_size) {
+    if (!buffer || !grid || len < 4) return -1;
+    
+    int offset = 0;
+    
+    // Read uncompressed size
+    uint32_t total_size = read_u32(buffer + offset);
+    offset += 4;
+    
+    if (total_size > max_size) return -1;
+    
+    uint32_t cells_written = 0;
+    
+    while (offset + 4 <= (int)len && cells_written < total_size) {
+        uint16_t count = read_u16(buffer + offset);
+        offset += 2;
+        uint16_t value = read_u16(buffer + offset);
+        offset += 2;
+        
+        if (count == 0) break;  // End marker
+        
+        // Write 'count' copies of 'value'
+        for (uint16_t j = 0; j < count && cells_written < total_size; j++) {
+            grid[cells_written++] = value;
+        }
+    }
+    
+    // Fill remaining with 0 if needed
+    while (cells_written < max_size) {
+        grid[cells_written++] = 0;
     }
     
     return 0;

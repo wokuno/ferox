@@ -228,6 +228,34 @@ ferox/
 
 ## Implementation Log
 
+### Session 7 (Cell-Based Rendering Architecture)
+- **Replaced procedural blob rendering with cell-based rendering**
+  - Old: Colonies rendered as procedural shapes using `shape_seed`, `wobble_phase`, `colony_shape_at_angle()`
+  - New: Colonies rendered by drawing actual cell positions from grid data
+  - Much more accurate visualization of territory boundaries
+- **Protocol changes:**
+  - Added RLE-compressed grid data to MSG_WORLD_STATE
+  - Added `protocol_serialize_grid_rle()`, `protocol_deserialize_grid_rle()` functions
+  - Added `proto_world_init()`, `proto_world_free()`, `proto_world_alloc_grid()` functions
+  - ProtoWorld now includes `grid` field with actual cell colony_ids
+  - Removed `shape_seed` and `wobble_phase` from ProtoColony (deprecated)
+  - Added `border_color` fields to ProtoColony for border cell rendering
+- **Rendering changes:**
+  - GUI renderer draws cells directly instead of procedural shapes
+  - Border cells (adjacent to empty/enemy) use border_color
+  - Interior cells use body_color
+- **Future-ready architecture:**
+  - Grid structure is GPU-friendly (contiguous memory)
+  - Row-based domain decomposition ready for MPI
+  - SHMEM ghost regions planned for boundary exchange
+  - (GPU/MPI not yet implemented - CPU threading only for now)
+- Updated documentation:
+  - ARCHITECTURE.md: Cell-based rendering pipeline, grid transmission
+  - PROTOCOL.md: Grid serialization format, RLE compression
+  - GENETICS.md: Colony visualization system
+  - SIMULATION.md: Removed shape animation references
+  - README.md: Updated feature description
+
 ### Session 6 (Visual Stability Fix - 2026-02-12)
 - Fixed demo mode shape mutation causing visual jumps
   - Removed random shape_seed mutation (1 in 200 chance per tick)
