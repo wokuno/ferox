@@ -26,11 +26,11 @@ Genome genome_create_random(void) {
     for (int i = 0; i < 8; i++) {
         g.spread_weights[i] = 0.3f + rand_float() * 0.7f;
     }
-    g.spread_rate = 0.15f + rand_float() * 0.25f;  // 0.15-0.4: much slower spread
+    g.spread_rate = 0.3f + rand_float() * 0.5f;  // 0.3-0.8: faster spread for more activity
     g.mutation_rate = rand_float() * 0.1f;  // 0-0.1
     g.aggression = 0.3f + rand_float() * 0.7f;  // 0.3-1.0: varied aggression
     g.resilience = 0.2f + rand_float() * 0.6f;  // 0.2-0.8
-    g.metabolism = 0.3f + rand_float() * 0.5f;  // 0.3-0.8: lower metabolism = slower growth
+    g.metabolism = 0.4f + rand_float() * 0.5f;  // 0.4-0.9: higher metabolism = faster growth
     
     // === Social Behavior ===
     g.detection_range = 0.1f + rand_float() * 0.4f;  // 0.1-0.5

@@ -286,9 +286,9 @@ void simulation_spread(World* world) {
                     // Success history affects spread direction
                     float history_bonus = 1.0f + colony->success_history[d % 8] * 0.2f;
                     
-                    // Slightly slower spread to allow more interaction time
+                    // More active spread to keep colonies dynamic
                     float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * 
-                                        env_modifier * dir_weight * strategic_modifier * history_bonus * 0.7f;
+                                        env_modifier * dir_weight * strategic_modifier * history_bonus;
                     
                     if (rand_float() < spread_prob) {
                         if (pending_count >= pending_capacity) {
@@ -592,8 +592,8 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                         float attack = colony->genome.aggression * (1.0f + colony->genome.toxin_production * 0.5f);
                         float defense = enemy->genome.resilience * (0.5f + enemy->genome.defense_priority * 0.5f);
                         float combat_chance = attack / (attack + defense + 0.1f);
-                        // Higher overall combat rate (was * 0.3, now * 0.6)
-                        if (rand_float() < combat_chance * 0.6f) {
+                        // High combat rate for active borders
+                        if (rand_float() < combat_chance * 0.85f) {
                             pending_buffer_add(pending, nx, ny, cell->colony_id);
                         }
                     }
@@ -1013,8 +1013,8 @@ void simulation_resolve_combat(World* world) {
                 // === COMBAT RESOLUTION ===
                 float attack_chance = attack_str / (attack_str + defend_str + 0.1f);
                 
-                // Higher base combat rate for dynamic battles
-                if (rand_float() < attack_chance * 0.7f) {
+                // High combat rate for dynamic, active borders
+                if (rand_float() < attack_chance * 0.9f) {
                     // Attacker wins - record result
                     if (result_count >= result_capacity) {
                         result_capacity *= 2;
@@ -1118,9 +1118,9 @@ void simulation_tick(World* world) {
         // NATURAL DECAY: All cells have a small baseline death rate
         // This ensures colonies shrink over time if they're not actively growing
         // Border cells die faster (exposed), interior cells are more stable
-        float base_death_rate = 0.003f;  // ~0.3% per tick baseline
+        float base_death_rate = 0.005f;  // ~0.5% per tick baseline (increased for more churn)
         if (cell->is_border) {
-            base_death_rate = 0.008f;  // Border cells more vulnerable
+            base_death_rate = 0.012f;  // Border cells more vulnerable
         }
         // Biofilm protects against natural decay
         base_death_rate *= (1.0f - colony->biofilm_strength * 0.5f);
@@ -1149,6 +1149,25 @@ void simulation_tick(World* world) {
     
     // Update environmental layers
     simulation_update_nutrients(world);
+    
+    // ENVIRONMENTAL DISTURBANCES: Periodic events to prevent stagnation
+    // Every ~100 ticks, create a nutrient-depleted zone
+    if (world->tick % 100 == 0 && rand_float() < 0.5f) {
+        int cx = rand() % world->width;
+        int cy = rand() % world->height;
+        int radius = 5 + rand() % 15;  // Radius 5-20
+        for (int y = cy - radius; y <= cy + radius; y++) {
+            for (int x = cx - radius; x <= cx + radius; x++) {
+                if (x >= 0 && x < world->width && y >= 0 && y < world->height) {
+                    int dist2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+                    if (dist2 <= radius * radius) {
+                        int idx = y * world->width + x;
+                        world->nutrients[idx] *= 0.3f;  // Deplete nutrients in zone
+                    }
+                }
+            }
+        }
+    }
     
     // Run simulation phases
     simulation_spread(world);
