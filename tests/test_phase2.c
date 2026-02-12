@@ -58,12 +58,23 @@ static Genome create_test_genome(float spread, float mutation, float aggr, float
     g.toxin_resistance = spread;
     g.signal_emission = spread;
     g.signal_sensitivity = spread;
+    g.alarm_threshold = spread;
     g.gene_transfer_rate = mutation * 0.1f;  // Scale to proper 0-0.1 range
+    // Competitive strategy
+    g.resource_consumption = spread;
+    g.defense_priority = spread;
     // Survival strategies
     g.dormancy_threshold = spread;
     g.biofilm_investment = spread;
     g.motility = spread;
     g.efficiency = spread;
+    // Neural network
+    for (int i = 0; i < 8; i++) g.hidden_weights[i] = spread * 2.0f - 1.0f;  // Scale to -1 to 1 range
+    g.learning_rate = spread;
+    g.memory_factor = spread;
+    // Environmental sensing (missing fields)
+    g.toxin_sensitivity = spread;
+    g.quorum_threshold = spread;
     return g;
 }
 

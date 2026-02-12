@@ -5,14 +5,15 @@
 
 #define MUTATION_DELTA 0.1f
 #define NUM_GENOME_FIELDS 26  // All evolvable traits (added neural network + env sensing fields)
-// Most fields: 0-1 range * 1.0 weight = 1.0 contribution each (19 fields = 19.0)
-// social_factor/edge_affinity: -1 to 1 range * 0.5 weight = 1.0 each (2 fields = 2.0)
-// mutation_rate: 0-0.1 range * 5.0 weight = 0.5 contribution
-// gene_transfer_rate: 0-0.1 range * 10.0 weight = 1.0 contribution
-// max_tracked: 1-4 range / 4.0 = 0.75 contribution
-// Neural: hidden_weights avg diff * 0.5 = ~0.5, learning_rate + memory_factor = 2.0
-// Total: 19.0 + 2.0 + 0.5 + 1.0 + 0.75 + 2.5 = 25.75
-#define GENOME_DISTANCE_WEIGHT_SUM 25.75f
+// Basic (5): spread_rate(1) + mutation_rate*5(0.5) + aggression(1) + resilience(1) + metabolism(1) = 4.5
+// Social (4): detection_range(1) + social_factor*0.5(1) + merge_affinity(1) + max_tracked(0.75) = 3.75
+// Environmental (5): nutrient_sensitivity(1) + toxin_sensitivity(1) + edge_affinity*0.5(1) + density_tolerance(1) + quorum_threshold(1) = 5
+// Colony interactions (6): toxin_production(1) + toxin_resistance(1) + signal_emission(1) + signal_sensitivity(1) + alarm_threshold(1) + gene_transfer_rate*10(1) = 6
+// Competitive (2): resource_consumption(1) + defense_priority(1) = 2
+// Survival (4): dormancy_threshold(1) + biofilm_investment(1) + motility(1) + efficiency(1) = 4
+// Neural (3): hidden_weights avg*0.5(1) + learning_rate(1) + memory_factor(1) = 3
+// Total: 4.5 + 3.75 + 5 + 6 + 2 + 4 + 3 = 28.25
+#define GENOME_DISTANCE_WEIGHT_SUM 28.25f
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -25,11 +26,11 @@ Genome genome_create_random(void) {
     for (int i = 0; i < 8; i++) {
         g.spread_weights[i] = 0.3f + rand_float() * 0.7f;
     }
-    g.spread_rate = 0.4f + rand_float() * 0.6f;  // 0.4-1.0: ensures viable growth
+    g.spread_rate = 0.6f + rand_float() * 0.4f;  // 0.6-1.0: ensures active growth
     g.mutation_rate = rand_float() * 0.1f;  // 0-0.1
-    g.aggression = 0.2f + rand_float() * 0.8f;  // 0.2-1.0
-    g.resilience = 0.2f + rand_float() * 0.8f;  // 0.2-1.0
-    g.metabolism = 0.4f + rand_float() * 0.6f;  // 0.4-1.0
+    g.aggression = 0.5f + rand_float() * 0.5f;  // 0.5-1.0: more aggressive
+    g.resilience = 0.2f + rand_float() * 0.6f;  // 0.2-0.8: slightly lower max resilience
+    g.metabolism = 0.6f + rand_float() * 0.4f;  // 0.6-1.0: higher metabolism
     
     // === Social Behavior ===
     g.detection_range = 0.1f + rand_float() * 0.4f;  // 0.1-0.5
