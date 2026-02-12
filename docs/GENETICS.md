@@ -6,6 +6,377 @@ This document explains the genetic system that drives colony behavior and evolut
 
 Every bacterial colony in Ferox has a **genome** - a set of genetic parameters that determine its appearance and behavior. These genomes mutate over time and can be merged during colony recombination, leading to emergent evolutionary dynamics.
 
+## Colony Decision Model (AI Architecture)
+
+The genetic system functions as a **neural-network-like decision model** where genome traits act as weights that transform environmental inputs into behavioral outputs. Each colony's genome encodes a unique "personality" that determines how it responds to its environment.
+
+### System Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     FEROX COLONY DECISION MODEL                             │
+│               (Genetic Algorithm + Neural-Network-Like System)              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                              INPUTS (Sensors)                              ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║                                                                           ║
+║  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐           ║
+║  │  NEIGHBORS (8)  │  │   ENVIRONMENT   │  │   INTERNAL      │           ║
+║  │                 │  │                 │  │                 │           ║
+║  │ • Empty cells   │  │ • Nutrients     │  │ • Cell age      │           ║
+║  │ • Enemy cells   │  │ • Toxins        │  │ • Stress level  │           ║
+║  │ • Allied cells  │  │ • Signals       │  │ • Colony state  │           ║
+║  │ • Border status │  │ • Edge distance │  │ • Population    │           ║
+║  │                 │  │ • Density       │  │                 │           ║
+║  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘           ║
+║           │                    │                    │                     ║
+╚═══════════│════════════════════│════════════════════│═════════════════════╝
+            │                    │                    │
+            ▼                    ▼                    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     GENOME WEIGHTS (Neural "Weights")                      ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║                                                                           ║
+║    ┌───────────────────────────────────────────────────────────────┐     ║
+║    │                    SPREAD WEIGHTS [8]                          │     ║
+║    │         (Direction preference - like attention heads)          │     ║
+║    │                                                                 │     ║
+║    │                         N [0.7]                                 │     ║
+║    │                           ↑                                     │     ║
+║    │                    NW [0.4]  NE [0.5]                          │     ║
+║    │                       ↖   ↑   ↗                                │     ║
+║    │               W [0.3] ←   ●   → E [0.8]                        │     ║
+║    │                       ↙   ↓   ↘                                │     ║
+║    │                    SW [0.6]  SE [0.9]                          │     ║
+║    │                           ↓                                     │     ║
+║    │                         S [0.5]                                 │     ║
+║    └───────────────────────────────────────────────────────────────┘     ║
+║                                                                           ║
+║    ┌────────────────┐ ┌────────────────┐ ┌────────────────┐              ║
+║    │ BASIC TRAITS   │ │ SOCIAL TRAITS  │ │ SURVIVAL       │              ║
+║    │                │ │                │ │                │              ║
+║    │ spread_rate    │ │ social_factor  │ │ resilience     │              ║
+║    │ metabolism     │ │ detection_range│ │ dormancy_thresh│              ║
+║    │ aggression     │ │ merge_affinity │ │ biofilm_invest │              ║
+║    │ mutation_rate  │ │ signal_emiss.  │ │ toxin_resist.  │              ║
+║    │ efficiency     │ │ signal_sensit. │ │ motility       │              ║
+║    └───────┬────────┘ └───────┬────────┘ └───────┬────────┘              ║
+║            │                  │                  │                        ║
+╚════════════│══════════════════│══════════════════│════════════════════════╝
+             │                  │                  │
+             ▼                  ▼                  ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                      DECISION COMPUTATION                                  ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║                                                                           ║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │                    SPREAD DECISION                                   │ ║
+║  │                                                                      │ ║
+║  │   P(spread) = spread_rate × metabolism × direction_weight           │ ║
+║  │                                                                      │ ║
+║  │   Direction selected by: max(spread_weights[d] × nutrient_gradient  │ ║
+║  │                              × social_influence × density_factor)    │ ║
+║  └─────────────────────────────────────────────────────────────────────┘ ║
+║                                                                           ║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │                    COMBAT DECISION                                   │ ║
+║  │                                                                      │ ║
+║  │   P(overtake) = aggression × (1.0 - enemy_resilience)               │ ║
+║  │                                                                      │ ║
+║  │   Attack occurs when: rand() < P(overtake)                          │ ║
+║  └─────────────────────────────────────────────────────────────────────┘ ║
+║                                                                           ║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │                    MERGE DECISION                                    │ ║
+║  │                                                                      │ ║
+║  │   distance = genome_distance(self, neighbor)                        │ ║
+║  │   threshold = 0.05 + avg(merge_affinity) × 0.1                      │ ║
+║  │                                                                      │ ║
+║  │   Merge when: distance ≤ threshold AND related(parent/sibling)      │ ║
+║  └─────────────────────────────────────────────────────────────────────┘ ║
+║                                                                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+             │
+             ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                         OUTPUTS (Actions)                                  ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║                                                                           ║
+║  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   ║
+║  │  SPREAD  │  │  MUTATE  │  │  DIVIDE  │  │ RECOMBINE│  │ TRANSFER │   ║
+║  │          │  │          │  │          │  │          │  │  GENES   │   ║
+║  │ Colonize │  │ Evolve   │  │ Split    │  │ Merge    │  │ Exchange │   ║
+║  │ adjacent │  │ genome   │  │ into new │  │ with kin │  │ traits   │   ║
+║  │ cells    │  │ traits   │  │ colonies │  │ colonies │  │ on touch │   ║
+║  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘   ║
+║       │             │             │             │             │          ║
+╚═══════│═════════════│═════════════│═════════════│═════════════│══════════╝
+        │             │             │             │             │
+        └──────────┬──┴──────┬──────┴──────┬──────┴─────────────┘
+                   │         │             │
+                   ▼         ▼             ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     FEEDBACK LOOPS (Evolution)                             ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║                                                                           ║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │                                                                      │ ║
+║  │   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐          │ ║
+║  │   │  MUTATION   │────▶│  SELECTION  │────▶│  FITNESS    │          │ ║
+║  │   │             │     │             │     │             │          │ ║
+║  │   │ δ = ±0.1    │     │ Colonies    │     │ High cells  │          │ ║
+║  │   │ per trait   │     │ compete for │     │ = success   │          │ ║
+║  │   │ per tick    │     │ territory   │     │ = reproduce │          │ ║
+║  │   └─────────────┘     └─────────────┘     └──────┬──────┘          │ ║
+║  │          ▲                                       │                  │ ║
+║  │          │          ┌────────────────────────────┘                  │ ║
+║  │          │          ▼                                               │ ║
+║  │   ┌──────┴──────────────────┐     ┌─────────────┐                  │ ║
+║  │   │     GENOME UPDATE       │     │ INHERITANCE │                  │ ║
+║  │   │                         │◀────│             │                  │ ║
+║  │   │ Traits drift toward     │     │ Division:   │                  │ ║
+║  │   │ successful strategies   │     │ copy+mutate │                  │ ║
+║  │   │                         │     │             │                  │ ║
+║  │   │ mutation_rate itself    │     │ Merge:      │                  │ ║
+║  │   │ can mutate (meta-evol)  │     │ weighted avg│                  │ ║
+║  │   └─────────────────────────┘     └─────────────┘                  │ ║
+║  │                                                                      │ ║
+║  └─────────────────────────────────────────────────────────────────────┘ ║
+║                                                                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+```
+
+### The Neural Network Analogy
+
+The genome functions similarly to a neural network:
+
+| Neural Network Concept | Ferox Equivalent |
+|------------------------|------------------|
+| **Input neurons** | Neighbor cells, environment sensors |
+| **Weights** | Genome traits (spread_weights, aggression, etc.) |
+| **Activation function** | Probability thresholds + random sampling |
+| **Output neurons** | Actions (spread, attack, merge, divide) |
+| **Backpropagation** | Natural selection (successful colonies survive) |
+| **Learning rate** | `mutation_rate` (self-modifying!) |
+| **Attention mechanism** | `spread_weights[8]` - direction preferences |
+
+### Genome → Behavior → Evolution Flow
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                     EVOLUTIONARY CYCLE (per tick)                          │
+└────────────────────────────────────────────────────────────────────────────┘
+
+   TICK N                    TICK N+1                    TICK N+2
+     │                          │                          │
+     ▼                          ▼                          ▼
+┌─────────┐              ┌─────────┐              ┌─────────┐
+│ GENOME  │              │ GENOME' │              │ GENOME''│
+│         │──mutation──▶ │         │──mutation──▶ │         │
+│ traits  │              │ traits  │              │ traits  │
+└────┬────┘              └────┬────┘              └────┬────┘
+     │                        │                        │
+     │ encodes                │ encodes                │ encodes
+     ▼                        ▼                        ▼
+┌─────────┐              ┌─────────┐              ┌─────────┐
+│BEHAVIOR │              │BEHAVIOR │              │BEHAVIOR │
+│         │              │         │              │         │
+│ spread  │              │ spread  │              │ spread  │
+│ attack  │              │ attack  │              │ attack  │
+│ merge   │              │ merge   │              │ merge   │
+└────┬────┘              └────┬────┘              └────┬────┘
+     │                        │                        │
+     │ results in             │ results in             │ results in
+     ▼                        ▼                        ▼
+┌─────────┐              ┌─────────┐              ┌─────────┐
+│TERRITORY│              │TERRITORY│              │TERRITORY│
+│         │              │         │              │         │
+│ cells   │──survival──▶ │ cells   │──survival──▶ │ cells   │
+│ count   │              │ count   │              │ count   │
+└─────────┘              └─────────┘              └─────────┘
+     │                        │                        │
+     │                   ┌────┴────┐                   │
+     │                   │DIVISION?│                   │
+     │                   └────┬────┘                   │
+     │                        │                        │
+     │              ┌─────────┴─────────┐              │
+     │              ▼                   ▼              │
+     │        ┌─────────┐         ┌─────────┐         │
+     │        │ CHILD A │         │ CHILD B │         │
+     │        │ mutated │         │ mutated │         │
+     │        │ genome  │         │ genome  │         │
+     │        └─────────┘         └─────────┘         │
+     │                                                 │
+     └─────────────────────────────────────────────────┘
+                     (lineage continues)
+```
+
+### Simulation Tick Phases
+
+Each simulation tick executes these phases in order:
+
+```
+simulation_tick(world)
+        │
+        ▼
+┌───────────────────┐
+│  1. AGE CELLS     │  All cells age += 1
+└─────────┬─────────┘
+          │
+          ▼
+┌───────────────────┐
+│  2. SPREAD        │  Each colony tries to expand
+│                   │
+│  for each cell:   │  ┌──────────────────────────────────┐
+│    for each dir:  │  │ P = spread_rate × metabolism     │
+│      if empty:    │──│ if rand() < P: colonize          │
+│      if enemy:    │  │ P = aggression × (1-resilience)  │
+│                   │  │ if rand() < P: overtake          │
+│                   │  └──────────────────────────────────┘
+└─────────┬─────────┘
+          │
+          ▼
+┌───────────────────┐
+│  3. MUTATE        │  Each active colony mutates genome
+│                   │
+│  for each trait:  │  ┌──────────────────────────────────┐
+│    P = mut_rate   │  │ if rand() < mutation_rate:       │
+│    if rand() < P: │──│   trait += random(±0.1)          │
+│                   │  │   clamp to valid range           │
+│                   │  └──────────────────────────────────┘
+└─────────┬─────────┘
+          │
+          ▼
+┌───────────────────┐
+│  4. DIVISIONS     │  Check for colony splits
+│                   │
+│  flood_fill each  │  ┌──────────────────────────────────┐
+│  colony to find   │──│ if components > 1:               │
+│  disconnected     │  │   largest keeps ID               │
+│  components       │  │   others become new colonies     │
+│                   │  │   with mutated genomes           │
+│                   │  └──────────────────────────────────┘
+└─────────┬─────────┘
+          │
+          ▼
+┌───────────────────┐
+│  5. RECOMBINE     │  Check for compatible merges
+│                   │
+│  for adjacent     │  ┌──────────────────────────────────┐
+│  colony pairs:    │──│ if related AND distance < 0.05:  │
+│    check compat.  │  │   merge genomes (weighted avg)   │
+│                   │  │   larger absorbs smaller         │
+│                   │  └──────────────────────────────────┘
+└─────────┬─────────┘
+          │
+          ▼
+┌───────────────────┐
+│  6. UPDATE STATS  │  Recount cells, update max_pop
+└─────────┬─────────┘
+          │
+          ▼
+     tick++
+```
+
+### Genetic Algorithm Properties
+
+The Ferox genetics system implements a **genetic algorithm** with these key properties:
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                    GENETIC ALGORITHM COMPONENTS                            │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │ CHROMOSOME: Genome struct                                            │  │
+│  │                                                                      │  │
+│  │ ┌────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┐       │  │
+│  │ │spr │mut │agg │res │met │det │soc │mrg │nut │edg │den │... │ ...   │  │
+│  │ │rate│rate│    │    │    │rng │fac │aff │sns │aff │tol │    │       │  │
+│  │ └────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┘       │  │
+│  │                     ~25 float genes + color genes                    │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │ FITNESS FUNCTION: Territory control                                  │  │
+│  │                                                                      │  │
+│  │   fitness = colony.cell_count / world.total_cells                   │  │
+│  │                                                                      │  │
+│  │   Implicit selection: colonies with more cells have more            │  │
+│  │   opportunities to spread and divide (reproduce)                    │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │ SELECTION: Spatial competition                                       │  │
+│  │                                                                      │  │
+│  │   • Colonies fight for territory (aggression vs resilience)         │  │
+│  │   • Empty space is colonized by fastest spreaders                   │  │
+│  │   • Colonies with 0 cells die (selection pressure)                  │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │ MUTATION: Per-tick genome drift                                      │  │
+│  │                                                                      │  │
+│  │   • Each gene: P(mutate) = mutation_rate                            │  │
+│  │   • Mutation delta: ±0.1 (uniform random)                           │  │
+│  │   • Self-referential: mutation_rate can mutate                      │  │
+│  │   • Clamped to valid ranges                                         │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │ CROSSOVER: Genome merging during recombination                       │  │
+│  │                                                                      │  │
+│  │   child_trait = parent_a.trait × weight_a + parent_b.trait × weight_b│  │
+│  │                                                                      │  │
+│  │   where weight_x = cell_count_x / total_cells                       │  │
+│  │                                                                      │  │
+│  │   (Weighted averaging instead of traditional crossover)             │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │ SPECIATION: Geographic isolation                                     │  │
+│  │                                                                      │  │
+│  │   • Colony disconnection triggers division                          │  │
+│  │   • Child colonies immediately mutate (divergence)                  │  │
+│  │   • parent_id tracks lineage                                        │  │
+│  │   • Related colonies can recombine if genetically similar           │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Horizontal Gene Transfer
+
+In addition to vertical inheritance (parent→child), Ferox supports **horizontal gene transfer** between adjacent colonies:
+
+```
+      Colony A                Colony B
+    ┌───────────┐            ┌───────────┐
+    │ toxin_res │            │ toxin_res │
+    │   = 0.3   │───TOUCH───▶│   = 0.8   │
+    │           │            │           │
+    │ gene_xfer │            │           │
+    │   = 0.05  │            │ RECEIVES: │
+    │           │            │ +strength │
+    └───────────┘            └───────────┘
+                                   │
+                                   ▼
+                             ┌───────────┐
+                             │ toxin_res │
+                             │  = 0.45   │  (partial transfer)
+                             └───────────┘
+
+    genome_transfer_genes(recipient, donor, transfer_strength)
+    
+    Transferred traits:
+    • toxin_resistance (30% chance)
+    • nutrient_sensitivity (30% chance)  
+    • efficiency (20% chance)
+    • dormancy_resistance (20% chance)
+```
+
 ## Genome Structure
 
 ```c
