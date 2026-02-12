@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Release, Debug]
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libsdl2-dev
+      
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake sdl2
+      
+      - name: Configure CMake
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      
+      - name: Build
+        run: |
+          cmake --build build --config ${{ matrix.build_type }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+      
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure -C ${{ matrix.build_type }}
+
+  test-suites:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libsdl2-dev
+      
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+      
+      - name: Run Phase 1 tests (Core structures)
+        run: ./build/tests/test_phase1
+      
+      - name: Run Phase 2 tests (World simulation)
+        run: ./build/tests/test_phase2
+      
+      - name: Run Phase 3 tests (Threading)
+        run: ./build/tests/test_phase3
+      
+      - name: Run Phase 4 tests (Protocol)
+        run: ./build/tests/test_phase4
+      
+      - name: Run Phase 5 tests (Server)
+        run: ./build/tests/test_phase5
+      
+      - name: Run Phase 6 tests (Client)
+        run: ./build/tests/test_phase6
+      
+      - name: Run Visual Stability tests
+        run: ./build/tests/test_visual_stability
+      
+      - name: Run Genetics Advanced tests
+        run: ./build/tests/test_genetics_advanced
+      
+      - name: Run World Advanced tests
+        run: ./build/tests/test_world_advanced
+      
+      - name: Run Simulation Stress tests
+        run: ./build/tests/test_simulation_stress
+      
+      - name: Run Threadpool Stress tests
+        run: ./build/tests/test_threadpool_stress
+      
+      - name: Run Protocol Edge tests
+        run: ./build/tests/test_protocol_edge
+      
+      - name: Run GUI tests
+        run: ./build/tests/test_gui
+      
+      - name: Run Colors Exhaustive tests
+        run: ./build/tests/test_colors_exhaustive
+      
+      - name: Run Names Exhaustive tests
+        run: ./build/tests/test_names_exhaustive
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libsdl2-dev
+      
+      - name: Build with AddressSanitizer
+        run: |
+          cmake -B build-asan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g"
+          cmake --build build-asan -j$(nproc)
+      
+      - name: Run tests with ASan
+        run: |
+          cd build-asan
+          ASAN_OPTIONS=detect_leaks=1 ctest --output-on-failure
+      
+      - name: Build with UndefinedBehaviorSanitizer
+        run: |
+          cmake -B build-ubsan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer -g"
+          cmake --build build-ubsan -j$(nproc)
+      
+      - name: Run tests with UBSan
+        run: |
+          cd build-ubsan
+          ctest --output-on-failure
+
+  memory-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libsdl2-dev valgrind
+      
+      - name: Build Debug
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build -j$(nproc)
+      
+      - name: Run Valgrind on core tests
+        run: |
+          valgrind --leak-check=full --error-exitcode=1 ./build/tests/test_phase1
+          valgrind --leak-check=full --error-exitcode=1 ./build/tests/test_phase2
