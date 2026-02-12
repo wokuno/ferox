@@ -435,10 +435,10 @@ void server_handle_command(Server* server, ClientSession* client, CommandType cm
             break;
             
         case CMD_SPEED_UP:
-            if (server->speed_multiplier < 10.0f) {
+            if (server->speed_multiplier < 100.0f) {
                 server->speed_multiplier *= 2.0f;
                 // Clamp to max to handle floating point accumulation
-                if (server->speed_multiplier > 10.0f) server->speed_multiplier = 10.0f;
+                if (server->speed_multiplier > 100.0f) server->speed_multiplier = 100.0f;
                 printf("Speed increased to %.1fx by client %u\n", server->speed_multiplier, client->id);
             }
             break;

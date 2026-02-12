@@ -252,8 +252,8 @@ static void gui_client_process_input(GuiClient* client, GuiInputState* input) {
         case GUI_INPUT_SPEED_UP:
             gui_client_send_command(client, CMD_SPEED_UP, NULL);
             client->local_world.speed_multiplier *= 1.5f;
-            if (client->local_world.speed_multiplier > 10.0f) {
-                client->local_world.speed_multiplier = 10.0f;
+            if (client->local_world.speed_multiplier > 100.0f) {
+                client->local_world.speed_multiplier = 100.0f;
             }
             break;
             

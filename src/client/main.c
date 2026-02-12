@@ -145,8 +145,8 @@ static void run_demo_mode(void) {
                 break;
             case INPUT_SPEED_UP:
                 g_client->local_world.speed_multiplier *= 1.5f;
-                if (g_client->local_world.speed_multiplier > 10.0f)
-                    g_client->local_world.speed_multiplier = 10.0f;
+                if (g_client->local_world.speed_multiplier > 100.0f)
+                    g_client->local_world.speed_multiplier = 100.0f;
                 break;
             case INPUT_SLOW_DOWN:
                 g_client->local_world.speed_multiplier /= 1.5f;
