@@ -350,6 +350,9 @@ int main(void) {
     int passed = 0;
     int failed = 0;
     
+    // Ignore SIGPIPE to prevent crash when writing to closed sockets
+    signal(SIGPIPE, SIG_IGN);
+    
     printf("=== Phase 5 Integration Tests ===\n\n");
     
     // Server creation tests
