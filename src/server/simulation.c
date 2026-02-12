@@ -374,20 +374,34 @@ void simulation_mutate(World* world) {
             // Check how different the genome became
             float genetic_distance = genome_distance(&original, &colony->genome);
             
-            // 5% base chance of speciation, higher if mutation was dramatic
-            float speciation_chance = 0.05f + genetic_distance * 0.3f;
+            // 2% base chance of speciation, higher only for very dramatic mutations
+            float speciation_chance = 0.02f + genetic_distance * 0.15f;
             
-            // More likely for larger colonies (more genetic diversity)
-            if (colony->cell_count > 30) {
-                speciation_chance *= 1.5f;
+            // Only larger colonies can speciate (need critical mass)
+            if (colony->cell_count < 20) {
+                speciation_chance = 0.0f;
             }
             
-            if (rand_float() < speciation_chance && colony->cell_count > 10) {
-                // SPECIATION! Split off some cells as a new species
-                // The new species gets the mutated genome, parent keeps original
+            if (rand_float() < speciation_chance) {
+                // SPECIATION! Start from a single seed cell and grow outward
+                // Find a random border cell to be the seed
+                int seed_x = -1, seed_y = -1;
+                int attempts = 0;
+                while (seed_x < 0 && attempts < 100) {
+                    int j = rand() % (world->width * world->height);
+                    Cell* cell = &world->cells[j];
+                    if (cell->colony_id == colony->id && cell->is_border) {
+                        seed_x = j % world->width;
+                        seed_y = j / world->width;
+                    }
+                    attempts++;
+                }
                 
-                int cells_for_new = (int)(colony->cell_count * (0.2f + rand_float() * 0.3f));  // 20-50%
-                if (cells_for_new >= 5) {
+                if (seed_x >= 0) {
+                    // Transfer 5-15% of cells, but start from seed and grow outward
+                    int cells_for_new = (int)(colony->cell_count * (0.05f + rand_float() * 0.1f));
+                    cells_for_new = (cells_for_new < 3) ? 3 : (cells_for_new > 20) ? 20 : cells_for_new;
+                    
                     // Create new colony with mutated genome
                     Colony new_species;
                     memset(&new_species, 0, sizeof(Colony));
@@ -397,7 +411,7 @@ void simulation_mutate(World* world) {
                     new_species.parent_id = colony->id;
                     new_species.shape_seed = colony->shape_seed ^ (uint32_t)(rand() << 8);
                     new_species.wobble_phase = rand_float() * 6.28f;
-                    new_species.cell_count = 0;  // Will be set by cell transfer
+                    new_species.cell_count = 0;
                     new_species.max_cell_count = 0;
                     generate_scientific_name(new_species.name, sizeof(new_species.name));
                     
@@ -407,21 +421,40 @@ void simulation_mutate(World* world) {
                     
                     uint32_t new_id = world_add_colony(world, new_species);
                     if (new_id > 0) {
-                        // Transfer some cells to new species (border cells preferentially)
+                        // BFS from seed cell to transfer contiguous cells
                         int transferred = 0;
-                        for (int j = 0; j < world->width * world->height && transferred < cells_for_new; j++) {
-                            Cell* cell = &world->cells[j];
-                            if (cell->colony_id == colony->id) {
-                                // Prefer border cells for speciation
-                                float transfer_chance = cell->is_border ? 0.6f : 0.3f;
-                                if (rand_float() < transfer_chance) {
-                                    cell->colony_id = new_id;
-                                    cell->age = 0;  // New species cells are "young"
-                                    transferred++;
-                                    if (colony->cell_count > 0) colony->cell_count--;
+                        int queue[400];  // Simple queue for BFS
+                        int q_front = 0, q_back = 0;
+                        queue[q_back++] = seed_y * world->width + seed_x;
+                        
+                        while (q_front < q_back && transferred < cells_for_new) {
+                            int idx = queue[q_front++];
+                            Cell* cell = &world->cells[idx];
+                            if (cell->colony_id != colony->id) continue;
+                            
+                            // Transfer this cell
+                            cell->colony_id = new_id;
+                            cell->age = 0;
+                            transferred++;
+                            if (colony->cell_count > 0) colony->cell_count--;
+                            
+                            // Add neighbors to queue
+                            int cx = idx % world->width;
+                            int cy = idx / world->width;
+                            int dx[] = {-1, 1, 0, 0};
+                            int dy[] = {0, 0, -1, 1};
+                            for (int d = 0; d < 4 && q_back < 400; d++) {
+                                int nx = cx + dx[d];
+                                int ny = cy + dy[d];
+                                if (nx >= 0 && nx < world->width && ny >= 0 && ny < world->height) {
+                                    int nidx = ny * world->width + nx;
+                                    if (world->cells[nidx].colony_id == colony->id) {
+                                        queue[q_back++] = nidx;
+                                    }
                                 }
                             }
                         }
+                        
                         // Update new species cell count
                         Colony* new_col = world_get_colony(world, new_id);
                         if (new_col) {
