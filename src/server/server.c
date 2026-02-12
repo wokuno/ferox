@@ -303,6 +303,7 @@ static void build_protocol_world(Server* server, ProtoWorld* proto_world) {
             // Copy shape data for procedural organic borders
             proto_colony->shape_seed = server->world->colonies[i].shape_seed;
             proto_colony->wobble_phase = server->world->colonies[i].wobble_phase;
+            proto_colony->shape_evolution = server->world->colonies[i].shape_evolution;
             
             count++;
         }

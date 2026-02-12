@@ -113,6 +113,9 @@ int protocol_serialize_colony(const ProtoColony* colony, uint8_t* buffer) {
     write_float(buffer + offset, colony->wobble_phase);
     offset += 4;
     
+    write_float(buffer + offset, colony->shape_evolution);
+    offset += 4;
+    
     return offset;
 }
 
@@ -155,6 +158,9 @@ int protocol_deserialize_colony(const uint8_t* buffer, ProtoColony* colony) {
     offset += 4;
     
     colony->wobble_phase = read_float(buffer + offset);
+    offset += 4;
+    
+    colony->shape_evolution = read_float(buffer + offset);
     offset += 4;
     
     return offset;

@@ -113,6 +113,7 @@ typedef struct {
     Color color;         // Display color
     uint32_t shape_seed; // Seed for procedural shape generation
     float wobble_phase;  // Animation phase for border movement
+    float shape_evolution; // Shape evolution factor (0-1), gradually changes over time
     
     // New dynamic state
     ColonyState state;       // Current colony state

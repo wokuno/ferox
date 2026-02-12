@@ -965,8 +965,10 @@ void simulation_tick(World* world) {
         colony->wobble_phase += 0.03f;
         if (colony->wobble_phase > 6.28318f) colony->wobble_phase -= 6.28318f;
         
-        // Note: shape_seed is NOT mutated - that causes jarring visual jumps
-        // Shape evolution happens naturally through smooth wobble_phase animation
+        // Gradually evolve shape over time (slow, continuous morphing)
+        // This makes colonies visually change as they age and mutate
+        colony->shape_evolution += 0.002f;
+        if (colony->shape_evolution > 100.0f) colony->shape_evolution -= 100.0f;
     }
     
     world->tick++;

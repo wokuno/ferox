@@ -346,8 +346,9 @@ void gui_renderer_draw_colony(GuiRenderer* renderer, const ProtoColony* colony, 
     
     for (int i = 0; i < COLONY_SEGMENTS; i++) {
         float angle = (float)i / COLONY_SEGMENTS * 2.0f * M_PI;
-        float shape_mult = colony_shape_at_angle(colony->shape_seed, angle, 
-                                                  colony->wobble_phase + renderer->time * 0.5f);
+        float shape_mult = colony_shape_at_angle_evolved(colony->shape_seed, angle, 
+                                                   colony->wobble_phase + renderer->time * 0.5f,
+                                                   colony->shape_evolution);
         if (!isfinite(shape_mult) || shape_mult < 0.1f) shape_mult = 1.0f;
         float r_at_angle = screen_radius * shape_mult;
         
@@ -456,14 +457,16 @@ void gui_renderer_draw_colony(GuiRenderer* renderer, const ProtoColony* colony, 
         // Draw slightly larger border
         for (int i = 0; i < COLONY_SEGMENTS; i++) {
             float angle = (float)i / COLONY_SEGMENTS * 2.0f * M_PI;
-            float shape_mult = colony_shape_at_angle(colony->shape_seed, angle,
-                                                      colony->wobble_phase + renderer->time * 0.5f);
+            float shape_mult = colony_shape_at_angle_evolved(colony->shape_seed, angle,
+                                                      colony->wobble_phase + renderer->time * 0.5f,
+                                                      colony->shape_evolution);
             float r_at_angle = (screen_radius + 3) * shape_mult;
             
             int next = (i + 1) % COLONY_SEGMENTS;
             float next_angle = (float)next / COLONY_SEGMENTS * 2.0f * M_PI;
-            float next_shape = colony_shape_at_angle(colony->shape_seed, next_angle,
-                                                      colony->wobble_phase + renderer->time * 0.5f);
+            float next_shape = colony_shape_at_angle_evolved(colony->shape_seed, next_angle,
+                                                      colony->wobble_phase + renderer->time * 0.5f,
+                                                      colony->shape_evolution);
             float next_r = (screen_radius + 3) * next_shape;
             
             SDL_RenderDrawLine(r,
@@ -625,8 +628,9 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
                 if (angle < 0) angle += 2.0f * M_PI;
                 
                 // Get shape multiplier at this angle
-                float shape_mult = colony_shape_at_angle(colony->shape_seed, angle, 
-                                                          colony->wobble_phase + renderer->time * 0.5f);
+                float shape_mult = colony_shape_at_angle_evolved(colony->shape_seed, angle, 
+                                                          colony->wobble_phase + renderer->time * 0.5f,
+                                                          colony->shape_evolution);
                 float effective_radius = colony->radius * shape_mult;
                 
                 if (dist <= effective_radius) {

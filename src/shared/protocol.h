@@ -58,12 +58,13 @@ typedef struct ProtoColony {
     bool alive;
     uint32_t shape_seed;             // Seed for procedural shape generation
     float wobble_phase;              // Animation phase for border movement
+    float shape_evolution;           // Shape evolution factor (0-1, changes over time)
 } ProtoColony;
 
 // Colony serialized size: id(4) + name(32) + x(4) + y(4) + radius(4) + population(4) + 
 //                        max_population(4) + growth_rate(4) + colors(3) + alive(1) +
-//                        shape_seed(4) + wobble_phase(4) = 72 bytes
-#define COLONY_SERIALIZED_SIZE 72
+//                        shape_seed(4) + wobble_phase(4) + shape_evolution(4) = 76 bytes
+#define COLONY_SERIALIZED_SIZE 76
 
 // World data structure for serialization (prefixed to avoid conflict with types.h)
 typedef struct ProtoWorld {

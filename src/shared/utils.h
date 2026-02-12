@@ -97,13 +97,20 @@ static inline float fractal_noise1d(uint32_t seed, float x, int octaves) {
 
 // Get colony shape radius multiplier at a given angle
 // Returns a value typically in range [0.5, 1.5] for organic blob shapes
-static inline float colony_shape_at_angle(uint32_t shape_seed, float angle, float phase) {
+// evolution: 0+ value that causes shape to morph over time
+static inline float colony_shape_at_angle_evolved(uint32_t shape_seed, float angle, float phase, float evolution) {
     // Normalize angle to [0, 2*PI)
     const float TWO_PI = 6.28318530718f;
     while (angle < 0) angle += TWO_PI;
     while (angle >= TWO_PI) angle -= TWO_PI;
     
-    // Derive shape parameters from seed using different bit patterns
+    // Use evolution to gradually shift the shape parameters
+    // Evolution creates smooth morphing by blending derived values
+    float evo_factor = sinf(evolution * 0.5f) * 0.5f + 0.5f;  // 0-1 oscillating
+    float evo_shift = evolution * 0.1f;  // Continuous shift
+    
+    // Derive shape parameters from seed, but shift them with evolution
+    uint32_t evo_seed = shape_seed + (uint32_t)(evolution * 1000.0f);
     uint32_t h1 = hash_u32(shape_seed);
     uint32_t h2 = hash_u32(shape_seed ^ 0xDEADBEEF);
     uint32_t h3 = hash_u32(shape_seed ^ 0xCAFEBABE);
@@ -186,6 +193,11 @@ static inline float colony_shape_at_angle(uint32_t shape_seed, float angle, floa
     float anim = sinf(phase * 2.0f + angle * 1.5f) * 0.03f;
     result += anim;
     
+    // Add evolution-based morphing - smooth slow changes over time
+    float evo_morph = sinf(angle * 3.0f + evo_shift) * 0.1f * evo_factor;
+    float evo_wobble = fractal_noise1d(evo_seed, angle / TWO_PI * 8.0f, 3) * 0.15f * evo_factor;
+    result += evo_morph + evo_wobble;
+    
     // Add very subtle high-frequency detail
     float detail = fractal_noise1d(shape_seed ^ 0xFF, angle / TWO_PI * 16.0f, 2) * 0.05f;
     result += detail;
@@ -195,6 +207,11 @@ static inline float colony_shape_at_angle(uint32_t shape_seed, float angle, floa
     if (result > 1.5f) result = 1.5f;
     
     return result;
+}
+
+// Legacy wrapper for backward compatibility
+static inline float colony_shape_at_angle(uint32_t shape_seed, float angle, float phase) {
+    return colony_shape_at_angle_evolved(shape_seed, angle, phase, 0.0f);
 }
 
 #endif // FEROX_UTILS_H
