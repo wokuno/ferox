@@ -43,13 +43,18 @@ World* world_create(int width, int height) {
     world->nutrients = (float*)malloc(grid_size * sizeof(float));
     world->toxins = (float*)calloc(grid_size, sizeof(float));  // Start with no toxins
     world->signals = (float*)calloc(grid_size, sizeof(float)); // Start with no signals
+    world->alarm_signals = (float*)calloc(grid_size, sizeof(float)); // Start with no alarms
     world->signal_source = (uint32_t*)calloc(grid_size, sizeof(uint32_t));
+    world->alarm_source = (uint32_t*)calloc(grid_size, sizeof(uint32_t));
     
-    if (!world->nutrients || !world->toxins || !world->signals || !world->signal_source) {
+    if (!world->nutrients || !world->toxins || !world->signals || !world->signal_source ||
+        !world->alarm_signals || !world->alarm_source) {
         if (world->nutrients) free(world->nutrients);
         if (world->toxins) free(world->toxins);
         if (world->signals) free(world->signals);
+        if (world->alarm_signals) free(world->alarm_signals);
         if (world->signal_source) free(world->signal_source);
+        if (world->alarm_source) free(world->alarm_source);
         free(world->cells);
         free(world);
         return NULL;
@@ -83,7 +88,9 @@ void world_destroy(World* world) {
     if (world->nutrients) free(world->nutrients);
     if (world->toxins) free(world->toxins);
     if (world->signals) free(world->signals);
+    if (world->alarm_signals) free(world->alarm_signals);
     if (world->signal_source) free(world->signal_source);
+    if (world->alarm_source) free(world->alarm_source);
     free(world);
 }
 

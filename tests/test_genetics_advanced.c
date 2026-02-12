@@ -48,15 +48,31 @@ static Genome create_test_genome(float spread, float mutation, float aggr, float
     memset(&g, 0, sizeof(Genome));
     for (int i = 0; i < 8; i++) g.spread_weights[i] = 0.5f;
     g.spread_rate = spread;
-    g.mutation_rate = mutation;
+    g.mutation_rate = mutation * 0.1f;  // Scale to proper 0-0.1 range
     g.aggression = aggr;
     g.resilience = resil;
     g.metabolism = metab;
-    // Set social traits to spread value for extremes test
+    // Set all genome fields to properly scaled values for distance calculations
+    // Social traits
     g.detection_range = spread;
-    g.social_factor = spread * 2.0f - 1.0f;  // Map 0-1 to -1 to 1
+    g.social_factor = spread * 2.0f - 1.0f;  // Scale to proper -1 to 1 range
     g.merge_affinity = spread;
-    g.max_tracked = (uint8_t)(spread * 4.0f);  // Map 0-1 to 0-4
+    g.max_tracked = 1 + (uint8_t)(spread * 3.0f);  // Scale to proper 1-4 range
+    // Environmental sensing
+    g.nutrient_sensitivity = spread;
+    g.edge_affinity = spread * 2.0f - 1.0f;  // Scale to proper -1 to 1 range
+    g.density_tolerance = spread;
+    // Colony interactions
+    g.toxin_production = spread;
+    g.toxin_resistance = spread;
+    g.signal_emission = spread;
+    g.signal_sensitivity = spread;
+    g.gene_transfer_rate = mutation * 0.1f;  // Scale to proper 0-0.1 range
+    // Survival strategies
+    g.dormancy_threshold = spread;
+    g.biofilm_investment = spread;
+    g.motility = spread;
+    g.efficiency = spread;
     g.body_color = (Color){128, 128, 128};
     g.border_color = (Color){64, 64, 64};
     return g;
@@ -190,7 +206,8 @@ TEST(merge_equal_weights_produces_average) {
     Genome result = genome_merge(&a, 100, &b, 100);
     
     ASSERT_FLOAT_NEAR(result.spread_rate, 0.5f, 0.0001f);
-    ASSERT_FLOAT_NEAR(result.mutation_rate, 0.5f, 0.0001f);
+    // mutation_rate is scaled: 0.0 and 0.1, merged = 0.05
+    ASSERT_FLOAT_NEAR(result.mutation_rate, 0.05f, 0.0001f);
     ASSERT_FLOAT_NEAR(result.aggression, 0.5f, 0.0001f);
     ASSERT_FLOAT_NEAR(result.resilience, 0.5f, 0.0001f);
     ASSERT_FLOAT_NEAR(result.metabolism, 0.5f, 0.0001f);
@@ -204,13 +221,15 @@ TEST(merge_unequal_weights_is_weighted) {
     Genome result = genome_merge(&a, 75, &b, 25);
     
     ASSERT_FLOAT_NEAR(result.spread_rate, 0.25f, 0.0001f);
-    ASSERT_FLOAT_NEAR(result.mutation_rate, 0.25f, 0.0001f);
+    // mutation_rate is scaled: 0.0 and 0.1, merged with 75/25 = 0.025
+    ASSERT_FLOAT_NEAR(result.mutation_rate, 0.025f, 0.0001f);
     
     // 1:3 ratio - a has 25%, b has 75%
     result = genome_merge(&a, 25, &b, 75);
     
     ASSERT_FLOAT_NEAR(result.spread_rate, 0.75f, 0.0001f);
-    ASSERT_FLOAT_NEAR(result.mutation_rate, 0.75f, 0.0001f);
+    // mutation_rate is scaled: 0.0 and 0.1, merged with 25/75 = 0.075
+    ASSERT_FLOAT_NEAR(result.mutation_rate, 0.075f, 0.0001f);
 }
 
 TEST(merge_extreme_weight_ratios) {

@@ -46,25 +46,40 @@ typedef struct {
     
     // === Environmental Sensing ===
     float nutrient_sensitivity;  // 0-1: how strongly to follow nutrient gradients
+    float toxin_sensitivity;     // 0-1: how strongly to avoid toxins
     float edge_affinity;         // -1 to 1: negative=avoid edges, positive=seek edges
     float density_tolerance;     // 0-1: how well colony handles crowding (affects spread in dense areas)
+    float quorum_threshold;      // 0-1: local density threshold that triggers quorum sensing behavior
     
     // === Colony-Colony Interactions ===
     float toxin_production;      // 0-1: how much toxin is emitted (damages nearby foreign cells)
     float toxin_resistance;      // 0-1: resistance to toxin damage
     float signal_emission;       // 0-1: strength of chemical signals emitted
     float signal_sensitivity;    // 0-1: how strongly to react to signals
+    float alarm_threshold;       // 0-1: when to emit alarm signals (hostile contact sensitivity)
     float gene_transfer_rate;    // 0-0.1: probability of horizontal gene transfer on contact
+    
+    // === Competitive Strategy ===
+    float resource_consumption;  // 0-1: how aggressively nutrients are consumed (fast growth vs sustainability)
+    float defense_priority;      // 0-1: tendency to form defensive borders vs aggressive expansion
     
     // === Survival Strategies ===
     float dormancy_threshold;    // 0-1: population ratio that triggers dormancy (0=never dormant)
     float dormancy_resistance;   // 0-1: how resistant dormant cells are (but can't grow)
+    float sporulation_threshold; // 0-1: stress level that triggers dormancy/spore state
     float biofilm_investment;    // 0-1: trade growth for resilience
+    float biofilm_tendency;      // 0-1: tendency to form protective biofilm
     float motility;              // 0-1: how much the colony can drift/move
     float motility_direction;    // 0-2π: preferred drift direction (can evolve)
+    float specialization;        // 0-1: how different edge vs interior cells behave
     
     // === Metabolic Strategy ===
     float efficiency;            // 0-1: high=slow but sustainable, low=fast but depletes resources
+    
+    // === Neural Network Decision Layer ===
+    float hidden_weights[8];     // Hidden layer weights for decision network
+    float learning_rate;         // 0-1: how quickly the colony adapts
+    float memory_factor;         // 0-1: how much past experience influences decisions
     
     Color body_color;
     Color border_color;
@@ -101,9 +116,15 @@ typedef struct {
     
     // New dynamic state
     ColonyState state;       // Current colony state
+    bool is_dormant;         // Colony is in spore/dormant state
     float stress_level;      // 0-1: accumulated stress
+    float biofilm_strength;  // 0-1: current biofilm protection level
     float drift_x, drift_y;  // Accumulated motility drift
     float signal_strength;   // Current signal output level
+    
+    // Neural network learning state
+    float success_history[8]; // Tracks which directions led to successful expansion
+    uint32_t last_population; // For tracking growth/decline
 } Colony;
 
 // World structure
@@ -120,7 +141,9 @@ typedef struct {
     float* nutrients;       // nutrient level per cell (0-1)
     float* toxins;          // toxin level per cell (0-1) 
     float* signals;         // chemical signal level per cell (0-1)
+    float* alarm_signals;   // alarm signal level per cell (0-1) - warns of hostile contact
     uint32_t* signal_source; // which colony emitted signal at each cell
+    uint32_t* alarm_source;  // which colony emitted alarm at each cell
 } World;
 
 #endif // FEROX_TYPES_H

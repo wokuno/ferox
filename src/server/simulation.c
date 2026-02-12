@@ -5,10 +5,65 @@
 #include "../shared/colors.h"
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 // Direction offsets for 4-connectivity (N, E, S, W)
 static const int DX[] = {0, 1, 0, -1};
 static const int DY[] = {-1, 0, 1, 0};
+
+// Environmental constants
+#define NUTRIENT_DEPLETION_RATE 0.05f   // Nutrients consumed per cell per tick
+#define NUTRIENT_REGEN_RATE 0.002f      // Natural nutrient regeneration
+#define TOXIN_DECAY_RATE 0.01f          // Toxin decay per tick
+#define QUORUM_SENSING_RADIUS 3         // Radius for local density calculation
+
+// Calculate local population density around a cell
+static float calculate_local_density(World* world, int x, int y, uint32_t colony_id) {
+    int count = 0;
+    int total = 0;
+    for (int dy = -QUORUM_SENSING_RADIUS; dy <= QUORUM_SENSING_RADIUS; dy++) {
+        for (int dx = -QUORUM_SENSING_RADIUS; dx <= QUORUM_SENSING_RADIUS; dx++) {
+            Cell* neighbor = world_get_cell(world, x + dx, y + dy);
+            if (neighbor) {
+                total++;
+                if (neighbor->colony_id == colony_id) {
+                    count++;
+                }
+            }
+        }
+    }
+    return total > 0 ? (float)count / (float)total : 0.0f;
+}
+
+// Calculate environmental spread modifier for a target cell
+static float calculate_env_spread_modifier(World* world, Colony* colony, int tx, int ty, int sx, int sy) {
+    int target_idx = ty * world->width + tx;
+    float modifier = 1.0f;
+    
+    // Chemotaxis: prefer higher nutrient levels
+    float nutrient = world->nutrients[target_idx];
+    modifier *= (1.0f + colony->genome.nutrient_sensitivity * (nutrient - 0.5f));
+    
+    // Toxin avoidance: avoid areas with toxins
+    float toxin = world->toxins[target_idx];
+    modifier *= (1.0f - colony->genome.toxin_sensitivity * toxin);
+    
+    // Edge preference: positive = prefer edges, negative = prefer center
+    float edge_dist_x = fminf((float)tx, (float)(world->width - 1 - tx)) / (float)(world->width / 2);
+    float edge_dist_y = fminf((float)ty, (float)(world->height - 1 - ty)) / (float)(world->height / 2);
+    float edge_factor = 1.0f - fminf(edge_dist_x, edge_dist_y);
+    modifier *= (1.0f + colony->genome.edge_affinity * (edge_factor - 0.5f));
+    
+    // Quorum sensing: reduce spread probability if local density exceeds threshold
+    float local_density = calculate_local_density(world, sx, sy, colony->id);
+    if (local_density > colony->genome.quorum_threshold) {
+        float density_penalty = (local_density - colony->genome.quorum_threshold) * 
+                                (1.0f - colony->genome.density_tolerance);
+        modifier *= (1.0f - density_penalty);
+    }
+    
+    return utils_clamp_f(modifier, 0.0f, 2.0f);
+}
 
 // Stack for iterative flood-fill
 typedef struct {
@@ -149,7 +204,7 @@ void simulation_spread(World* world) {
             Colony* colony = world_get_colony(world, cell->colony_id);
             if (!colony) continue;
             
-            // Try to spread to neighbors based on spread_rate
+            // Try to spread to neighbors based on spread_rate with environmental modifiers
             for (int d = 0; d < 4; d++) {
                 int nx = x + DX[d];
                 int ny = y + DY[d];
@@ -158,8 +213,11 @@ void simulation_spread(World* world) {
                 if (!neighbor) continue;
                 
                 if (neighbor->colony_id == 0) {
-                    // Empty cell - can spread
-                    if (rand_float() < colony->genome.spread_rate * colony->genome.metabolism) {
+                    // Empty cell - calculate spread probability with environmental sensing
+                    float env_modifier = calculate_env_spread_modifier(world, colony, nx, ny, x, y);
+                    float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * env_modifier;
+                    
+                    if (rand_float() < spread_prob) {
                         if (pending_count >= pending_capacity) {
                             pending_capacity *= 2;
                             pending = (PendingCell*)realloc(pending, pending_capacity * sizeof(PendingCell));
@@ -167,8 +225,6 @@ void simulation_spread(World* world) {
                         pending[pending_count++] = (PendingCell){nx, ny, cell->colony_id};
                     }
                 }
-                // Note: Direct attacks on enemy cells disabled to promote coexistence
-                // Colonies compete by racing to fill empty space, not by destroying each other
             }
         }
     }
@@ -529,6 +585,259 @@ void simulation_update_colony_stats(World* world) {
     }
 }
 
+// ============================================================================
+// Environmental Dynamics Functions
+// ============================================================================
+
+// Update nutrient levels: deplete where cells are, regenerate elsewhere
+void simulation_update_nutrients(World* world) {
+    if (!world || !world->nutrients) return;
+    
+    int total_cells = world->width * world->height;
+    
+    for (int i = 0; i < total_cells; i++) {
+        if (world->cells[i].colony_id != 0) {
+            // Cells consume nutrients based on metabolism
+            Colony* colony = world_get_colony(world, world->cells[i].colony_id);
+            float consumption = NUTRIENT_DEPLETION_RATE;
+            if (colony) {
+                consumption *= colony->genome.metabolism;
+                // High efficiency reduces consumption
+                consumption *= (1.0f - colony->genome.efficiency * 0.5f);
+            }
+            world->nutrients[i] = utils_clamp_f(world->nutrients[i] - consumption, 0.0f, 1.0f);
+        } else {
+            // Empty cells slowly regenerate nutrients
+            world->nutrients[i] = utils_clamp_f(world->nutrients[i] + NUTRIENT_REGEN_RATE, 0.0f, 1.0f);
+        }
+    }
+}
+
+// Decay toxins over time
+void simulation_decay_toxins(World* world) {
+    if (!world || !world->toxins) return;
+    
+    int total_cells = world->width * world->height;
+    for (int i = 0; i < total_cells; i++) {
+        world->toxins[i] = utils_clamp_f(world->toxins[i] - TOXIN_DECAY_RATE, 0.0f, 1.0f);
+    }
+}
+
+// ============================================================================
+// Competitive Strategy Functions
+// ============================================================================
+
+// Produce toxins around colony borders
+void simulation_produce_toxins(World* world) {
+    if (!world || !world->toxins) return;
+    
+    // Decay existing toxins
+    int total_cells = world->width * world->height;
+    for (int i = 0; i < total_cells; i++) {
+        world->toxins[i] *= 0.95f;  // 5% decay per tick
+    }
+    
+    // Each border cell produces toxins
+    for (int y = 0; y < world->height; y++) {
+        for (int x = 0; x < world->width; x++) {
+            Cell* cell = world_get_cell(world, x, y);
+            if (!cell || cell->colony_id == 0 || !cell->is_border) continue;
+            
+            Colony* colony = world_get_colony(world, cell->colony_id);
+            if (!colony || !colony->active) continue;
+            
+            // Border cells produce toxins based on toxin_production trait
+            // High defense_priority increases toxin output at borders
+            float production = colony->genome.toxin_production * 
+                               (1.0f + colony->genome.defense_priority * 0.5f);
+            
+            // Emit toxins to neighboring cells
+            for (int d = 0; d < 4; d++) {
+                int nx = x + DX[d];
+                int ny = y + DY[d];
+                if (nx < 0 || nx >= world->width || ny < 0 || ny >= world->height) continue;
+                
+                int idx = ny * world->width + nx;
+                world->toxins[idx] = utils_clamp_f(world->toxins[idx] + production * 0.1f, 0.0f, 1.0f);
+            }
+        }
+    }
+}
+
+// Apply toxin damage to cells
+void simulation_apply_toxin_damage(World* world) {
+    if (!world || !world->toxins) return;
+    
+    // Collect cells that should die from toxins
+    typedef struct { int x, y; } DeadCell;
+    DeadCell* dead = NULL;
+    int dead_count = 0;
+    int dead_capacity = 64;
+    dead = (DeadCell*)malloc(dead_capacity * sizeof(DeadCell));
+    if (!dead) return;
+    
+    for (int y = 0; y < world->height; y++) {
+        for (int x = 0; x < world->width; x++) {
+            int idx = y * world->width + x;
+            Cell* cell = world_get_cell(world, x, y);
+            if (!cell || cell->colony_id == 0) continue;
+            
+            Colony* colony = world_get_colony(world, cell->colony_id);
+            if (!colony || !colony->active) continue;
+            
+            float toxin_level = world->toxins[idx];
+            if (toxin_level <= 0.01f) continue;
+            
+            // Damage = toxin_level * (1 - resistance) * vulnerability_factor
+            // High defense_priority reduces damage at borders
+            float vulnerability = cell->is_border ? 
+                (1.0f - colony->genome.defense_priority * 0.3f) : 1.0f;
+            float damage = toxin_level * (1.0f - colony->genome.toxin_resistance) * vulnerability;
+            
+            // Probabilistic death based on damage
+            if (rand_float() < damage * 0.15f) {
+                if (dead_count >= dead_capacity) {
+                    dead_capacity *= 2;
+                    dead = (DeadCell*)realloc(dead, dead_capacity * sizeof(DeadCell));
+                    if (!dead) return;
+                }
+                dead[dead_count++] = (DeadCell){x, y};
+            }
+        }
+    }
+    
+    // Kill cells
+    for (int i = 0; i < dead_count; i++) {
+        Cell* cell = world_get_cell(world, dead[i].x, dead[i].y);
+        if (cell && cell->colony_id != 0) {
+            Colony* colony = world_get_colony(world, cell->colony_id);
+            if (colony && colony->cell_count > 0) {
+                colony->cell_count--;
+            }
+            cell->colony_id = 0;
+            cell->age = 0;
+            cell->is_border = false;
+        }
+    }
+    
+    free(dead);
+}
+
+// Handle resource consumption and nutrient depletion
+void simulation_consume_resources(World* world) {
+    if (!world || !world->nutrients) return;
+    
+    for (int y = 0; y < world->height; y++) {
+        for (int x = 0; x < world->width; x++) {
+            int idx = y * world->width + x;
+            Cell* cell = world_get_cell(world, x, y);
+            if (!cell || cell->colony_id == 0) continue;
+            
+            Colony* colony = world_get_colony(world, cell->colony_id);
+            if (!colony || !colony->active) continue;
+            
+            // Consume nutrients based on resource_consumption trait
+            // High aggression also increases consumption
+            float consumption = colony->genome.resource_consumption * 
+                                (0.5f + colony->genome.aggression * 0.5f);
+            
+            // Deplete nutrients (but leave some minimum for regrowth)
+            world->nutrients[idx] = utils_clamp_f(
+                world->nutrients[idx] - consumption * 0.02f, 0.1f, 1.0f);
+        }
+    }
+    
+    // Slow nutrient regeneration in empty cells
+    for (int i = 0; i < world->width * world->height; i++) {
+        if (world->cells[i].colony_id == 0) {
+            world->nutrients[i] = utils_clamp_f(world->nutrients[i] + 0.005f, 0.0f, 1.0f);
+        }
+    }
+}
+
+// Combat resolution when colonies meet at borders
+void simulation_resolve_combat(World* world) {
+    if (!world) return;
+    
+    typedef struct { int x, y; uint32_t winner; } CombatResult;
+    CombatResult* results = NULL;
+    int result_count = 0;
+    int result_capacity = 64;
+    results = (CombatResult*)malloc(result_capacity * sizeof(CombatResult));
+    if (!results) return;
+    
+    // Check border cells for adjacent enemy cells
+    for (int y = 0; y < world->height; y++) {
+        for (int x = 0; x < world->width; x++) {
+            Cell* cell = world_get_cell(world, x, y);
+            if (!cell || cell->colony_id == 0 || !cell->is_border) continue;
+            
+            Colony* attacker = world_get_colony(world, cell->colony_id);
+            if (!attacker || !attacker->active) continue;
+            
+            // Check neighbors for enemy cells
+            for (int d = 0; d < 4; d++) {
+                int nx = x + DX[d];
+                int ny = y + DY[d];
+                
+                Cell* neighbor = world_get_cell(world, nx, ny);
+                if (!neighbor || neighbor->colony_id == 0 || 
+                    neighbor->colony_id == cell->colony_id) continue;
+                
+                Colony* defender = world_get_colony(world, neighbor->colony_id);
+                if (!defender || !defender->active) continue;
+                
+                // Combat calculation:
+                // Attacker strength = aggression * (1 - defense_priority) + toxin_production
+                // Defender strength = resilience * defense_priority + toxin_resistance
+                float attack_str = attacker->genome.aggression * (1.0f - attacker->genome.defense_priority * 0.5f) +
+                                   attacker->genome.toxin_production * 0.5f;
+                float defend_str = defender->genome.resilience * (0.5f + defender->genome.defense_priority * 0.5f) +
+                                   defender->genome.toxin_resistance * 0.3f;
+                
+                // Nutrient advantage: well-fed cells fight better
+                if (world->nutrients) {
+                    int attacker_idx = y * world->width + x;
+                    int defender_idx = ny * world->width + nx;
+                    attack_str *= (0.7f + world->nutrients[attacker_idx] * 0.3f);
+                    defend_str *= (0.7f + world->nutrients[defender_idx] * 0.3f);
+                }
+                
+                // Probabilistic outcome - no guaranteed winner
+                float attack_chance = attack_str / (attack_str + defend_str + 0.5f);
+                
+                if (rand_float() < attack_chance * 0.1f) {
+                    // Attacker wins this exchange
+                    if (result_count >= result_capacity) {
+                        result_capacity *= 2;
+                        results = (CombatResult*)realloc(results, result_capacity * sizeof(CombatResult));
+                        if (!results) return;
+                    }
+                    results[result_count++] = (CombatResult){nx, ny, cell->colony_id};
+                }
+            }
+        }
+    }
+    
+    // Apply combat results
+    for (int i = 0; i < result_count; i++) {
+        Cell* cell = world_get_cell(world, results[i].x, results[i].y);
+        if (cell && cell->colony_id != 0 && cell->colony_id != results[i].winner) {
+            // Defender loses this cell
+            Colony* loser = world_get_colony(world, cell->colony_id);
+            if (loser && loser->cell_count > 0) {
+                loser->cell_count--;
+            }
+            // Cell becomes empty (not captured - simulates mutual destruction)
+            cell->colony_id = 0;
+            cell->age = 0;
+            cell->is_border = false;
+        }
+    }
+    
+    free(results);
+}
+
 void simulation_tick(World* world) {
     if (!world) return;
     
@@ -538,6 +847,9 @@ void simulation_tick(World* world) {
             world->cells[i].age++;
         }
     }
+    
+    // Update environmental layers
+    simulation_update_nutrients(world);
     
     // Run simulation phases
     simulation_spread(world);

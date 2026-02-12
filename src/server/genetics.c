@@ -4,7 +4,15 @@
 #include <math.h>
 
 #define MUTATION_DELTA 0.1f
-#define NUM_GENOME_FIELDS 20  // All evolvable traits
+#define NUM_GENOME_FIELDS 26  // All evolvable traits (added neural network + env sensing fields)
+// Most fields: 0-1 range * 1.0 weight = 1.0 contribution each (19 fields = 19.0)
+// social_factor/edge_affinity: -1 to 1 range * 0.5 weight = 1.0 each (2 fields = 2.0)
+// mutation_rate: 0-0.1 range * 5.0 weight = 0.5 contribution
+// gene_transfer_rate: 0-0.1 range * 10.0 weight = 1.0 contribution
+// max_tracked: 1-4 range / 4.0 = 0.75 contribution
+// Neural: hidden_weights avg diff * 0.5 = ~0.5, learning_rate + memory_factor = 2.0
+// Total: 19.0 + 2.0 + 0.5 + 1.0 + 0.75 + 2.5 = 25.75
+#define GENOME_DISTANCE_WEIGHT_SUM 25.75f
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -31,25 +39,42 @@ Genome genome_create_random(void) {
     
     // === Environmental Sensing ===
     g.nutrient_sensitivity = rand_float() * 0.8f;  // 0-0.8: chemotaxis strength
+    g.toxin_sensitivity = 0.3f + rand_float() * 0.6f;  // 0.3-0.9: toxin avoidance
     g.edge_affinity = (rand_float() - 0.5f) * 1.0f;  // -0.5 to 0.5
     g.density_tolerance = 0.3f + rand_float() * 0.7f;  // 0.3-1.0
+    g.quorum_threshold = 0.3f + rand_float() * 0.5f;  // 0.3-0.8: quorum sensing threshold
     
     // === Colony Interactions ===
     g.toxin_production = rand_float() * 0.5f;  // 0-0.5: moderate toxin production
     g.toxin_resistance = rand_float() * 0.8f;  // 0-0.8
     g.signal_emission = rand_float() * 0.6f;  // 0-0.6
     g.signal_sensitivity = rand_float() * 0.8f;  // 0-0.8
+    g.alarm_threshold = 0.3f + rand_float() * 0.5f;  // 0.3-0.8: sensitivity to hostile contact
     g.gene_transfer_rate = rand_float() * 0.05f;  // 0-0.05: rare gene transfer
+    
+    // === Competitive Strategy ===
+    g.resource_consumption = 0.3f + rand_float() * 0.5f;  // 0.3-0.8: balanced resource use
+    g.defense_priority = rand_float() * 0.7f;  // 0-0.7: most colonies moderately defensive
     
     // === Survival Strategies ===
     g.dormancy_threshold = rand_float() * 0.3f;  // 0-0.3: triggers at low population
     g.dormancy_resistance = 0.3f + rand_float() * 0.6f;  // 0.3-0.9
+    g.sporulation_threshold = 0.4f + rand_float() * 0.4f;  // 0.4-0.8: stress level for dormancy
     g.biofilm_investment = rand_float() * 0.5f;  // 0-0.5: trade growth for resilience
+    g.biofilm_tendency = rand_float() * 0.6f;  // 0-0.6: tendency to form biofilm
     g.motility = rand_float() * 0.3f;  // 0-0.3: colony drift speed
     g.motility_direction = rand_float() * 2.0f * (float)M_PI;  // random direction
+    g.specialization = rand_float() * 0.5f;  // 0-0.5: edge vs interior differentiation
     
     // === Metabolic Strategy ===
     g.efficiency = 0.3f + rand_float() * 0.6f;  // 0.3-0.9
+    
+    // === Neural Network Decision Layer ===
+    for (int i = 0; i < 8; i++) {
+        g.hidden_weights[i] = (rand_float() - 0.5f) * 2.0f;  // -1 to 1
+    }
+    g.learning_rate = 0.05f + rand_float() * 0.2f;  // 0.05-0.25
+    g.memory_factor = 0.3f + rand_float() * 0.5f;   // 0.3-0.8
     
     // === Colors ===
     g.body_color.r = (uint8_t)rand_range(50, 255);
@@ -100,15 +125,22 @@ void genome_mutate(Genome* genome) {
     
     // === Environmental Sensing ===
     MUTATE_FIELD(nutrient_sensitivity, 0.0f, 1.0f);
+    MUTATE_FIELD(toxin_sensitivity, 0.0f, 1.0f);
     MUTATE_FIELD_SLOW(edge_affinity, -1.0f, 1.0f);
     MUTATE_FIELD(density_tolerance, 0.0f, 1.0f);
+    MUTATE_FIELD_SLOW(quorum_threshold, 0.0f, 1.0f);
     
     // === Colony Interactions ===
     MUTATE_FIELD_SLOW(toxin_production, 0.0f, 1.0f);
     MUTATE_FIELD(toxin_resistance, 0.0f, 1.0f);
     MUTATE_FIELD(signal_emission, 0.0f, 1.0f);
     MUTATE_FIELD(signal_sensitivity, 0.0f, 1.0f);
+    MUTATE_FIELD(alarm_threshold, 0.0f, 1.0f);
     MUTATE_FIELD_SLOW(gene_transfer_rate, 0.0f, 0.1f);
+    
+    // === Competitive Strategy ===
+    MUTATE_FIELD(resource_consumption, 0.0f, 1.0f);
+    MUTATE_FIELD_SLOW(defense_priority, 0.0f, 1.0f);
     
     // === Survival Strategies ===
     MUTATE_FIELD_SLOW(dormancy_threshold, 0.0f, 0.5f);
@@ -124,6 +156,16 @@ void genome_mutate(Genome* genome) {
     
     // === Metabolic Strategy ===
     MUTATE_FIELD(efficiency, 0.0f, 1.0f);
+    
+    // === Neural Network Decision Layer ===
+    for (int i = 0; i < 8; i++) {
+        if (rand_float() < mutation_chance * 0.5f) {
+            float delta = (rand_float() - 0.5f) * MUTATION_DELTA;
+            genome->hidden_weights[i] = utils_clamp_f(genome->hidden_weights[i] + delta, -1.0f, 1.0f);
+        }
+    }
+    MUTATE_FIELD_SLOW(learning_rate, 0.0f, 1.0f);
+    MUTATE_FIELD_SLOW(memory_factor, 0.0f, 1.0f);
 }
 
 #undef MUTATE_FIELD
@@ -149,15 +191,22 @@ float genome_distance(const Genome* a, const Genome* b) {
     
     // Environmental sensing
     diff += utils_abs_f(a->nutrient_sensitivity - b->nutrient_sensitivity);
+    diff += utils_abs_f(a->toxin_sensitivity - b->toxin_sensitivity);
     diff += utils_abs_f(a->edge_affinity - b->edge_affinity) * 0.5f;
     diff += utils_abs_f(a->density_tolerance - b->density_tolerance);
+    diff += utils_abs_f(a->quorum_threshold - b->quorum_threshold);
     
     // Colony interactions
     diff += utils_abs_f(a->toxin_production - b->toxin_production);
     diff += utils_abs_f(a->toxin_resistance - b->toxin_resistance);
     diff += utils_abs_f(a->signal_emission - b->signal_emission);
     diff += utils_abs_f(a->signal_sensitivity - b->signal_sensitivity);
+    diff += utils_abs_f(a->alarm_threshold - b->alarm_threshold);
     diff += utils_abs_f(a->gene_transfer_rate - b->gene_transfer_rate) * 10.0f;
+    
+    // Competitive strategy
+    diff += utils_abs_f(a->resource_consumption - b->resource_consumption);
+    diff += utils_abs_f(a->defense_priority - b->defense_priority);
     
     // Survival strategies
     diff += utils_abs_f(a->dormancy_threshold - b->dormancy_threshold);
@@ -165,8 +214,17 @@ float genome_distance(const Genome* a, const Genome* b) {
     diff += utils_abs_f(a->motility - b->motility);
     diff += utils_abs_f(a->efficiency - b->efficiency);
     
+    // Neural network weights (averaged difference, scaled)
+    float nn_diff = 0.0f;
+    for (int i = 0; i < 8; i++) {
+        nn_diff += utils_abs_f(a->hidden_weights[i] - b->hidden_weights[i]);
+    }
+    diff += nn_diff / 8.0f * 0.5f;  // Average diff scaled by 0.5 (range is -1 to 1)
+    diff += utils_abs_f(a->learning_rate - b->learning_rate);
+    diff += utils_abs_f(a->memory_factor - b->memory_factor);
+    
     // Normalize to 0-1 range
-    return diff / (float)NUM_GENOME_FIELDS;
+    return diff / GENOME_DISTANCE_WEIGHT_SUM;
 }
 
 // Helper macro for merging
@@ -204,15 +262,22 @@ Genome genome_merge(const Genome* a, size_t count_a, const Genome* b, size_t cou
     
     // Environmental sensing
     MERGE_FIELD(nutrient_sensitivity);
+    MERGE_FIELD(toxin_sensitivity);
     MERGE_FIELD(edge_affinity);
     MERGE_FIELD(density_tolerance);
+    MERGE_FIELD(quorum_threshold);
     
     // Colony interactions
     MERGE_FIELD(toxin_production);
     MERGE_FIELD(toxin_resistance);
     MERGE_FIELD(signal_emission);
     MERGE_FIELD(signal_sensitivity);
+    MERGE_FIELD(alarm_threshold);
     MERGE_FIELD(gene_transfer_rate);
+    
+    // Competitive strategy
+    MERGE_FIELD(resource_consumption);
+    MERGE_FIELD(defense_priority);
     
     // Survival strategies
     MERGE_FIELD(dormancy_threshold);

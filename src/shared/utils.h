@@ -35,6 +35,16 @@ static inline float utils_abs_f(float val) {
     return val < 0 ? -val : val;
 }
 
+// Sigmoid activation function for neural network (returns 0-1)
+static inline float sigmoid(float x) {
+    return 1.0f / (1.0f + expf(-x));
+}
+
+// Fast sigmoid approximation for neural network (returns 0-1)
+static inline float sigmoid_fast(float x) {
+    return x / (1.0f + fabsf(x)) * 0.5f + 0.5f;
+}
+
 // ============================================================================
 // Procedural noise functions for colony shape generation
 // ============================================================================
