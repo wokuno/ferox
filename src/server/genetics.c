@@ -24,65 +24,81 @@
 Genome genome_create_random(void) {
     Genome g;
     
-    // === Basic Traits - Very aggressive for dynamic simulation ===
+    // === RANDOM ARCHETYPE: Create varied colony types ===
+    // Each colony gets a random "personality" that affects all traits
+    float aggression_bias = rand_float();  // 0=defensive, 1=aggressive
+    float growth_bias = rand_float();      // 0=slow/stable, 1=fast/volatile
+    float social_bias = rand_float();      // 0=loner, 1=cooperative
+    
+    // === Basic Traits - Wide variance for diversity ===
     for (int i = 0; i < 8; i++) {
-        g.spread_weights[i] = 0.5f + rand_float() * 0.5f;  // Higher base weights
+        // Some directions are strongly preferred, others weak
+        g.spread_weights[i] = rand_float();  // Full 0-1 range
     }
-    g.spread_rate = 0.7f + rand_float() * 0.3f;  // 0.7-1.0: very fast spread
-    g.mutation_rate = 0.05f + rand_float() * 0.15f;  // 0.05-0.2: high mutation
-    g.aggression = 0.5f + rand_float() * 0.5f;  // 0.5-1.0: very aggressive
-    g.resilience = 0.3f + rand_float() * 0.4f;  // 0.3-0.7
-    g.metabolism = 0.7f + rand_float() * 0.3f;  // 0.7-1.0: very high metabolism
+    // Normalize one direction to be strong
+    g.spread_weights[rand() % 8] = 0.8f + rand_float() * 0.2f;
     
-    // === Social Behavior ===
-    g.detection_range = 0.2f + rand_float() * 0.5f;  // 0.2-0.7: better awareness
-    g.max_tracked = (uint8_t)(2 + rand_range(0, 3));  // 2-5
-    g.social_factor = (rand_float() - 0.5f) * 2.0f;  // -1 to 1
-    g.merge_affinity = rand_float() * 0.3f;  // 0-0.3
+    g.spread_rate = utils_clamp_f(0.2f + rand_float() * 0.5f + growth_bias * 0.3f, 0.0f, 1.0f);
+    g.mutation_rate = 0.02f + rand_float() * 0.25f;  // 0.02-0.27: wide mutation range
+    g.aggression = utils_clamp_f(rand_float() * 0.4f + aggression_bias * 0.6f, 0.0f, 1.0f);
+    g.resilience = utils_clamp_f(rand_float() * 0.5f + (1.0f - aggression_bias) * 0.4f, 0.0f, 1.0f);
+    g.metabolism = utils_clamp_f(0.3f + rand_float() * 0.4f + growth_bias * 0.3f, 0.0f, 1.0f);
     
-    // === Environmental Sensing ===
-    g.nutrient_sensitivity = 0.3f + rand_float() * 0.6f;  // 0.3-0.9: strong chemotaxis
-    g.toxin_sensitivity = 0.4f + rand_float() * 0.5f;  // 0.4-0.9
-    g.edge_affinity = (rand_float() - 0.3f) * 1.0f;  // -0.3 to 0.7: slight preference for edges
-    g.density_tolerance = 0.4f + rand_float() * 0.6f;  // 0.4-1.0
-    g.quorum_threshold = 0.2f + rand_float() * 0.4f;  // 0.2-0.6: faster quorum response
+    // === Social Behavior - Very varied ===
+    g.detection_range = rand_float() * 0.8f;  // 0-0.8: full range
+    g.max_tracked = (uint8_t)(1 + rand_range(0, 5));  // 1-6
+    g.social_factor = utils_clamp_f((social_bias - 0.5f) * 2.0f + (rand_float() - 0.5f) * 0.5f, -1.0f, 1.0f);
+    g.merge_affinity = rand_float() * 0.5f * social_bias;  // 0-0.5, social colonies merge more
     
-    // === Colony Interactions - More aggressive ===
-    g.toxin_production = 0.2f + rand_float() * 0.6f;  // 0.2-0.8: higher toxin production
-    g.toxin_resistance = 0.2f + rand_float() * 0.6f;  // 0.2-0.8
-    g.signal_emission = 0.3f + rand_float() * 0.5f;  // 0.3-0.8
-    g.signal_sensitivity = 0.3f + rand_float() * 0.6f;  // 0.3-0.9
-    g.alarm_threshold = 0.2f + rand_float() * 0.4f;  // 0.2-0.6: faster alarm response
-    g.gene_transfer_rate = rand_float() * 0.1f;  // 0-0.1: more gene transfer
+    // === Environmental Sensing - Full range ===
+    g.nutrient_sensitivity = rand_float();  // 0-1.0
+    g.toxin_sensitivity = rand_float();  // 0-1.0
+    g.edge_affinity = (rand_float() - 0.5f) * 2.0f;  // -1 to 1
+    g.density_tolerance = rand_float();  // 0-1.0
+    g.quorum_threshold = rand_float() * 0.8f;  // 0-0.8
     
-    // === Competitive Strategy - Aggressive ===
-    g.resource_consumption = 0.5f + rand_float() * 0.4f;  // 0.5-0.9: high consumption
-    g.defense_priority = 0.3f + rand_float() * 0.5f;  // 0.3-0.8
+    // === Colony Interactions - Wide variety ===
+    g.toxin_production = utils_clamp_f(rand_float() * aggression_bias + rand_float() * 0.2f, 0.0f, 1.0f);
+    g.toxin_resistance = rand_float();  // 0-1.0
+    g.signal_emission = utils_clamp_f(rand_float() * social_bias + rand_float() * 0.3f, 0.0f, 1.0f);
+    g.signal_sensitivity = rand_float();  // 0-1.0
+    g.alarm_threshold = rand_float() * 0.8f;  // 0-0.8
+    g.gene_transfer_rate = rand_float() * 0.15f;  // 0-0.15
+    
+    // === Competitive Strategy ===
+    g.resource_consumption = utils_clamp_f(0.2f + rand_float() * 0.8f, 0.0f, 1.0f);
+    g.defense_priority = utils_clamp_f(rand_float() * (1.0f - aggression_bias) + 0.1f, 0.0f, 1.0f);
     
     // === Survival Strategies ===
-    g.dormancy_threshold = rand_float() * 0.2f;  // 0-0.2
-    g.dormancy_resistance = 0.4f + rand_float() * 0.5f;  // 0.4-0.9
-    g.sporulation_threshold = 0.5f + rand_float() * 0.4f;  // 0.5-0.9
-    g.biofilm_investment = rand_float() * 0.4f;  // 0-0.4
-    g.biofilm_tendency = rand_float() * 0.5f;  // 0-0.5
-    g.motility = 0.1f + rand_float() * 0.4f;  // 0.1-0.5: more mobile
+    g.dormancy_threshold = rand_float() * 0.4f;  // 0-0.4
+    g.dormancy_resistance = rand_float() * 0.8f + 0.2f;  // 0.2-1.0
+    g.sporulation_threshold = rand_float() * 0.6f + 0.2f;  // 0.2-0.8
+    g.biofilm_investment = rand_float() * 0.6f;  // 0-0.6
+    g.biofilm_tendency = rand_float() * 0.7f;  // 0-0.7
+    g.motility = rand_float() * 0.6f;  // 0-0.6: full motility range
     g.motility_direction = rand_float() * 2.0f * (float)M_PI;
-    g.specialization = rand_float() * 0.5f;
+    g.specialization = rand_float() * 0.7f;  // 0-0.7
     
     // === Metabolic Strategy ===
-    g.efficiency = 0.4f + rand_float() * 0.5f;  // 0.4-0.9
+    g.efficiency = rand_float() * 0.7f + 0.3f;  // 0.3-1.0
     
-    // === Neural Network Decision Layer - More active ===
+    // === Neural Network Decision Layer ===
     for (int i = 0; i < 8; i++) {
-        g.hidden_weights[i] = (rand_float() - 0.5f) * 2.0f;  // -1 to 1
+        // More extreme weights for varied behavior
+        float w = (rand_float() - 0.5f) * 2.0f;
+        // 20% chance of extreme weight
+        if (rand_float() < 0.2f) {
+            w = w > 0 ? 0.8f + rand_float() * 0.2f : -0.8f - rand_float() * 0.2f;
+        }
+        g.hidden_weights[i] = w;
     }
-    g.learning_rate = 0.1f + rand_float() * 0.3f;  // 0.1-0.4: faster learning
-    g.memory_factor = 0.4f + rand_float() * 0.4f;   // 0.4-0.8
+    g.learning_rate = rand_float() * 0.5f;  // 0-0.5
+    g.memory_factor = rand_float() * 0.8f + 0.2f;  // 0.2-1.0
     
-    // === Colors ===
-    g.body_color.r = (uint8_t)rand_range(50, 255);
-    g.body_color.g = (uint8_t)rand_range(50, 255);
-    g.body_color.b = (uint8_t)rand_range(50, 255);
+    // === Colors - Full vibrant range ===
+    g.body_color.r = (uint8_t)rand_range(30, 255);
+    g.body_color.g = (uint8_t)rand_range(30, 255);
+    g.body_color.b = (uint8_t)rand_range(30, 255);
     g.border_color.r = (uint8_t)(g.body_color.r / 2);
     g.border_color.g = (uint8_t)(g.body_color.g / 2);
     g.border_color.b = (uint8_t)(g.body_color.b / 2);
@@ -114,17 +130,34 @@ void genome_mutate(Genome* genome) {
     if (!genome) return;
     
     // Base mutation chance from genome, but with a floor for constant evolution
-    float mutation_chance = fmaxf(genome->mutation_rate, 0.05f);
+    float mutation_chance = fmaxf(genome->mutation_rate, 0.08f);
     
-    // Occasional "hypermutation" events - dramatic genetic shifts
-    bool hypermutation = rand_float() < 0.02f;  // 2% chance per mutation call
+    // Occasional "hypermutation" events - dramatic genetic shifts (5% chance)
+    bool hypermutation = rand_float() < 0.05f;
     if (hypermutation) {
-        mutation_chance *= 3.0f;  // Triple mutation rate during hypermutation
+        mutation_chance *= 4.0f;  // Quadruple mutation rate during hypermutation
+    }
+    
+    // Rare "radical mutation" - completely randomize one trait (1% chance)
+    if (rand_float() < 0.01f) {
+        int trait = rand() % 10;
+        switch (trait) {
+            case 0: genome->spread_rate = rand_float(); break;
+            case 1: genome->aggression = rand_float(); break;
+            case 2: genome->resilience = rand_float(); break;
+            case 3: genome->metabolism = rand_float(); break;
+            case 4: genome->toxin_production = rand_float(); break;
+            case 5: genome->toxin_resistance = rand_float(); break;
+            case 6: genome->motility = rand_float() * 0.6f; break;
+            case 7: genome->social_factor = (rand_float() - 0.5f) * 2.0f; break;
+            case 8: genome->efficiency = rand_float(); break;
+            case 9: genome->defense_priority = rand_float(); break;
+        }
     }
     
     // === Basic Traits - these drive core behavior ===
-    MUTATE_FIELD_LARGE(spread_rate, 0.1f, 1.0f);  // Always some spread capability
-    MUTATE_FIELD(mutation_rate, 0.02f, 0.3f);     // Higher max mutation rate
+    MUTATE_FIELD_LARGE(spread_rate, 0.0f, 1.0f);
+    MUTATE_FIELD(mutation_rate, 0.01f, 0.4f);  // Can get very high mutation
     MUTATE_FIELD_LARGE(aggression, 0.0f, 1.0f);
     MUTATE_FIELD_LARGE(resilience, 0.0f, 1.0f);
     MUTATE_FIELD_LARGE(metabolism, 0.2f, 1.0f);   // Always some metabolism

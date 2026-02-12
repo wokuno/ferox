@@ -351,19 +351,86 @@ void simulation_mutate(World* world) {
         if (!colony->active) continue;
         
         // Higher baseline mutation - evolution should be visible
-        // Minimum 5% chance + mutation_rate contribution
-        float baseline_rate = 0.05f + colony->genome.mutation_rate * 0.5f;
+        // Minimum 8% chance + mutation_rate contribution
+        float baseline_rate = 0.08f + colony->genome.mutation_rate * 0.6f;
         
         // Stressed colonies mutate much more as they try to adapt
-        baseline_rate *= (1.0f + colony->stress_level * 2.0f);
+        baseline_rate *= (1.0f + colony->stress_level * 2.5f);
         
         // Larger colonies have more chances to mutate (more cells dividing)
-        baseline_rate *= (1.0f + (float)colony->cell_count / 500.0f);
+        baseline_rate *= (1.0f + (float)colony->cell_count / 300.0f);
         
         if (rand_float() < baseline_rate) {
+            // Store original genome for speciation check
+            Genome original = colony->genome;
+            
+            // Apply mutation
             genome_mutate(&colony->genome);
+            
             // Update colony color to reflect genome changes
             colony->color = colony->genome.body_color;
+            
+            // SPECIATION EVENT: If mutation was extreme, create a new species
+            // Check how different the genome became
+            float genetic_distance = genome_distance(&original, &colony->genome);
+            
+            // 5% base chance of speciation, higher if mutation was dramatic
+            float speciation_chance = 0.05f + genetic_distance * 0.3f;
+            
+            // More likely for larger colonies (more genetic diversity)
+            if (colony->cell_count > 30) {
+                speciation_chance *= 1.5f;
+            }
+            
+            if (rand_float() < speciation_chance && colony->cell_count > 10) {
+                // SPECIATION! Split off some cells as a new species
+                // The new species gets the mutated genome, parent keeps original
+                
+                int cells_for_new = (int)(colony->cell_count * (0.2f + rand_float() * 0.3f));  // 20-50%
+                if (cells_for_new >= 5) {
+                    // Create new colony with mutated genome
+                    Colony new_species;
+                    memset(&new_species, 0, sizeof(Colony));
+                    new_species.genome = colony->genome;  // Mutated genome goes to new species
+                    new_species.color = new_species.genome.body_color;
+                    new_species.active = true;
+                    new_species.parent_id = colony->id;
+                    new_species.shape_seed = colony->shape_seed ^ (uint32_t)(rand() << 8);
+                    new_species.wobble_phase = rand_float() * 6.28f;
+                    new_species.cell_count = 0;  // Will be set by cell transfer
+                    new_species.max_cell_count = 0;
+                    generate_scientific_name(new_species.name, sizeof(new_species.name));
+                    
+                    // Revert parent to original genome
+                    colony->genome = original;
+                    colony->color = original.body_color;
+                    
+                    uint32_t new_id = world_add_colony(world, new_species);
+                    if (new_id > 0) {
+                        // Transfer some cells to new species (border cells preferentially)
+                        int transferred = 0;
+                        for (int j = 0; j < world->width * world->height && transferred < cells_for_new; j++) {
+                            Cell* cell = &world->cells[j];
+                            if (cell->colony_id == colony->id) {
+                                // Prefer border cells for speciation
+                                float transfer_chance = cell->is_border ? 0.6f : 0.3f;
+                                if (rand_float() < transfer_chance) {
+                                    cell->colony_id = new_id;
+                                    cell->age = 0;  // New species cells are "young"
+                                    transferred++;
+                                    if (colony->cell_count > 0) colony->cell_count--;
+                                }
+                            }
+                        }
+                        // Update new species cell count
+                        Colony* new_col = world_get_colony(world, new_id);
+                        if (new_col) {
+                            new_col->cell_count = transferred;
+                            new_col->max_cell_count = transferred;
+                        }
+                    }
+                }
+            }
         }
     }
 }

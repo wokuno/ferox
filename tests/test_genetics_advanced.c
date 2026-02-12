@@ -349,10 +349,10 @@ TEST(genome_create_produces_valid_color_range) {
     for (int i = 0; i < 100; i++) {
         Genome g = genome_create_random();
         
-        // Body colors should be in valid range (50-255 based on implementation)
-        ASSERT(g.body_color.r >= 50 && g.body_color.r <= 255, "Body R out of range");
-        ASSERT(g.body_color.g >= 50 && g.body_color.g <= 255, "Body G out of range");
-        ASSERT(g.body_color.b >= 50 && g.body_color.b <= 255, "Body B out of range");
+        // Body colors should be in valid range (30-255 for more variety)
+        ASSERT(g.body_color.r >= 30 && g.body_color.r <= 255, "Body R out of range");
+        ASSERT(g.body_color.g >= 30 && g.body_color.g <= 255, "Body G out of range");
+        ASSERT(g.body_color.b >= 30 && g.body_color.b <= 255, "Body B out of range");
         
         // Border should be darker (half of body based on implementation)
         ASSERT_LE(g.border_color.r, g.body_color.r);
