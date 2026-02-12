@@ -389,7 +389,8 @@ static void gui_client_render(GuiClient* client) {
                                   client->local_world.tick,
                                   alive_count,
                                   client->local_world.paused,
-                                  client->local_world.speed_multiplier);
+                                  client->local_world.speed_multiplier,
+                                  client->fps);
     
     // Draw controls help hint
     gui_renderer_draw_controls_help(client->renderer);
@@ -401,13 +402,24 @@ void gui_client_run(GuiClient* client) {
     if (!client) return;
     
     client->running = true;
+    client->fps = 60.0f;  // Initial estimate
     
     Uint32 last_time = SDL_GetTicks();
+    Uint32 fps_update_time = last_time;
+    int frame_count = 0;
     
     while (client->running) {
         Uint32 current_time = SDL_GetTicks();
         float dt = (current_time - last_time) / 1000.0f;
         last_time = current_time;
+        
+        // Update FPS counter every 500ms
+        frame_count++;
+        if (current_time - fps_update_time >= 500) {
+            client->fps = frame_count * 1000.0f / (current_time - fps_update_time);
+            frame_count = 0;
+            fps_update_time = current_time;
+        }
         
         // Update animation time
         gui_renderer_update_time(client->renderer, dt);

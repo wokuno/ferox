@@ -705,10 +705,13 @@ void gui_renderer_draw_colony_info(GuiRenderer* renderer, const ProtoColony* col
     SDL_Rect title_bar = { panel_x + 1, panel_y + 1, INFO_PANEL_WIDTH - 2, 25 };
     SDL_RenderFillRect(r, &title_bar);
     
+    // Title text
+    gui_renderer_draw_text(renderer, panel_x + 10, panel_y + 8, "COLONY INFO", 180, 200, 255);
+    
     if (!colony) {
         // No colony selected message
-        SDL_SetRenderDrawColor(r, 150, 150, 170, 255);
-        // Would draw "No colony selected" text here
+        gui_renderer_draw_text(renderer, panel_x + 20, panel_y + 50, "No colony selected", 150, 150, 170);
+        gui_renderer_draw_text(renderer, panel_x + 20, panel_y + 70, "Press TAB to cycle", 120, 120, 140);
         return;
     }
     
@@ -718,6 +721,24 @@ void gui_renderer_draw_colony_info(GuiRenderer* renderer, const ProtoColony* col
     SDL_RenderFillRect(r, &swatch);
     SDL_SetRenderDrawColor(r, 200, 200, 220, 255);
     SDL_RenderDrawRect(r, &swatch);
+    
+    // Colony name (truncate if too long)
+    char name_buf[24];
+    snprintf(name_buf, sizeof(name_buf), "%.20s", colony->name);
+    gui_renderer_draw_text(renderer, panel_x + 40, panel_y + 40, name_buf, 220, 220, 240);
+    
+    // Colony ID
+    char id_buf[16];
+    snprintf(id_buf, sizeof(id_buf), "ID: %u", colony->id);
+    gui_renderer_draw_text(renderer, panel_x + 40, panel_y + 55, id_buf, 150, 150, 170);
+    
+    // Position
+    char pos_buf[32];
+    snprintf(pos_buf, sizeof(pos_buf), "Pos: %.0f, %.0f", colony->x, colony->y);
+    gui_renderer_draw_text(renderer, panel_x + 10, panel_y + 75, pos_buf, 150, 160, 180);
+    
+    // Population label
+    gui_renderer_draw_text(renderer, panel_x + 10, panel_y + 90, "Population:", 150, 160, 180);
     
     // Population bar
     int bar_y = panel_y + 100;
@@ -734,8 +755,15 @@ void gui_renderer_draw_colony_info(GuiRenderer* renderer, const ProtoColony* col
     SDL_Rect bar_fill = { panel_x + 20, bar_y, (int)(bar_width * pop_ratio), 15 };
     SDL_RenderFillRect(r, &bar_fill);
     
+    // Population numbers
+    char pop_buf[32];
+    snprintf(pop_buf, sizeof(pop_buf), "%d / %d", colony->population, colony->max_population);
+    gui_renderer_draw_text(renderer, panel_x + 20, bar_y + 20, pop_buf, 180, 180, 200);
+    
     // Growth indicator
-    int growth_y = panel_y + 130;
+    int growth_y = panel_y + 140;
+    gui_renderer_draw_text(renderer, panel_x + 10, growth_y - 10, "Growth:", 150, 160, 180);
+    
     SDL_SetRenderDrawColor(r, 100, 100, 120, 255);
     SDL_RenderDrawLine(r, panel_x + 20, growth_y + 7, panel_x + INFO_PANEL_WIDTH - 20, growth_y + 7);
     
@@ -764,9 +792,8 @@ void gui_renderer_draw_colony_info(GuiRenderer* renderer, const ProtoColony* col
 }
 
 void gui_renderer_draw_status_bar(GuiRenderer* renderer, uint32_t tick, int colony_count,
-                                   bool paused, float speed) {
+                                   bool paused, float speed, float fps) {
     if (!renderer) return;
-    (void)tick;  // Used for tick counter display (TODO: add text rendering)
     
     SDL_Renderer* r = renderer->renderer;
     
@@ -790,6 +817,7 @@ void gui_renderer_draw_status_bar(GuiRenderer* renderer, uint32_t tick, int colo
         SDL_Rect pause2 = { 25, bar_y + 8, 5, 14 };
         SDL_RenderFillRect(r, &pause1);
         SDL_RenderFillRect(r, &pause2);
+        gui_renderer_draw_text(renderer, 40, bar_y + 10, "PAUSED", 200, 150, 50);
     } else {
         SDL_SetRenderDrawColor(r, 100, 200, 100, 255);
         // Draw play symbol (triangle)
@@ -798,34 +826,25 @@ void gui_renderer_draw_status_bar(GuiRenderer* renderer, uint32_t tick, int colo
         }
     }
     
-    // Speed indicator bars
-    int speed_x = 50;
-    int num_bars = (int)(speed + 0.5f);
-    if (num_bars < 1) num_bars = 1;
-    if (num_bars > 10) num_bars = 10;
+    // Tick counter
+    char tick_buf[32];
+    snprintf(tick_buf, sizeof(tick_buf), "Tick: %u", tick);
+    gui_renderer_draw_text(renderer, 100, bar_y + 10, tick_buf, 180, 180, 200);
     
-    for (int i = 0; i < num_bars && i < 5; i++) {
-        SDL_SetRenderDrawColor(r, 100, 150, 200, 200);
-        SDL_Rect speed_bar = { speed_x + i * 8, bar_y + 10, 5, 10 };
-        SDL_RenderFillRect(r, &speed_bar);
-    }
+    // Speed display
+    char speed_buf[24];
+    snprintf(speed_buf, sizeof(speed_buf), "Speed: %.1fx", speed);
+    gui_renderer_draw_text(renderer, 220, bar_y + 10, speed_buf, 150, 180, 220);
     
-    // Colony count indicator (circles)
-    int colony_x = renderer->window_width - 150;
-    SDL_SetRenderDrawColor(r, 150, 200, 150, 200);
-    for (int i = 0; i < colony_count && i < 10; i++) {
-        int dot_x = colony_x + i * 12;
-        SDL_Rect dot = { dot_x, bar_y + 11, 8, 8 };
-        SDL_RenderFillRect(r, &dot);
-    }
+    // FPS display
+    char fps_buf[16];
+    snprintf(fps_buf, sizeof(fps_buf), "FPS: %.0f", fps);
+    gui_renderer_draw_text(renderer, 340, bar_y + 10, fps_buf, 150, 200, 150);
     
-    // If more than 10, show "+"
-    if (colony_count > 10) {
-        SDL_SetRenderDrawColor(r, 200, 200, 200, 255);
-        int plus_x = colony_x + 10 * 12 + 5;
-        SDL_RenderDrawLine(r, plus_x, bar_y + 15, plus_x + 10, bar_y + 15);
-        SDL_RenderDrawLine(r, plus_x + 5, bar_y + 10, plus_x + 5, bar_y + 20);
-    }
+    // Colony count
+    char colony_buf[24];
+    snprintf(colony_buf, sizeof(colony_buf), "Colonies: %d", colony_count);
+    gui_renderer_draw_text(renderer, renderer->window_width - 120, bar_y + 10, colony_buf, 180, 200, 180);
 }
 
 // Draw text using bitmap font

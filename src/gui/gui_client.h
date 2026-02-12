@@ -15,6 +15,7 @@ typedef struct GuiClient {
     bool running;
     uint32_t selected_colony;
     uint32_t selected_index;      // Index in colony array for cycling
+    float fps;                    // Current frames per second
 } GuiClient;
 
 // Create and destroy
