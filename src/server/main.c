@@ -46,7 +46,7 @@ int main(int argc, char* argv[]) {
     int world_height = 100;
     int thread_count = 4;
     int initial_colonies = 20;
-    int tick_rate_ms = 100;
+    int tick_rate_ms = 50;  // Faster default (was 100ms)
     
     // Long options
     static struct option long_options[] = {
