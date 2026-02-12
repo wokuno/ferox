@@ -351,28 +351,32 @@ static void gui_client_process_input(GuiClient* client, GuiInputState* input) {
 }
 
 static void gui_client_receive_updates(GuiClient* client) {
-    if (!client->socket || !net_has_data(client->socket)) return;
+    if (!client->socket) return;
     
-    MessageHeader header;
-    uint8_t* payload = NULL;
+    // Drain all pending messages to keep up with high-speed simulation
+    // This prevents buffer overflow when server sends faster than we render
+    int messages_processed = 0;
+    const int max_messages_per_frame = 50;  // Limit to prevent infinite loop
     
-    // Try to receive with timeout to avoid blocking forever
-    net_set_nonblocking(client->socket, false);
-    
-    int result = protocol_recv_message(client->socket->fd, &header, &payload);
-    if (result == 0) {
-        gui_client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
-        free(payload);
-    } else if (result < 0) {
-        // Connection error - but don't immediately quit, try to reconnect or continue
-        // Only disconnect on fatal errors
-        fprintf(stderr, "Network receive error\n");
-        client->connected = false;
-        // Don't set running = false here - let user decide to quit
+    while (net_has_data(client->socket) && messages_processed < max_messages_per_frame) {
+        MessageHeader header;
+        uint8_t* payload = NULL;
+        
+        int result = protocol_recv_message(client->socket->fd, &header, &payload);
+        if (result == 0) {
+            gui_client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
+            free(payload);
+            messages_processed++;
+        } else if (result < 0) {
+            // Connection error
+            fprintf(stderr, "Network receive error\n");
+            client->connected = false;
+            break;
+        } else {
+            // Partial read, try again next frame
+            break;
+        }
     }
-    // result > 0 means partial read, just continue
-    
-    net_set_nonblocking(client->socket, true);
 }
 
 static void gui_client_render(GuiClient* client) {
