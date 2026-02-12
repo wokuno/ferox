@@ -4,12 +4,26 @@ Thank you for your interest in contributing to Ferox! This document provides gui
 
 ## Table of Contents
 
+- [Security](#security)
 - [Development Setup](#development-setup)
 - [Code Style](#code-style)
 - [Commit Message Format](#commit-message-format)
 - [Pull Request Process](#pull-request-process)
 - [Project Structure](#project-structure)
 - [Testing Requirements](#testing-requirements)
+
+## Security
+
+Please review [SECURITY.md](../SECURITY.md) before contributing. Key points:
+
+- **Code Owners**: All PRs require review from code owners (see `.github/CODEOWNERS`)
+- **Workflow changes**: Modifications to `.github/` require explicit owner approval
+- **No secrets**: Never commit credentials, tokens, or sensitive data
+- **Dependency caution**: This project intentionally has minimal dependencies
+
+### Reporting Vulnerabilities
+
+Do NOT open public issues for security vulnerabilities. See [SECURITY.md](../SECURITY.md) for reporting instructions.
 
 ## Development Setup
 

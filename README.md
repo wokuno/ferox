@@ -99,6 +99,14 @@ make install
 ./ferox_client [server_address] [port]
 ```
 
+## Contributing
+
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for development guidelines.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for security policy and vulnerability reporting.
+
 ## Development
 
 ### Debug Build

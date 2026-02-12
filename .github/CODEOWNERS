@@ -1,0 +1,16 @@
+# Code Owners for Ferox
+# These users will be requested for review when PRs modify matching files
+
+# Default owner for everything
+* @wokuno
+
+# Workflow files require owner approval
+/.github/ @wokuno
+
+# Core simulation code
+/src/server/ @wokuno
+/src/shared/ @wokuno
+
+# Security-sensitive files
+/scripts/ @wokuno
+CMakeLists.txt @wokuno
