@@ -1476,11 +1476,17 @@ void simulation_tick(World* world) {
     // Creates competition and prevents any colony from dominating forever
     int world_size = world->width * world->height;
     float empty_ratio = 1.0f - (float)total_cells / (float)world_size;
-    // Base 3% spawn chance + more when empty space available
-    float spawn_chance = 0.03f + empty_ratio * 0.1f;
-    if (active_colonies < 200 && rand_float() < spawn_chance) {
+    
+    // Always spawn if population is too low (prevents simulation death)
+    bool force_spawn = active_colonies < 3;
+    
+    // Base 5% spawn chance + more when empty space available + emergency spawns
+    float spawn_chance = 0.05f + empty_ratio * 0.15f;
+    if (active_colonies < 10) spawn_chance += 0.2f;  // Boost when few colonies
+    
+    if ((active_colonies < 200 && rand_float() < spawn_chance) || force_spawn) {
         // Find a random empty spot
-        for (int attempts = 0; attempts < 30; attempts++) {
+        for (int attempts = 0; attempts < 50; attempts++) {
             int x = rand() % world->width;
             int y = rand() % world->height;
             Cell* cell = world_get_cell(world, x, y);
