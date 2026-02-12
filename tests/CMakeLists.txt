@@ -2,7 +2,7 @@
 
 # Phase 1 - Basic shared library tests
 add_executable(test_phase1 test_phase1.c)
-target_link_libraries(test_phase1 PRIVATE ferox_shared)
+target_link_libraries(test_phase1 PRIVATE ferox_shared m)
 add_test(NAME Phase1Tests COMMAND test_phase1)
 
 # Phase 2 - Server library tests
