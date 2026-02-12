@@ -124,5 +124,3 @@ typedef struct {
 } World;
 
 #endif // FEROX_TYPES_H
-
-#endif // FEROX_TYPES_H
