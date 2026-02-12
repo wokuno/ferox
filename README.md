@@ -23,7 +23,8 @@ ferox/
 ├── src/
 │   ├── shared/     # Common utilities, types, networking
 │   ├── server/     # Simulation engine and server
-│   └── client/     # Visualization client
+│   ├── client/     # Terminal visualization client
+│   └── gui/        # SDL2 GUI client
 ├── tests/          # Unit and integration tests
 ├── docs/           # Documentation
 └── cmake/          # CMake modules
