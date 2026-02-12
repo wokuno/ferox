@@ -1,6 +1,7 @@
 #include "genetics.h"
 #include "../shared/utils.h"
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 
 // Much larger mutations for dynamic evolution
@@ -23,90 +24,196 @@
 
 Genome genome_create_random(void) {
     Genome g;
+    memset(&g, 0, sizeof(Genome));
     
-    // === RANDOM ARCHETYPE: Create varied colony types ===
-    // Each colony gets a random "personality" that affects all traits
-    float aggression_bias = rand_float();  // 0=defensive, 1=aggressive
-    float growth_bias = rand_float();      // 0=slow/stable, 1=fast/volatile
-    float social_bias = rand_float();      // 0=loner, 1=cooperative
+    // === STRATEGY ARCHETYPE: Pick a dominant strategy ===
+    // This creates VASTLY different colony behaviors
+    int strategy = rand() % 8;
     
-    // === Basic Traits - Wide variance for diversity ===
-    for (int i = 0; i < 8; i++) {
-        // Some directions are strongly preferred, others weak
-        g.spread_weights[i] = rand_float();  // Full 0-1 range
+    // Base randomness for all traits
+    float chaos = rand_float();  // 0-1: how "wild" the colony is
+    
+    // Strategy-specific biases
+    float aggression_bias = 0.5f;
+    float growth_bias = 0.5f;
+    float social_bias = 0.5f;
+    float toxin_bias = 0.5f;
+    float defense_bias = 0.5f;
+    float mobility_bias = 0.5f;
+    
+    switch (strategy) {
+        case 0:  // BERSERKER: Maximum aggression, charge at everything
+            aggression_bias = 0.9f + rand_float() * 0.1f;
+            growth_bias = 0.8f + rand_float() * 0.2f;
+            defense_bias = rand_float() * 0.3f;  // Glass cannon
+            toxin_bias = 0.7f + rand_float() * 0.3f;
+            social_bias = rand_float() * 0.2f;  // Loner
+            mobility_bias = 0.8f + rand_float() * 0.2f;
+            break;
+        case 1:  // TURTLE: Maximum defense, slow but steady
+            aggression_bias = rand_float() * 0.2f;
+            defense_bias = 0.9f + rand_float() * 0.1f;
+            growth_bias = 0.2f + rand_float() * 0.3f;  // Slow growth
+            toxin_bias = 0.3f + rand_float() * 0.3f;
+            social_bias = 0.5f + rand_float() * 0.3f;
+            mobility_bias = rand_float() * 0.2f;  // Stay put
+            break;
+        case 2:  // SWARM: Fast spreading, overwhelm with numbers
+            growth_bias = 0.95f + rand_float() * 0.05f;
+            aggression_bias = 0.5f + rand_float() * 0.3f;
+            defense_bias = rand_float() * 0.4f;  // Weak individually
+            toxin_bias = rand_float() * 0.3f;
+            social_bias = rand_float() * 0.3f;
+            mobility_bias = 0.6f + rand_float() * 0.3f;
+            break;
+        case 3:  // TOXIC: Poison everything, chemical warfare
+            toxin_bias = 0.95f + rand_float() * 0.05f;
+            aggression_bias = 0.4f + rand_float() * 0.4f;
+            defense_bias = 0.5f + rand_float() * 0.3f;
+            growth_bias = 0.3f + rand_float() * 0.4f;
+            social_bias = rand_float() * 0.3f;
+            mobility_bias = 0.3f + rand_float() * 0.3f;
+            break;
+        case 4:  // HIVE: Highly social, cooperative expansion
+            social_bias = 0.9f + rand_float() * 0.1f;
+            growth_bias = 0.5f + rand_float() * 0.3f;
+            aggression_bias = 0.3f + rand_float() * 0.4f;
+            defense_bias = 0.5f + rand_float() * 0.3f;
+            toxin_bias = rand_float() * 0.4f;
+            mobility_bias = 0.4f + rand_float() * 0.3f;
+            break;
+        case 5:  // NOMAD: High mobility, constantly shifting
+            mobility_bias = 0.95f + rand_float() * 0.05f;
+            growth_bias = 0.6f + rand_float() * 0.3f;
+            aggression_bias = 0.4f + rand_float() * 0.4f;
+            defense_bias = rand_float() * 0.4f;
+            toxin_bias = rand_float() * 0.3f;
+            social_bias = rand_float() * 0.5f;
+            break;
+        case 6:  // PARASITE: Weak alone, steals from others
+            aggression_bias = 0.7f + rand_float() * 0.3f;
+            growth_bias = 0.4f + rand_float() * 0.3f;
+            defense_bias = rand_float() * 0.3f;
+            toxin_bias = 0.2f + rand_float() * 0.3f;
+            social_bias = 0.6f + rand_float() * 0.3f;  // Seeks others
+            mobility_bias = 0.5f + rand_float() * 0.3f;
+            break;
+        default:  // CHAOTIC: Completely random, unpredictable
+            aggression_bias = rand_float();
+            growth_bias = rand_float();
+            defense_bias = rand_float();
+            toxin_bias = rand_float();
+            social_bias = rand_float();
+            mobility_bias = rand_float();
+            chaos = 0.8f + rand_float() * 0.2f;  // Extra chaotic
+            break;
     }
-    // Normalize one direction to be strong
-    g.spread_weights[rand() % 8] = 0.8f + rand_float() * 0.2f;
     
-    g.spread_rate = utils_clamp_f(0.2f + rand_float() * 0.5f + growth_bias * 0.3f, 0.0f, 1.0f);
-    g.mutation_rate = 0.02f + rand_float() * 0.25f;  // 0.02-0.27: wide mutation range
-    // Wide aggression variance: full 0-1 range with archetype influence
-    g.aggression = utils_clamp_f(rand_float() * 0.5f + aggression_bias * 0.5f, 0.0f, 1.0f);
-    // Wide defense variance: full 0-1 range, inverse to aggression bias
-    g.resilience = utils_clamp_f(rand_float() * 0.5f + (1.0f - aggression_bias) * 0.5f, 0.0f, 1.0f);
-    g.metabolism = utils_clamp_f(0.3f + rand_float() * 0.4f + growth_bias * 0.3f, 0.0f, 1.0f);
+    // Add chaos factor to all biases
+    aggression_bias = utils_clamp_f(aggression_bias + (rand_float() - 0.5f) * chaos * 0.4f, 0.0f, 1.0f);
+    growth_bias = utils_clamp_f(growth_bias + (rand_float() - 0.5f) * chaos * 0.4f, 0.0f, 1.0f);
+    defense_bias = utils_clamp_f(defense_bias + (rand_float() - 0.5f) * chaos * 0.4f, 0.0f, 1.0f);
     
-    // === Social Behavior - Very varied ===
-    g.detection_range = rand_float() * 0.8f;  // 0-0.8: full range
-    g.max_tracked = (uint8_t)(1 + rand_range(0, 5));  // 1-6
-    g.social_factor = utils_clamp_f((social_bias - 0.5f) * 2.0f + (rand_float() - 0.5f) * 0.5f, -1.0f, 1.0f);
-    g.merge_affinity = rand_float() * 0.5f * social_bias;  // 0-0.5, social colonies merge more
+    // === SPREAD WEIGHTS: Extreme directional preferences ===
+    for (int i = 0; i < 8; i++) {
+        g.spread_weights[i] = rand_float() * 0.5f;  // Base weak
+    }
+    // 1-3 very strong directions
+    int strong_dirs = 1 + rand() % 3;
+    for (int i = 0; i < strong_dirs; i++) {
+        g.spread_weights[rand() % 8] = 0.8f + rand_float() * 0.2f;
+    }
     
-    // === Environmental Sensing - Full range ===
-    g.nutrient_sensitivity = rand_float();  // 0-1.0
-    g.toxin_sensitivity = rand_float();  // 0-1.0
-    g.edge_affinity = (rand_float() - 0.5f) * 2.0f;  // -1 to 1
-    g.density_tolerance = rand_float();  // 0-1.0
-    g.quorum_threshold = rand_float() * 0.8f;  // 0-0.8
+    // === CORE TRAITS: Heavily influenced by strategy ===
+    g.spread_rate = utils_clamp_f(growth_bias * 0.8f + rand_float() * 0.2f, 0.1f, 1.0f);
+    g.mutation_rate = 0.05f + rand_float() * 0.3f + chaos * 0.1f;  // Chaotic = more mutation
+    g.aggression = utils_clamp_f(aggression_bias * 0.9f + rand_float() * 0.1f, 0.0f, 1.0f);
+    g.resilience = utils_clamp_f(defense_bias * 0.9f + rand_float() * 0.1f, 0.0f, 1.0f);
+    g.metabolism = utils_clamp_f(growth_bias * 0.7f + rand_float() * 0.3f, 0.2f, 1.0f);
     
-    // === Colony Interactions - Wide variety with production specialization ===
-    // Some colonies specialize in toxin production, others in resource production
-    float production_spec = rand_float();  // 0=resource producer, 1=toxin producer
-    g.toxin_production = utils_clamp_f(production_spec * 0.8f + rand_float() * 0.2f, 0.0f, 1.0f);
-    g.toxin_resistance = utils_clamp_f(rand_float() * 0.6f + production_spec * 0.4f, 0.0f, 1.0f);
-    g.signal_emission = utils_clamp_f(rand_float() * social_bias + rand_float() * 0.3f, 0.0f, 1.0f);
-    g.signal_sensitivity = rand_float();  // 0-1.0
-    g.alarm_threshold = rand_float() * 0.8f;  // 0-0.8
-    g.gene_transfer_rate = rand_float() * 0.15f;  // 0-0.15
+    // === SOCIAL BEHAVIOR: Extreme variance ===
+    g.detection_range = utils_clamp_f(social_bias * 0.5f + mobility_bias * 0.3f + rand_float() * 0.2f, 0.0f, 1.0f);
+    g.max_tracked = (uint8_t)(1 + (int)(social_bias * 5));
+    g.social_factor = utils_clamp_f((social_bias - 0.5f) * 2.5f + (rand_float() - 0.5f) * 0.5f, -1.0f, 1.0f);
+    g.merge_affinity = social_bias * 0.6f + rand_float() * 0.2f;
     
-    // === Competitive Strategy - Wide variance ===
-    g.resource_consumption = utils_clamp_f((1.0f - production_spec) * 0.6f + rand_float() * 0.4f, 0.0f, 1.0f);
-    // Defense priority: full 0-1 range with archetype influence
-    g.defense_priority = utils_clamp_f(rand_float() * 0.5f + (1.0f - aggression_bias) * 0.5f, 0.0f, 1.0f);
+    // === ENVIRONMENTAL SENSING ===
+    g.nutrient_sensitivity = rand_float();
+    g.toxin_sensitivity = utils_clamp_f(1.0f - toxin_bias * 0.5f + rand_float() * 0.3f, 0.0f, 1.0f);
+    g.edge_affinity = (rand_float() - 0.5f) * 2.0f + (mobility_bias - 0.5f);
+    g.density_tolerance = utils_clamp_f(social_bias * 0.6f + rand_float() * 0.4f, 0.0f, 1.0f);
+    g.quorum_threshold = rand_float() * 0.8f;
     
-    // === Survival Strategies ===
-    g.dormancy_threshold = rand_float() * 0.4f;  // 0-0.4
-    g.dormancy_resistance = rand_float() * 0.8f + 0.2f;  // 0.2-1.0
-    g.sporulation_threshold = rand_float() * 0.6f + 0.2f;  // 0.2-0.8
-    g.biofilm_investment = rand_float() * 0.6f;  // 0-0.6
-    g.biofilm_tendency = rand_float() * 0.7f;  // 0-0.7
-    g.motility = rand_float() * 0.6f;  // 0-0.6: full motility range
+    // === COLONY INTERACTIONS: Strategy-driven ===
+    g.toxin_production = utils_clamp_f(toxin_bias * 0.9f + rand_float() * 0.1f, 0.0f, 1.0f);
+    g.toxin_resistance = utils_clamp_f(toxin_bias * 0.7f + rand_float() * 0.3f, 0.0f, 1.0f);
+    g.signal_emission = utils_clamp_f(social_bias * 0.7f + rand_float() * 0.3f, 0.0f, 1.0f);
+    g.signal_sensitivity = utils_clamp_f(social_bias * 0.5f + mobility_bias * 0.3f + rand_float() * 0.2f, 0.0f, 1.0f);
+    g.alarm_threshold = rand_float() * 0.8f;
+    g.gene_transfer_rate = social_bias * 0.15f + rand_float() * 0.05f;
+    
+    // === COMPETITIVE STRATEGY ===
+    g.resource_consumption = utils_clamp_f(aggression_bias * 0.5f + growth_bias * 0.4f + rand_float() * 0.1f, 0.0f, 1.0f);
+    g.defense_priority = utils_clamp_f(defense_bias * 0.9f + rand_float() * 0.1f, 0.0f, 1.0f);
+    
+    // === SURVIVAL STRATEGIES ===
+    g.dormancy_threshold = defense_bias * 0.3f + rand_float() * 0.2f;
+    g.dormancy_resistance = defense_bias * 0.6f + rand_float() * 0.4f;
+    g.sporulation_threshold = 0.2f + defense_bias * 0.4f + rand_float() * 0.2f;
+    g.biofilm_investment = defense_bias * 0.5f + rand_float() * 0.3f;
+    g.biofilm_tendency = defense_bias * 0.6f + rand_float() * 0.2f;
+    g.motility = utils_clamp_f(mobility_bias * 0.8f + rand_float() * 0.2f, 0.0f, 1.0f);
     g.motility_direction = rand_float() * 2.0f * (float)M_PI;
-    g.specialization = rand_float() * 0.7f;  // 0-0.7
+    g.specialization = rand_float() * 0.8f;
     
-    // === Metabolic Strategy ===
-    g.efficiency = rand_float() * 0.7f + 0.3f;  // 0.3-1.0
+    // === METABOLIC STRATEGY ===
+    g.efficiency = utils_clamp_f(0.2f + (1.0f - growth_bias) * 0.5f + rand_float() * 0.3f, 0.0f, 1.0f);
     
-    // === Neural Network Decision Layer ===
+    // === NEURAL NETWORK: Wild weights for unpredictable behavior ===
     for (int i = 0; i < 8; i++) {
-        // More extreme weights for varied behavior
         float w = (rand_float() - 0.5f) * 2.0f;
-        // 20% chance of extreme weight
-        if (rand_float() < 0.2f) {
-            w = w > 0 ? 0.8f + rand_float() * 0.2f : -0.8f - rand_float() * 0.2f;
+        // 30% chance of EXTREME weight
+        if (rand_float() < 0.3f) {
+            w = w > 0 ? 0.9f + rand_float() * 0.1f : -0.9f - rand_float() * 0.1f;
         }
-        g.hidden_weights[i] = w;
+        // Chaos adds more variance
+        w += (rand_float() - 0.5f) * chaos * 0.5f;
+        g.hidden_weights[i] = utils_clamp_f(w, -1.0f, 1.0f);
     }
-    g.learning_rate = rand_float() * 0.5f;  // 0-0.5
-    g.memory_factor = rand_float() * 0.8f + 0.2f;  // 0.2-1.0
+    g.learning_rate = 0.1f + rand_float() * 0.5f + chaos * 0.2f;  // Chaotic = learns faster
+    g.memory_factor = 0.2f + rand_float() * 0.6f;
     
-    // === Colors - Full vibrant range ===
-    g.body_color.r = (uint8_t)rand_range(30, 255);
-    g.body_color.g = (uint8_t)rand_range(30, 255);
-    g.body_color.b = (uint8_t)rand_range(30, 255);
-    g.border_color.r = (uint8_t)(g.body_color.r / 2);
-    g.border_color.g = (uint8_t)(g.body_color.g / 2);
-    g.border_color.b = (uint8_t)(g.body_color.b / 2);
+    // === COLORS: Strategy-influenced with high saturation ===
+    // Make colors more vibrant and strategy-correlated
+    int base_hue = rand() % 360;
+    float saturation = 0.7f + rand_float() * 0.3f;
+    float value = 0.6f + rand_float() * 0.4f;
+    
+    // HSV to RGB conversion
+    float h = (float)base_hue / 60.0f;
+    int hi = (int)h % 6;
+    float f = h - (float)hi;
+    float p = value * (1.0f - saturation);
+    float q = value * (1.0f - f * saturation);
+    float t = value * (1.0f - (1.0f - f) * saturation);
+    
+    float r, gr, b;
+    switch (hi) {
+        case 0: r = value; gr = t; b = p; break;
+        case 1: r = q; gr = value; b = p; break;
+        case 2: r = p; gr = value; b = t; break;
+        case 3: r = p; gr = q; b = value; break;
+        case 4: r = t; gr = p; b = value; break;
+        default: r = value; gr = p; b = q; break;
+    }
+    
+    // Ensure minimum brightness of 30 for all channels
+    g.body_color.r = (uint8_t)(30 + (uint8_t)(r * 225));
+    g.body_color.g = (uint8_t)(30 + (uint8_t)(gr * 225));
+    g.body_color.b = (uint8_t)(30 + (uint8_t)(b * 225));
+    g.border_color.r = (uint8_t)(g.body_color.r * 0.5f);
+    g.border_color.g = (uint8_t)(g.body_color.g * 0.5f);
+    g.border_color.b = (uint8_t)(g.body_color.b * 0.5f);
     
     return g;
 }
