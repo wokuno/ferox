@@ -17,6 +17,10 @@ static const int DY[] = {-1, 0, 1, 0};
 #define TOXIN_DECAY_RATE 0.01f          // Toxin decay per tick
 #define QUORUM_SENSING_RADIUS 3         // Radius for local density calculation
 
+// Forward declarations
+static float get_scent_influence(World* world, int x, int y, int dx, int dy, 
+                                  uint32_t colony_id, const Genome* genome);
+
 // Calculate local population density around a cell
 static float calculate_local_density(World* world, int x, int y, uint32_t colony_id) {
     int count = 0;
@@ -275,6 +279,10 @@ void simulation_spread(World* world) {
                     // Directional preference from genome
                     float dir_weight = get_direction_weight(&colony->genome, DX[d], DY[d]);
                     
+                    // Scent influence - react to nearby colonies
+                    float scent_modifier = get_scent_influence(world, x, y, DX[d], DY[d], 
+                                                                cell->colony_id, &colony->genome);
+                    
                     // Strategic spread: push harder towards open space, less where enemies are
                     int enemy_count = count_enemy_neighbors(world, nx, ny, cell->colony_id);
                     float strategic_modifier = 1.0f;
@@ -289,7 +297,8 @@ void simulation_spread(World* world) {
                     // Very aggressive spread - colonies should constantly push
                     // Base multiplier of 5x to ensure colonies are always expanding
                     float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * 
-                                        env_modifier * dir_weight * strategic_modifier * history_bonus * 5.0f;
+                                        env_modifier * dir_weight * scent_modifier * 
+                                        strategic_modifier * history_bonus * 5.0f;
                     
                     if (rand_float() < spread_prob) {
                         if (pending_count >= pending_capacity) {
@@ -1012,6 +1021,125 @@ void simulation_consume_resources(World* world) {
     for (int i = 0; i < world->width * world->height; i++) {
         world->toxins[i] = utils_clamp_f(world->toxins[i] - 0.01f, 0.0f, 1.0f);
     }
+}
+
+// ============================================================================
+// Scent/Signal System - Colonies emit scent that diffuses outward
+// ============================================================================
+
+// Emit and diffuse colony scents - colonies can detect each other at distance
+void simulation_update_scents(World* world) {
+    if (!world || !world->signals || !world->signal_source) return;
+    
+    int total = world->width * world->height;
+    
+    // Allocate temp buffer for diffusion
+    float* new_signals = (float*)calloc(total, sizeof(float));
+    uint32_t* new_sources = (uint32_t*)calloc(total, sizeof(uint32_t));
+    if (!new_signals || !new_sources) {
+        free(new_signals);
+        free(new_sources);
+        return;
+    }
+    
+    // Step 1: Emit scent from colony cells (stronger at borders)
+    for (int y = 0; y < world->height; y++) {
+        for (int x = 0; x < world->width; x++) {
+            int idx = y * world->width + x;
+            Cell* cell = &world->cells[idx];
+            if (cell->colony_id == 0) continue;
+            
+            Colony* colony = world_get_colony(world, cell->colony_id);
+            if (!colony || !colony->active) continue;
+            
+            // Emit scent based on signal_emission trait
+            float emission = colony->genome.signal_emission * 0.3f;
+            // Border cells emit more
+            if (cell->is_border) emission *= 2.0f;
+            // Larger colonies emit more total scent
+            emission *= (1.0f + (float)colony->cell_count / 500.0f);
+            
+            new_signals[idx] += emission;
+            new_sources[idx] = cell->colony_id;
+        }
+    }
+    
+    // Step 2: Diffuse existing scent to neighbors (blur effect)
+    for (int y = 0; y < world->height; y++) {
+        for (int x = 0; x < world->width; x++) {
+            int idx = y * world->width + x;
+            float current = world->signals[idx];
+            if (current < 0.001f) continue;
+            
+            uint32_t source = world->signal_source[idx];
+            
+            // Diffuse 30% to neighbors, keep 60%, lose 10%
+            float keep = current * 0.6f;
+            float spread = current * 0.075f;  // 30% / 4 directions
+            
+            new_signals[idx] += keep;
+            if (new_signals[idx] > 0 && source > 0) {
+                new_sources[idx] = source;
+            }
+            
+            // Spread to 4 neighbors
+            for (int d = 0; d < 4; d++) {
+                int nx = x + DX[d], ny = y + DY[d];
+                if (nx >= 0 && nx < world->width && ny >= 0 && ny < world->height) {
+                    int ni = ny * world->width + nx;
+                    new_signals[ni] += spread;
+                    // Source tracking: keep strongest source
+                    if (spread > 0.01f && source > 0) {
+                        if (new_sources[ni] == 0 || new_signals[ni] < spread) {
+                            new_sources[ni] = source;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Clamp and copy back
+    for (int i = 0; i < total; i++) {
+        world->signals[i] = utils_clamp_f(new_signals[i], 0.0f, 1.0f);
+        world->signal_source[i] = new_sources[i];
+    }
+    
+    free(new_signals);
+    free(new_sources);
+}
+
+// Get scent influence on spread direction - returns modifier for given direction
+static float get_scent_influence(World* world, int x, int y, int dx, int dy, 
+                                  uint32_t colony_id, const Genome* genome) {
+    int nx = x + dx, ny = y + dy;
+    if (nx < 0 || nx >= world->width || ny < 0 || ny >= world->height) {
+        return 1.0f;
+    }
+    
+    int idx = ny * world->width + nx;
+    float scent = world->signals[idx];
+    uint32_t source = world->signal_source[idx];
+    
+    if (scent < 0.01f || source == 0) return 1.0f;
+    
+    // Scent from self/allies - might attract (social) or repel (aggressive expansion)
+    if (source == colony_id) {
+        // Self-scent: avoid overcrowding unless high density tolerance
+        return 1.0f - scent * (1.0f - genome->density_tolerance) * 0.3f;
+    }
+    
+    // Enemy scent - react based on aggression vs defense
+    float aggression = genome->aggression;
+    float defense = genome->defense_priority;
+    
+    // High aggression: attracted to enemy scent (hunt them)
+    // High defense: repelled by enemy scent (avoid conflict)
+    float reaction = (aggression - defense) * genome->signal_sensitivity;
+    
+    // reaction > 0: attracted (boost spread toward enemy)
+    // reaction < 0: repelled (reduce spread toward enemy)
+    return 1.0f + reaction * scent * 0.5f;
 }
 
 // Combat resolution when colonies meet at borders

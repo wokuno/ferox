@@ -42,11 +42,12 @@ static inline float rand_float_local(uint32_t* state) {
 /**
  * Calculate social influence multiplier for a spread direction.
  * 
- * Detects nearby colonies and adjusts spread probability:
- * - Positive social_factor: bias toward nearest neighbors (attracted)
- * - Negative social_factor: bias away from nearest neighbors (repelled)
+ * Uses scent field to detect nearby colonies and adjust spread probability:
+ * - High aggression: attracted to enemy scent (hunt them)
+ * - High defense: repelled by enemy scent (avoid conflict)
+ * - Also considers social_factor for general neighbor attraction/repulsion
  * 
- * Returns a multiplier 0.5-1.5 to apply to spread probability.
+ * Returns a multiplier 0.3-2.0 to apply to spread probability.
  */
 static float calculate_social_influence(
     World* world,
@@ -56,76 +57,95 @@ static float calculate_social_influence(
     Colony* colony
 ) {
     const Genome* genome = &colony->genome;
+    float influence = 1.0f;
     
-    // Skip if no social behavior
-    if (fabsf(genome->social_factor) < 0.01f) {
-        return 1.0f;
-    }
-    
-    // Calculate detection radius in cells (scale by world size)
-    int detect_radius = (int)(genome->detection_range * 
-                              (world->width + world->height) / 4.0f);
-    if (detect_radius < 5) detect_radius = 5;
-    if (detect_radius > 50) detect_radius = 50;
-    
-    // Find nearest different colonies (sample grid sparsely for performance)
-    float nearest_dx = 0, nearest_dy = 0;
-    float nearest_dist_sq = (float)(detect_radius * detect_radius + 1);
-    int found = 0;
-    int step = detect_radius / 4;
-    if (step < 2) step = 2;
-    
-    for (int dy = -detect_radius; dy <= detect_radius && found < genome->max_tracked; dy += step) {
-        for (int dx = -detect_radius; dx <= detect_radius && found < genome->max_tracked; dx += step) {
-            if (dx == 0 && dy == 0) continue;
-            
-            int check_x = cell_x + dx;
-            int check_y = cell_y + dy;
-            
-            AtomicCell* check_cell = grid_get_cell(grid, check_x, check_y);
-            if (!check_cell) continue;
-            
-            uint32_t check_colony_id = atomic_load(&check_cell->colony_id);
-            if (check_colony_id == 0 || check_colony_id == colony->id) continue;
-            
-            float dist_sq = (float)(dx * dx + dy * dy);
-            if (dist_sq < nearest_dist_sq) {
-                nearest_dist_sq = dist_sq;
-                nearest_dx = (float)dx;
-                nearest_dy = (float)dy;
-                found++;
+    // Check scent at target location
+    int nx = cell_x + spread_dx;
+    int ny = cell_y + spread_dy;
+    if (nx >= 0 && nx < world->width && ny >= 0 && ny < world->height && world->signals) {
+        int idx = ny * world->width + nx;
+        float scent = world->signals[idx];
+        uint32_t source = world->signal_source ? world->signal_source[idx] : 0;
+        
+        if (scent > 0.01f && source > 0) {
+            if (source == colony->id) {
+                // Self-scent: avoid overcrowding unless high density tolerance
+                influence *= 1.0f - scent * (1.0f - genome->density_tolerance) * 0.3f;
+            } else {
+                // Enemy scent: react based on aggression vs defense
+                float aggression = genome->aggression;
+                float defense = genome->defense_priority;
+                float sensitivity = genome->signal_sensitivity;
+                
+                // reaction > 0: attracted to enemy (aggressive hunting)
+                // reaction < 0: repelled by enemy (defensive avoidance)
+                float reaction = (aggression - defense) * sensitivity;
+                influence *= 1.0f + reaction * scent * 0.6f;
             }
         }
     }
     
-    // If no neighbors found, no influence
-    if (found == 0) {
-        return 1.0f;
+    // Also check direct neighbor detection for immediate threats
+    if (fabsf(genome->social_factor) > 0.01f) {
+        // Calculate detection radius in cells (scale by world size)
+        int detect_radius = (int)(genome->detection_range * 
+                                  (world->width + world->height) / 4.0f);
+        if (detect_radius < 5) detect_radius = 5;
+        if (detect_radius > 30) detect_radius = 30;
+    
+        // Find nearest different colonies (sample grid sparsely for performance)
+        float nearest_dx = 0, nearest_dy = 0;
+        float nearest_dist_sq = (float)(detect_radius * detect_radius + 1);
+        int found = 0;
+        int step = detect_radius / 4;
+        if (step < 2) step = 2;
+        
+        for (int dy = -detect_radius; dy <= detect_radius && found < genome->max_tracked; dy += step) {
+            for (int dx = -detect_radius; dx <= detect_radius && found < genome->max_tracked; dx += step) {
+                if (dx == 0 && dy == 0) continue;
+                
+                int check_x = cell_x + dx;
+                int check_y = cell_y + dy;
+                
+                AtomicCell* check_cell = grid_get_cell(grid, check_x, check_y);
+                if (!check_cell) continue;
+                
+                uint32_t check_colony_id = atomic_load(&check_cell->colony_id);
+                if (check_colony_id == 0 || check_colony_id == colony->id) continue;
+                
+                float dist_sq = (float)(dx * dx + dy * dy);
+                if (dist_sq < nearest_dist_sq) {
+                    nearest_dist_sq = dist_sq;
+                    nearest_dx = (float)dx;
+                    nearest_dy = (float)dy;
+                    found++;
+                }
+            }
+        }
+        
+        // Apply social factor based on nearest neighbor direction
+        if (found > 0) {
+            float dist = sqrtf(nearest_dist_sq);
+            if (dist >= 1.0f) {
+                float norm_dx = nearest_dx / dist;
+                float norm_dy = nearest_dy / dist;
+                
+                float spread_len = sqrtf((float)(spread_dx * spread_dx + spread_dy * spread_dy));
+                if (spread_len >= 0.1f) {
+                    float spread_norm_dx = (float)spread_dx / spread_len;
+                    float spread_norm_dy = (float)spread_dy / spread_len;
+                    
+                    // Dot product: positive if spreading toward neighbor
+                    float dot = spread_norm_dx * norm_dx + spread_norm_dy * norm_dy;
+                    influence *= 1.0f + genome->social_factor * dot * 0.4f;
+                }
+            }
+        }
     }
     
-    // Normalize direction to nearest colony
-    float dist = sqrtf(nearest_dist_sq);
-    if (dist < 1.0f) dist = 1.0f;
-    float norm_dx = nearest_dx / dist;
-    float norm_dy = nearest_dy / dist;
-    
-    // Normalize spread direction
-    float spread_len = sqrtf((float)(spread_dx * spread_dx + spread_dy * spread_dy));
-    if (spread_len < 0.1f) return 1.0f;
-    float spread_norm_dx = (float)spread_dx / spread_len;
-    float spread_norm_dy = (float)spread_dy / spread_len;
-    
-    // Dot product: positive if spreading toward neighbor, negative if away
-    float dot = spread_norm_dx * norm_dx + spread_norm_dy * norm_dy;
-    
-    // Apply social factor:
-    // Positive social_factor + positive dot = boost (attracted, moving toward)
-    // Negative social_factor + positive dot = reduce (repelled, want to move away)
-    float influence = 1.0f + genome->social_factor * dot * 0.4f;
-    
     // Clamp to reasonable range
-    if (influence < 0.5f) influence = 0.5f;
-    if (influence > 1.5f) influence = 1.5f;
+    if (influence < 0.3f) influence = 0.3f;
+    if (influence > 2.0f) influence = 2.0f;
     
     return influence;
 }
@@ -488,6 +508,9 @@ void atomic_tick(AtomicWorld* aworld) {
     // === Serial Phase ===
     // Sync atomic state back to regular world for complex operations
     atomic_world_sync_to_world(aworld);
+    
+    // Update scent field (colonies emit and scent diffuses)
+    simulation_update_scents(world);
     
     // Mutations (per-colony, serial)
     simulation_mutate(world);

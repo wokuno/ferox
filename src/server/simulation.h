@@ -70,4 +70,7 @@ void simulation_resolve_combat(World* world);
 // Update nutrients, toxins, and environmental layers
 void simulation_update_nutrients(World* world);
 
+// Update scent field - colonies emit scent that diffuses outward
+void simulation_update_scents(World* world);
+
 #endif // FEROX_SIMULATION_H
