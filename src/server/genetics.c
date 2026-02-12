@@ -24,60 +24,60 @@
 Genome genome_create_random(void) {
     Genome g;
     
-    // === Basic Traits ===
+    // === Basic Traits - Very aggressive for dynamic simulation ===
     for (int i = 0; i < 8; i++) {
-        g.spread_weights[i] = 0.3f + rand_float() * 0.7f;
+        g.spread_weights[i] = 0.5f + rand_float() * 0.5f;  // Higher base weights
     }
-    g.spread_rate = 0.5f + rand_float() * 0.5f;  // 0.5-1.0: very fast spread for dynamic simulation
-    g.mutation_rate = 0.02f + rand_float() * 0.15f;  // 0.02-0.17: much higher mutation for visible evolution
-    g.aggression = 0.4f + rand_float() * 0.6f;  // 0.4-1.0: aggressive colonies
-    g.resilience = 0.2f + rand_float() * 0.5f;  // 0.2-0.7
-    g.metabolism = 0.6f + rand_float() * 0.4f;  // 0.6-1.0: high metabolism for fast activity
+    g.spread_rate = 0.7f + rand_float() * 0.3f;  // 0.7-1.0: very fast spread
+    g.mutation_rate = 0.05f + rand_float() * 0.15f;  // 0.05-0.2: high mutation
+    g.aggression = 0.5f + rand_float() * 0.5f;  // 0.5-1.0: very aggressive
+    g.resilience = 0.3f + rand_float() * 0.4f;  // 0.3-0.7
+    g.metabolism = 0.7f + rand_float() * 0.3f;  // 0.7-1.0: very high metabolism
     
     // === Social Behavior ===
-    g.detection_range = 0.1f + rand_float() * 0.4f;  // 0.1-0.5
-    g.max_tracked = (uint8_t)(1 + rand_range(0, 3));  // 1-4
+    g.detection_range = 0.2f + rand_float() * 0.5f;  // 0.2-0.7: better awareness
+    g.max_tracked = (uint8_t)(2 + rand_range(0, 3));  // 2-5
     g.social_factor = (rand_float() - 0.5f) * 2.0f;  // -1 to 1
     g.merge_affinity = rand_float() * 0.3f;  // 0-0.3
     
     // === Environmental Sensing ===
-    g.nutrient_sensitivity = rand_float() * 0.8f;  // 0-0.8: chemotaxis strength
-    g.toxin_sensitivity = 0.3f + rand_float() * 0.6f;  // 0.3-0.9: toxin avoidance
-    g.edge_affinity = (rand_float() - 0.5f) * 1.0f;  // -0.5 to 0.5
-    g.density_tolerance = 0.3f + rand_float() * 0.7f;  // 0.3-1.0
-    g.quorum_threshold = 0.3f + rand_float() * 0.5f;  // 0.3-0.8: quorum sensing threshold
+    g.nutrient_sensitivity = 0.3f + rand_float() * 0.6f;  // 0.3-0.9: strong chemotaxis
+    g.toxin_sensitivity = 0.4f + rand_float() * 0.5f;  // 0.4-0.9
+    g.edge_affinity = (rand_float() - 0.3f) * 1.0f;  // -0.3 to 0.7: slight preference for edges
+    g.density_tolerance = 0.4f + rand_float() * 0.6f;  // 0.4-1.0
+    g.quorum_threshold = 0.2f + rand_float() * 0.4f;  // 0.2-0.6: faster quorum response
     
-    // === Colony Interactions ===
-    g.toxin_production = rand_float() * 0.5f;  // 0-0.5: moderate toxin production
-    g.toxin_resistance = rand_float() * 0.8f;  // 0-0.8
-    g.signal_emission = rand_float() * 0.6f;  // 0-0.6
-    g.signal_sensitivity = rand_float() * 0.8f;  // 0-0.8
-    g.alarm_threshold = 0.3f + rand_float() * 0.5f;  // 0.3-0.8: sensitivity to hostile contact
-    g.gene_transfer_rate = rand_float() * 0.05f;  // 0-0.05: rare gene transfer
+    // === Colony Interactions - More aggressive ===
+    g.toxin_production = 0.2f + rand_float() * 0.6f;  // 0.2-0.8: higher toxin production
+    g.toxin_resistance = 0.2f + rand_float() * 0.6f;  // 0.2-0.8
+    g.signal_emission = 0.3f + rand_float() * 0.5f;  // 0.3-0.8
+    g.signal_sensitivity = 0.3f + rand_float() * 0.6f;  // 0.3-0.9
+    g.alarm_threshold = 0.2f + rand_float() * 0.4f;  // 0.2-0.6: faster alarm response
+    g.gene_transfer_rate = rand_float() * 0.1f;  // 0-0.1: more gene transfer
     
-    // === Competitive Strategy ===
-    g.resource_consumption = 0.3f + rand_float() * 0.5f;  // 0.3-0.8: balanced resource use
-    g.defense_priority = rand_float() * 0.7f;  // 0-0.7: most colonies moderately defensive
+    // === Competitive Strategy - Aggressive ===
+    g.resource_consumption = 0.5f + rand_float() * 0.4f;  // 0.5-0.9: high consumption
+    g.defense_priority = 0.3f + rand_float() * 0.5f;  // 0.3-0.8
     
     // === Survival Strategies ===
-    g.dormancy_threshold = rand_float() * 0.3f;  // 0-0.3: triggers at low population
-    g.dormancy_resistance = 0.3f + rand_float() * 0.6f;  // 0.3-0.9
-    g.sporulation_threshold = 0.4f + rand_float() * 0.4f;  // 0.4-0.8: stress level for dormancy
-    g.biofilm_investment = rand_float() * 0.5f;  // 0-0.5: trade growth for resilience
-    g.biofilm_tendency = rand_float() * 0.6f;  // 0-0.6: tendency to form biofilm
-    g.motility = rand_float() * 0.3f;  // 0-0.3: colony drift speed
-    g.motility_direction = rand_float() * 2.0f * (float)M_PI;  // random direction
-    g.specialization = rand_float() * 0.5f;  // 0-0.5: edge vs interior differentiation
+    g.dormancy_threshold = rand_float() * 0.2f;  // 0-0.2
+    g.dormancy_resistance = 0.4f + rand_float() * 0.5f;  // 0.4-0.9
+    g.sporulation_threshold = 0.5f + rand_float() * 0.4f;  // 0.5-0.9
+    g.biofilm_investment = rand_float() * 0.4f;  // 0-0.4
+    g.biofilm_tendency = rand_float() * 0.5f;  // 0-0.5
+    g.motility = 0.1f + rand_float() * 0.4f;  // 0.1-0.5: more mobile
+    g.motility_direction = rand_float() * 2.0f * (float)M_PI;
+    g.specialization = rand_float() * 0.5f;
     
     // === Metabolic Strategy ===
-    g.efficiency = 0.3f + rand_float() * 0.6f;  // 0.3-0.9
+    g.efficiency = 0.4f + rand_float() * 0.5f;  // 0.4-0.9
     
-    // === Neural Network Decision Layer ===
+    // === Neural Network Decision Layer - More active ===
     for (int i = 0; i < 8; i++) {
         g.hidden_weights[i] = (rand_float() - 0.5f) * 2.0f;  // -1 to 1
     }
-    g.learning_rate = 0.05f + rand_float() * 0.2f;  // 0.05-0.25
-    g.memory_factor = 0.3f + rand_float() * 0.5f;   // 0.3-0.8
+    g.learning_rate = 0.1f + rand_float() * 0.3f;  // 0.1-0.4: faster learning
+    g.memory_factor = 0.4f + rand_float() * 0.4f;   // 0.4-0.8
     
     // === Colors ===
     g.body_color.r = (uint8_t)rand_range(50, 255);

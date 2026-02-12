@@ -284,12 +284,12 @@ void simulation_spread(World* world) {
                     }
                     
                     // Success history affects spread direction
-                    float history_bonus = 1.0f + colony->success_history[d % 8] * 0.2f;
+                    float history_bonus = 1.0f + colony->success_history[d % 8] * 0.3f;
                     
-                    // More active spread to keep colonies dynamic
-                    // Base multiplier of 3x to ensure colonies are visibly active
+                    // Very aggressive spread - colonies should constantly push
+                    // Base multiplier of 5x to ensure colonies are always expanding
                     float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * 
-                                        env_modifier * dir_weight * strategic_modifier * history_bonus * 3.0f;
+                                        env_modifier * dir_weight * strategic_modifier * history_bonus * 5.0f;
                     
                     if (rand_float() < spread_prob) {
                         if (pending_count >= pending_capacity) {
@@ -586,21 +586,21 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                 if (!neighbor) continue;
                 
                 if (neighbor->colony_id == 0) {
-                    // Empty cell - can spread (very high rate for dynamic simulation)
-                    float spread_chance = colony->genome.spread_rate * colony->genome.metabolism * 4.0f;
+                    // Empty cell - can spread (very aggressive)
+                    float spread_chance = colony->genome.spread_rate * colony->genome.metabolism * 6.0f;
                     if (rand_float() < spread_chance) {
                         pending_buffer_add(pending, nx, ny, cell->colony_id);
                     }
                 } else if (neighbor->colony_id != cell->colony_id) {
-                    // Enemy cell - might overtake based on aggression vs resilience
+                    // Enemy cell - aggressive takeover
                     Colony* enemy = world_get_colony(world, neighbor->colony_id);
                     if (enemy && enemy->active) {
-                        // Very aggressive combat for dynamic borders
-                        float attack = colony->genome.aggression * (1.0f + colony->genome.toxin_production * 0.5f);
-                        float defense = enemy->genome.resilience * (0.5f + enemy->genome.defense_priority * 0.5f);
-                        float combat_chance = attack / (attack + defense + 0.1f);
-                        // Very high combat rate
-                        if (rand_float() < combat_chance * 1.2f) {
+                        // Very aggressive combat
+                        float attack = colony->genome.aggression * (1.0f + colony->genome.toxin_production * 0.7f);
+                        float defense = enemy->genome.resilience * (0.4f + enemy->genome.defense_priority * 0.4f);
+                        float combat_chance = attack / (attack + defense + 0.05f);
+                        // Always at least 50% chance to attack, boosted by combat_chance
+                        if (rand_float() < 0.5f + combat_chance * 0.5f) {
                             pending_buffer_add(pending, nx, ny, cell->colony_id);
                         }
                     }
@@ -1160,9 +1160,9 @@ void simulation_tick(World* world) {
             continue;
         }
         
-        // OLD AGE: Very old cells have higher chance of dying
-        if (cell->age > 150) {
-            float age_death_chance = (cell->age - 150) * 0.0003f;  // Gradual increase
+        // OLD AGE: Cells have limited lifespan
+        if (cell->age > 120) {
+            float age_death_chance = (cell->age - 120) * 0.001f;
             if (rand_float() < age_death_chance) {
                 cell->colony_id = 0;
                 cell->age = 0;
@@ -1175,57 +1175,23 @@ void simulation_tick(World* world) {
     // Update environmental layers
     simulation_update_nutrients(world);
     
-    // ENVIRONMENTAL DISTURBANCES: Frequent events to keep simulation dynamic
+    // ENVIRONMENTAL DISTURBANCES: Periodic nutrient/toxin fluctuations
     // Every ~20 ticks, create environmental events
     if (world->tick % 20 == 0) {
-        // 60% chance: nutrient-depleted zone (forces migration)
-        if (rand_float() < 0.6f) {
+        // 50% chance: nutrient shift
+        if (rand_float() < 0.5f) {
             int cx = rand() % world->width;
             int cy = rand() % world->height;
-            int radius = 8 + rand() % 20;  // Radius 8-28
+            int radius = 10 + rand() % 20;
             for (int y = cy - radius; y <= cy + radius; y++) {
                 for (int x = cx - radius; x <= cx + radius; x++) {
                     if (x >= 0 && x < world->width && y >= 0 && y < world->height) {
                         int dist2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
                         if (dist2 <= radius * radius) {
                             int idx = y * world->width + x;
-                            world->nutrients[idx] *= 0.2f;  // Heavily deplete nutrients
-                        }
-                    }
-                }
-            }
-        }
-        
-        // 40% chance: toxin burst (kills cells in area)
-        if (rand_float() < 0.4f) {
-            int cx = rand() % world->width;
-            int cy = rand() % world->height;
-            int radius = 5 + rand() % 10;
-            for (int y = cy - radius; y <= cy + radius; y++) {
-                for (int x = cx - radius; x <= cx + radius; x++) {
-                    if (x >= 0 && x < world->width && y >= 0 && y < world->height) {
-                        int dist2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
-                        if (dist2 <= radius * radius) {
-                            int idx = y * world->width + x;
-                            world->toxins[idx] = utils_clamp_f(world->toxins[idx] + 0.5f, 0.0f, 1.0f);
-                        }
-                    }
-                }
-            }
-        }
-        
-        // 30% chance: nutrient bloom (creates growth opportunity)
-        if (rand_float() < 0.3f) {
-            int cx = rand() % world->width;
-            int cy = rand() % world->height;
-            int radius = 10 + rand() % 15;
-            for (int y = cy - radius; y <= cy + radius; y++) {
-                for (int x = cx - radius; x <= cx + radius; x++) {
-                    if (x >= 0 && x < world->width && y >= 0 && y < world->height) {
-                        int dist2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
-                        if (dist2 <= radius * radius) {
-                            int idx = y * world->width + x;
-                            world->nutrients[idx] = utils_clamp_f(world->nutrients[idx] + 0.4f, 0.0f, 1.0f);
+                            // Random nutrient change
+                            world->nutrients[idx] = utils_clamp_f(
+                                world->nutrients[idx] + (rand_float() - 0.5f) * 0.4f, 0.0f, 1.0f);
                         }
                     }
                 }
@@ -1252,14 +1218,15 @@ void simulation_tick(World* world) {
         }
     }
     
-    // Spontaneous generation: spawn new colonies frequently
-    // Creates competition and prevents stagnation
+    // Spontaneous generation: constant influx of new colonies
+    // Creates competition and prevents any colony from dominating forever
     int world_size = world->width * world->height;
     float empty_ratio = 1.0f - (float)total_cells / (float)world_size;
-    float spawn_chance = empty_ratio * 0.15f;  // Much higher spawn rate
-    if (active_colonies < 150 && rand_float() < spawn_chance) {
+    // Base 3% spawn chance + more when empty space available
+    float spawn_chance = 0.03f + empty_ratio * 0.1f;
+    if (active_colonies < 200 && rand_float() < spawn_chance) {
         // Find a random empty spot
-        for (int attempts = 0; attempts < 20; attempts++) {
+        for (int attempts = 0; attempts < 30; attempts++) {
             int x = rand() % world->width;
             int y = rand() % world->height;
             Cell* cell = world_get_cell(world, x, y);
