@@ -90,8 +90,15 @@ static void stack_destroy(Stack* s) {
 
 static void stack_push(Stack* s, int x, int y) {
     if (s->top + 2 > s->capacity) {
-        s->capacity *= 2;
-        s->data = (int*)realloc(s->data, s->capacity * sizeof(int));
+        int new_capacity = s->capacity * 2;
+        int* new_data = (int*)realloc(s->data, new_capacity * sizeof(int));
+        if (!new_data) {
+            // Realloc failed - cannot push, this will cause flood-fill to be incomplete
+            // but avoids a crash. The caller should handle incomplete results.
+            return;
+        }
+        s->data = new_data;
+        s->capacity = new_capacity;
     }
     s->data[s->top++] = x;
     s->data[s->top++] = y;
@@ -157,6 +164,9 @@ int* find_connected_components(World* world, uint32_t colony_id, int* num_compon
     }
     
     // Find components
+    // Note: component_id is int8_t (-128 to 127), so we can track at most 127 components (0-126)
+    // In practice, colonies rarely have more than a few components
+    const int MAX_COMPONENTS = 127;
     int* sizes = NULL;
     int count = 0;
     int capacity = 4;
@@ -170,10 +180,24 @@ int* find_connected_components(World* world, uint32_t colony_id, int* num_compon
         for (int x = 0; x < world->width; x++) {
             Cell* cell = world_get_cell(world, x, y);
             if (cell && cell->colony_id == colony_id && cell->component_id == -1) {
-                // Start new component
+                // Start new component - but stop if we hit the int8_t limit
+                if (count >= MAX_COMPONENTS) {
+                    // Too many components to track safely, return what we have
+                    // Remaining cells will be processed on next tick
+                    *num_components = count;
+                    return sizes;
+                }
                 if (count >= capacity) {
-                    capacity *= 2;
-                    sizes = (int*)realloc(sizes, capacity * sizeof(int));
+                    int new_capacity = capacity * 2;
+                    if (new_capacity > MAX_COMPONENTS) new_capacity = MAX_COMPONENTS;
+                    int* new_sizes = (int*)realloc(sizes, new_capacity * sizeof(int));
+                    if (!new_sizes) {
+                        // Realloc failed - return what we have
+                        *num_components = count;
+                        return sizes;
+                    }
+                    sizes = new_sizes;
+                    capacity = new_capacity;
                 }
                 sizes[count] = flood_fill(world, x, y, colony_id, (int8_t)count);
                 count++;
