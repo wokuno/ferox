@@ -56,7 +56,7 @@ static void print_usage(const char* program) {
     fprintf(stderr, "  R            Reset simulation\n");
 }
 
-static void init_colony_wobble(ProtoColony* colony) {
+static void init_colony_wobble(proto_colony* colony) {
     // Generate unique shape seed for procedural shape generation
     colony->shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
     colony->wobble_phase = (float)(rand() % 628) / 100.0f;  // Random phase 0-2*PI
@@ -89,7 +89,7 @@ static void run_demo_mode(void) {
     g_client->local_world.colony_count = 30;
     
     // Demo colonies - spread across larger world
-    ProtoColony demo_colonies[] = {
+    proto_colony demo_colonies[] = {
         {1, "Bacillus feroxii", 40.0f, 30.0f, 8.0f, 150, 150, 0.5f, 255, 100, 100, true, 0, 0.0f},
         {2, "Streptococcus viridis", 120.0f, 50.0f, 12.0f, 300, 300, 0.7f, 100, 255, 100, true, 0, 0.0f},
         {3, "Lactobacillus azurae", 70.0f, 100.0f, 6.0f, 80, 80, 0.3f, 100, 100, 255, true, 0, 0.0f},
@@ -186,7 +186,7 @@ static void run_demo_mode(void) {
                 
                 // Grow colonies and update wobble
                 for (uint32_t i = 0; i < g_client->local_world.colony_count; i++) {
-                    ProtoColony* c = &g_client->local_world.colonies[i];
+                    proto_colony* c = &g_client->local_world.colonies[i];
                     if (c->alive) {
                         c->radius += c->growth_rate * 0.05f * g_client->local_world.speed_multiplier;
                         c->population = (uint32_t)(c->radius * c->radius * 3.14159f);
@@ -219,7 +219,7 @@ static void run_demo_mode(void) {
                             (int)g_client->local_world.height);
         renderer_draw_world(g_client->renderer, &g_client->local_world);
         
-        const ProtoColony* selected = client_get_selected_colony(g_client);
+        const proto_colony* selected = client_get_selected_colony(g_client);
         renderer_draw_colony_info(g_client->renderer, selected);
         
         int alive = 0;

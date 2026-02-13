@@ -125,7 +125,7 @@ TEST(protocol_world_serialize_deserialize_throughput) {
     const int scale = get_perf_scale();
     const int iters = 120 * scale;
 
-    ProtoWorld world;
+    proto_world world;
     proto_world_init(&world);
     world.width = 300;
     world.height = 160;
@@ -165,7 +165,7 @@ TEST(protocol_world_serialize_deserialize_throughput) {
         ASSERT_NOT_NULL(buf);
         total_bytes += len;
 
-        ProtoWorld decoded;
+        proto_world decoded;
         proto_world_init(&decoded);
         rc = protocol_deserialize_world_state(buf, len, &decoded);
         ASSERT_EQ(rc, 0);

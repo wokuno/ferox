@@ -4,8 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdatomic.h>
 
-// Direction indices for spread_weights
 typedef enum {
     DIR_N = 0,
     DIR_NE,
@@ -18,141 +18,182 @@ typedef enum {
     DIR_COUNT
 } Direction;
 
-#define WOBBLE_POINTS 8  // Legacy, kept for compatibility
-#define SHAPE_SEED_OCTAVES 4  // Number of noise octaves for shape generation
+#define WOBBLE_POINTS 8
+#define SHAPE_SEED_OCTAVES 4
 
-// Color structure - RGB values (0-255)
 typedef struct {
     uint8_t r;
     uint8_t g;
     uint8_t b;
 } Color;
 
-// Genome structure - the genetic code of a colony
 typedef struct {
-    // === Basic Traits ===
-    float spread_weights[8];  // 0-1 for each direction: N,NE,E,SE,S,SW,W,NW
-    float spread_rate;        // 0-1: overall probability of spreading per tick
-    float mutation_rate;      // 0-0.1
-    float aggression;         // 0-1
-    float resilience;         // 0-1
-    float metabolism;         // 0-1: affects growth speed
+    float aggression;
+    float resilience;
+    float toxin_production;
+    float toxin_resistance;
+    float defense_priority;
+} CombatStats;
+
+typedef struct {
+    float spread_rate;
+    float mutation_rate;
+    float metabolism;
+    float efficiency;
+    float resource_consumption;
+} GrowthStats;
+
+typedef struct {
+    float detection_range;
+    uint8_t max_tracked;
+    float social_factor;
+    float merge_affinity;
+    float quorum_threshold;
+    float signal_emission;
+    float signal_sensitivity;
+    float alarm_threshold;
+    float gene_transfer_rate;
+} BehaviorStats;
+
+typedef struct {
+    float spread_weights[8];
+    float nutrient_sensitivity;
+    float toxin_sensitivity;
+    float edge_affinity;
+    float density_tolerance;
+    float dormancy_threshold;
+    float dormancy_resistance;
+    float sporulation_threshold;
+    float biofilm_investment;
+    float biofilm_tendency;
+    float motility;
+    float motility_direction;
+    float specialization;
+    float hidden_weights[8];
+    float learning_rate;
+    float memory_factor;
+} TraitStats;
+
+typedef struct Genome {
+    float spread_weights[8];
+    float spread_rate;
+    float mutation_rate;
+    float aggression;
+    float resilience;
+    float metabolism;
     
-    // === Social Behavior (chemotaxis-like) ===
-    float detection_range;    // 0-1: how far can detect neighbors (scaled to world size)
-    uint8_t max_tracked;      // 1-4: how many neighbor colonies can be tracked
-    float social_factor;      // -1 to 1: negative=repelled, positive=attracted
-    float merge_affinity;     // 0-1: slight bonus to merging with genetically similar colonies
+    float detection_range;
+    uint8_t max_tracked;
+    float social_factor;
+    float merge_affinity;
     
-    // === Environmental Sensing ===
-    float nutrient_sensitivity;  // 0-1: how strongly to follow nutrient gradients
-    float toxin_sensitivity;     // 0-1: how strongly to avoid toxins
-    float edge_affinity;         // -1 to 1: negative=avoid edges, positive=seek edges
-    float density_tolerance;     // 0-1: how well colony handles crowding (affects spread in dense areas)
-    float quorum_threshold;      // 0-1: local density threshold that triggers quorum sensing behavior
+    float nutrient_sensitivity;
+    float toxin_sensitivity;
+    float edge_affinity;
+    float density_tolerance;
+    float quorum_threshold;
     
-    // === Colony-Colony Interactions ===
-    float toxin_production;      // 0-1: how much toxin is emitted (damages nearby foreign cells)
-    float toxin_resistance;      // 0-1: resistance to toxin damage
-    float signal_emission;       // 0-1: strength of chemical signals emitted
-    float signal_sensitivity;    // 0-1: how strongly to react to signals
-    float alarm_threshold;       // 0-1: when to emit alarm signals (hostile contact sensitivity)
-    float gene_transfer_rate;    // 0-0.1: probability of horizontal gene transfer on contact
+    float toxin_production;
+    float toxin_resistance;
+    float signal_emission;
+    float signal_sensitivity;
+    float alarm_threshold;
+    float gene_transfer_rate;
     
-    // === Competitive Strategy ===
-    float resource_consumption;  // 0-1: how aggressively nutrients are consumed (fast growth vs sustainability)
-    float defense_priority;      // 0-1: tendency to form defensive borders vs aggressive expansion
+    float resource_consumption;
+    float defense_priority;
     
-    // === Survival Strategies ===
-    float dormancy_threshold;    // 0-1: population ratio that triggers dormancy (0=never dormant)
-    float dormancy_resistance;   // 0-1: how resistant dormant cells are (but can't grow)
-    float sporulation_threshold; // 0-1: stress level that triggers dormancy/spore state
-    float biofilm_investment;    // 0-1: trade growth for resilience
-    float biofilm_tendency;      // 0-1: tendency to form protective biofilm
-    float motility;              // 0-1: how much the colony can drift/move
-    float motility_direction;    // 0-2π: preferred drift direction (can evolve)
-    float specialization;        // 0-1: how different edge vs interior cells behave
+    float dormancy_threshold;
+    float dormancy_resistance;
+    float sporulation_threshold;
+    float biofilm_investment;
+    float biofilm_tendency;
+    float motility;
+    float motility_direction;
+    float specialization;
     
-    // === Metabolic Strategy ===
-    float efficiency;            // 0-1: high=slow but sustainable, low=fast but depletes resources
+    float efficiency;
     
-    // === Neural Network Decision Layer ===
-    float hidden_weights[8];     // Hidden layer weights for decision network
-    float learning_rate;         // 0-1: how quickly the colony adapts
-    float memory_factor;         // 0-1: how much past experience influences decisions
+    float hidden_weights[8];
+    float learning_rate;
+    float memory_factor;
     
     Color body_color;
     Color border_color;
+    
+    CombatStats combat;
+    GrowthStats growth;
+    BehaviorStats behavior;
+    TraitStats traits;
 } Genome;
 
-// Cell structure - represents one grid cell
 typedef struct {
-    uint32_t colony_id;  // 0 = empty
+    uint32_t colony_id;
     bool is_border;
-    uint8_t age;         // ticks since colonized
-    int8_t component_id; // used during flood-fill, -1 = unmarked
+    uint8_t age;
+    int8_t component_id;
 } Cell;
 
-// Colony state flags
 typedef enum {
     COLONY_STATE_NORMAL = 0,
-    COLONY_STATE_DORMANT = 1,    // Colony is dormant (resistant but not growing)
-    COLONY_STATE_STRESSED = 2,   // Colony is under stress (low nutrients/toxins)
+    COLONY_STATE_DORMANT = 1,
+    COLONY_STATE_STRESSED = 2,
 } ColonyState;
 
-// Colony structure
 typedef struct {
     uint32_t id;
-    char name[64];       // Scientific name
+    char name[64];
     Genome genome;
     size_t cell_count;
-    size_t max_cell_count;   // Historical max population
-    uint64_t age;        // Ticks alive
-    uint32_t parent_id;  // 0 if original
-    bool active;         // Whether colony is alive
-    Color color;         // Display color
-    uint32_t shape_seed; // Seed for procedural shape generation
-    float wobble_phase;  // Animation phase for border movement
-    float shape_evolution; // Shape evolution factor (0-1), gradually changes over time
+    size_t max_cell_count;
+    uint64_t age;
+    uint32_t parent_id;
+    bool active;
+    Color color;
+    uint32_t shape_seed;
+    float wobble_phase;
+    float shape_evolution;
     
-    // New dynamic state
-    ColonyState state;       // Current colony state
-    bool is_dormant;         // Colony is in spore/dormant state
-    float stress_level;      // 0-1: accumulated stress
-    float biofilm_strength;  // 0-1: current biofilm protection level
-    float drift_x, drift_y;  // Accumulated motility drift
-    float signal_strength;   // Current signal output level
+    ColonyState state;
+    bool is_dormant;
+    float stress_level;
+    float biofilm_strength;
+    float drift_x, drift_y;
+    float signal_strength;
     
-    // Neural network learning state
-    float success_history[8]; // Tracks which directions led to successful expansion
-    uint32_t last_population; // For tracking growth/decline
+    float success_history[8];
+    uint32_t last_population;
+    
+    uint32_t* cell_indices;
+    size_t cell_indices_capacity;
+    size_t cell_indices_count;
+    
+    float centroid_x;
+    float centroid_y;
 } Colony;
 
-// World structure
 typedef struct {
     int width;
     int height;
-    Cell* cells;            // flat array: cells[y * width + x]
-    Colony* colonies;       // dynamic array of colonies
+    Cell* cells;
+    Colony* colonies;
     size_t colony_count;
     size_t colony_capacity;
     uint64_t tick;
+    atomic_uint next_colony_id;
     
-    // Colony lookup table (indexed by colony ID for O(1) access)
-    Colony** colony_by_id;       // array of pointers into colonies[]
-    size_t colony_by_id_capacity; // allocated size of colony_by_id
+    Colony** colony_by_id;
+    size_t colony_by_id_capacity;
     
-    // Environmental layers
-    float* nutrients;       // nutrient level per cell (0-1)
-    float* toxins;          // toxin level per cell (0-1) 
-    float* signals;         // chemical signal level per cell (0-1)
-    float* alarm_signals;   // alarm signal level per cell (0-1) - warns of hostile contact
-    uint32_t* signal_source; // which colony emitted signal at each cell
-    uint32_t* alarm_source;  // which colony emitted alarm at each cell
+    float* nutrients;
+    float* toxins;
+    float* signals;
+    float* alarm_signals;
+    uint32_t* signal_source;
+    uint32_t* alarm_source;
     
-    // Scratch buffers (allocated once, reused each tick)
-    float* scratch_signals;      // temp buffer for scent diffusion
-    uint32_t* scratch_sources;   // temp buffer for scent source tracking
+    float* scratch_signals;
+    uint32_t* scratch_sources;
 } World;
 
-#endif // FEROX_TYPES_H
+#endif

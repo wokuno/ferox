@@ -196,7 +196,7 @@ void renderer_draw_cell(Renderer* renderer, int x, int y, uint8_t r, uint8_t g, 
     renderer_reset_colors(renderer);
 }
 
-void renderer_draw_world(Renderer* renderer, const ProtoWorld* world) {
+void renderer_draw_world(Renderer* renderer, const proto_world* world) {
     if (!world) return;
     
     // Clear background of petri dish (dark gray for "agar")
@@ -211,88 +211,88 @@ void renderer_draw_world(Renderer* renderer, const ProtoWorld* world) {
 
     // Prefer exact cell rendering when grid data is available (matches GUI behavior)
     if (world->has_grid && world->grid && world->grid_size > 0) {
-        static const int nx_off[4] = {0, 1, 0, -1};
-        static const int ny_off[4] = {-1, 0, 1, 0};
-        int start_x = renderer->view_x;
-        int start_y = renderer->view_y;
-        int end_x = renderer->view_x + renderer->view_width;
-        int end_y = renderer->view_y + renderer->view_height;
-        if (start_x < 0) start_x = 0;
-        if (start_y < 0) start_y = 0;
-        if (end_x > (int)world->width) end_x = (int)world->width;
-        if (end_y > (int)world->height) end_y = (int)world->height;
-
-        for (int wy = start_y; wy < end_y; wy++) {
-            for (int wx = start_x; wx < end_x; wx++) {
-                int idx = wy * (int)world->width + wx;
-                if (idx < 0 || idx >= (int)world->grid_size) continue;
-
-                uint16_t colony_id = world->grid[idx];
-                if (colony_id == 0) continue;
-
-                const ProtoColony* colony = NULL;
-                for (uint32_t i = 0; i < world->colony_count; i++) {
-                    if (world->colonies[i].id == colony_id && world->colonies[i].alive) {
-                        colony = &world->colonies[i];
-                        break;
-                    }
-                }
-                if (!colony) continue;
-
-                bool is_border = false;
-                for (int d = 0; d < 4; d++) {
-                    int nx = wx + nx_off[d];
-                    int ny = wy + ny_off[d];
-                    if (nx < 0 || nx >= (int)world->width || ny < 0 || ny >= (int)world->height) {
-                        is_border = true;
-                        break;
-                    }
-                    int nidx = ny * (int)world->width + nx;
-                    if (world->grid[nidx] != colony_id) {
-                        is_border = true;
-                        break;
-                    }
-                }
-
-                uint8_t r = colony->color_r;
-                uint8_t g = colony->color_g;
-                uint8_t b = colony->color_b;
-                if (colony->id == renderer->selected_colony) {
-                    r = (uint8_t)(r + (255 - r) / 3);
-                    g = (uint8_t)(g + (255 - g) / 3);
-                    b = (uint8_t)(b + (255 - b) / 3);
-                }
-                renderer_draw_cell(renderer, wx, wy, r, g, b, is_border);
-            }
-        }
-        return;
+        renderer_draw_world_grid(renderer, world);
+    } else {
+        renderer_draw_world_centroid(renderer, world);
     }
-    
-    // Draw each colony
+}
+
+void renderer_draw_world_grid(Renderer* renderer, const proto_world* world) {
+    static const int nx_off[4] = {0, 1, 0, -1};
+    static const int ny_off[4] = {-1, 0, 1, 0};
+    int start_x = renderer->view_x;
+    int start_y = renderer->view_y;
+    int end_x = renderer->view_x + renderer->view_width;
+    int end_y = renderer->view_y + renderer->view_height;
+    if (start_x < 0) start_x = 0;
+    if (start_y < 0) start_y = 0;
+    if (end_x > (int)world->width) end_x = (int)world->width;
+    if (end_y > (int)world->height) end_y = (int)world->height;
+
+    for (int wy = start_y; wy < end_y; wy++) {
+        for (int wx = start_x; wx < end_x; wx++) {
+            int idx = wy * (int)world->width + wx;
+            if (idx < 0 || idx >= (int)world->grid_size) continue;
+
+            uint16_t colony_id = world->grid[idx];
+            if (colony_id == 0) continue;
+
+            const proto_colony* colony = NULL;
+            for (uint32_t i = 0; i < world->colony_count; i++) {
+                if (world->colonies[i].id == colony_id && world->colonies[i].alive) {
+                    colony = &world->colonies[i];
+                    break;
+                }
+            }
+            if (!colony) continue;
+
+            bool is_border = false;
+            for (int d = 0; d < 4; d++) {
+                int nx = wx + nx_off[d];
+                int ny = wy + ny_off[d];
+                if (nx < 0 || nx >= (int)world->width || ny < 0 || ny >= (int)world->height) {
+                    is_border = true;
+                    break;
+                }
+                int nidx = ny * (int)world->width + nx;
+                if (world->grid[nidx] != colony_id) {
+                    is_border = true;
+                    break;
+                }
+            }
+
+            uint8_t r = colony->color_r;
+            uint8_t g = colony->color_g;
+            uint8_t b = colony->color_b;
+            if (colony->id == renderer->selected_colony) {
+                r = (uint8_t)(r + (255 - r) / 3);
+                g = (uint8_t)(g + (255 - g) / 3);
+                b = (uint8_t)(b + (255 - b) / 3);
+            }
+            renderer_draw_cell(renderer, wx, wy, r, g, b, is_border);
+        }
+    }
+}
+
+void renderer_draw_world_centroid(Renderer* renderer, const proto_world* world) {
     for (uint32_t i = 0; i < world->colony_count; i++) {
-        const ProtoColony* colony = &world->colonies[i];
+        const proto_colony* colony = &world->colonies[i];
         if (!colony->alive) continue;
         
-        // Calculate colony's visual representation based on radius
-        // Use rounding instead of truncation to reduce jitter when centroid is near integer boundary
         int cx = (int)(colony->x + 0.5f);
         int cy = (int)(colony->y + 0.5f);
         float base_radius = colony->radius;
         
-        // Draw cells with procedurally generated organic shape
-        int int_radius = (int)(base_radius * 1.7f + 2);  // Extra margin for shape variation
+        int int_radius = (int)(base_radius * 1.7f + 2);
         for (int dy = -int_radius; dy <= int_radius; dy++) {
             for (int dx = -int_radius; dx <= int_radius; dx++) {
-                // Calculate angle from center
                 float angle = atan2f((float)dy, (float)dx);
                 if (angle < 0) angle += 2.0f * 3.14159265f;
                 
-                // Get shape multiplier from procedural noise
                 float shape_mult = colony_shape_at_angle_evolved(colony->shape_seed, angle,
                                                                  colony->wobble_phase,
                                                                  colony->shape_evolution);
                 
-                // Calculate effective radius at this angle
                 float effective_radius = base_radius * shape_mult;
                 
                 float dist = sqrtf((float)(dx * dx + dy * dy));
@@ -301,16 +301,13 @@ void renderer_draw_world(Renderer* renderer, const ProtoWorld* world) {
                     int cell_x = cx + dx;
                     int cell_y = cy + dy;
                     
-                    // Is this cell on the border? (within 1.2 units of edge)
                     bool is_border = dist > (effective_radius - 1.2f);
                     
-                    // Highlight selected colony
                     uint8_t r = colony->color_r;
                     uint8_t g = colony->color_g;
                     uint8_t b = colony->color_b;
                     
                     if (colony->id == renderer->selected_colony) {
-                        // Brighten selected colony
                         r = (uint8_t)(r + (255 - r) / 3);
                         g = (uint8_t)(g + (255 - g) / 3);
                         b = (uint8_t)(b + (255 - b) / 3);
@@ -323,7 +320,7 @@ void renderer_draw_world(Renderer* renderer, const ProtoWorld* world) {
     }
 }
 
-void renderer_draw_colony_info(Renderer* renderer, const ProtoColony* colony) {
+void renderer_draw_colony_info(Renderer* renderer, const proto_colony* colony) {
     int panel_x = renderer->view_width + 4;
     int panel_y = 3;
     

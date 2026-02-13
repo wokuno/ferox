@@ -4,6 +4,7 @@ add_library(ferox_server_lib STATIC
     parallel.c
     server.c
     simulation.c
+    simulation_common.c
     threadpool.c
     world.c
 )

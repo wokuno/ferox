@@ -8,9 +8,9 @@
 #include "renderer.h"
 
 typedef struct Client {
-    NetSocket* socket;
+    net_socket* socket;
     Renderer* renderer;
-    ProtoWorld local_world;       // Local copy of world state
+    proto_world local_world;       // Local copy of world state
     bool connected;
     bool running;
     uint32_t selected_colony;
@@ -38,6 +38,6 @@ void client_update_world(Client* client, const uint8_t* data, size_t len);
 // Selection
 void client_select_next_colony(Client* client);
 void client_deselect_colony(Client* client);
-const ProtoColony* client_get_selected_colony(Client* client);
+const proto_colony* client_get_selected_colony(Client* client);
 
 #endif // CLIENT_H

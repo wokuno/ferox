@@ -202,10 +202,10 @@ Complete world state broadcast. Sent after each simulation tick.
 
 > **Note:** The `shape_seed` and `wobble_phase` fields have been removed. Colony shapes are now rendered directly from actual cell positions transmitted via the grid data, providing much more accurate territory visualization.
 
-### C Structure (ProtoColony)
+### C Structure (proto_colony)
 
 ```c
-typedef struct ProtoColony {
+typedef struct proto_colony {
     uint32_t id;
     char name[MAX_COLONY_NAME];
     float x, y;
@@ -222,38 +222,38 @@ typedef struct ProtoColony {
     uint8_t max_tracked;             // Max neighbor colonies to track (1-4)
     float social_factor;             // -1 to +1: repulsion to attraction
     float merge_affinity;            // 0-0.3: bonus to merge compatibility
-} ProtoColony;
+} proto_colony;
 ```
 
-### C Structure (ProtoWorld)
+### C Structure (proto_world)
 
 ```c
-typedef struct ProtoWorld {
+typedef struct proto_world {
     int width;
     int height;
     uint64_t tick;
     bool paused;
     float speed_multiplier;
-    ProtoColony* colonies;
+    proto_colony* colonies;
     size_t colony_count;
     
     // Grid data for cell-based rendering
     uint32_t* grid;                  // colony_id for each cell (width * height)
     size_t grid_size;                // Size in bytes of uncompressed grid
-} ProtoWorld;
+} proto_world;
 ```
 
 ### Memory Management Functions
 
 ```c
-// Initialize ProtoWorld with default values
-void proto_world_init(ProtoWorld* world);
+// Initialize proto_world with default values
+void proto_world_init(proto_world* world);
 
-// Free allocated memory in ProtoWorld
-void proto_world_free(ProtoWorld* world);
+// Free allocated memory in proto_world
+void proto_world_free(proto_world* world);
 
 // Allocate grid array for given dimensions
-int proto_world_alloc_grid(ProtoWorld* world, int width, int height);
+int proto_world_alloc_grid(proto_world* world, int width, int height);
 ```
 
 ---
@@ -594,10 +594,10 @@ int protocol_deserialize_header(const uint8_t* buffer, MessageHeader* header);
 ### World State
 
 ```c
-int protocol_serialize_world_state(const ProtoWorld* world, 
+int protocol_serialize_world_state(const proto_world* world, 
                                    uint8_t** buffer, size_t* len);
 int protocol_deserialize_world_state(const uint8_t* buffer, 
-                                     size_t len, ProtoWorld* world);
+                                     size_t len, proto_world* world);
 ```
 
 ### Commands
@@ -630,17 +630,17 @@ int protocol_deserialize_grid_rle(const uint8_t* buffer, size_t len,
                                   uint32_t* grid, int width, int height);
 ```
 
-### ProtoWorld Management
+### proto_world Management
 
 ```c
-// Initialize ProtoWorld structure
-void proto_world_init(ProtoWorld* world);
+// Initialize proto_world structure
+void proto_world_init(proto_world* world);
 
-// Free ProtoWorld allocated memory
-void proto_world_free(ProtoWorld* world);
+// Free proto_world allocated memory
+void proto_world_free(proto_world* world);
 
-// Allocate grid array in ProtoWorld
-int proto_world_alloc_grid(ProtoWorld* world, int width, int height);
+// Allocate grid array in proto_world
+int proto_world_alloc_grid(proto_world* world, int width, int height);
 ```
 
 ## Wire Examples

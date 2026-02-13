@@ -596,7 +596,7 @@ Network socket abstraction.
 #### net_server_create
 
 ```c
-NetServer* net_server_create(uint16_t port);
+net_server* net_server_create(uint16_t port);
 ```
 
 Create a TCP server listening on the specified port.
@@ -604,14 +604,14 @@ Create a TCP server listening on the specified port.
 **Parameters:**
 - `port` - Port number (0 for auto-assign)
 
-**Returns:** Pointer to NetServer, or NULL on failure
+**Returns:** Pointer to net_server, or NULL on failure
 
 ---
 
 #### net_server_destroy
 
 ```c
-void net_server_destroy(NetServer* server);
+void net_server_destroy(net_server* server);
 ```
 
 Destroy server and close listening socket.
@@ -624,7 +624,7 @@ Destroy server and close listening socket.
 #### net_server_accept
 
 ```c
-NetSocket* net_server_accept(NetServer* server);
+net_socket* net_server_accept(net_server* server);
 ```
 
 Accept a new client connection (blocking).
@@ -639,7 +639,7 @@ Accept a new client connection (blocking).
 #### net_client_connect
 
 ```c
-NetSocket* net_client_connect(const char* host, uint16_t port);
+net_socket* net_client_connect(const char* host, uint16_t port);
 ```
 
 Connect to a server.
@@ -655,7 +655,7 @@ Connect to a server.
 #### net_socket_close
 
 ```c
-void net_socket_close(NetSocket* socket);
+void net_socket_close(net_socket* socket);
 ```
 
 Close a socket and free resources.
@@ -668,7 +668,7 @@ Close a socket and free resources.
 #### net_send
 
 ```c
-int net_send(NetSocket* socket, const uint8_t* data, size_t len);
+int net_send(net_socket* socket, const uint8_t* data, size_t len);
 ```
 
 Send data over socket.
@@ -685,7 +685,7 @@ Send data over socket.
 #### net_recv
 
 ```c
-int net_recv(NetSocket* socket, uint8_t* buffer, size_t max_len);
+int net_recv(net_socket* socket, uint8_t* buffer, size_t max_len);
 ```
 
 Receive data from socket.
@@ -702,7 +702,7 @@ Receive data from socket.
 #### net_has_data
 
 ```c
-bool net_has_data(NetSocket* socket);
+bool net_has_data(net_socket* socket);
 ```
 
 Check if socket has data available (non-blocking).
@@ -717,7 +717,7 @@ Check if socket has data available (non-blocking).
 #### net_set_nonblocking
 
 ```c
-void net_set_nonblocking(NetSocket* socket, bool nonblocking);
+void net_set_nonblocking(net_socket* socket, bool nonblocking);
 ```
 
 Set socket blocking mode.
@@ -731,7 +731,7 @@ Set socket blocking mode.
 #### net_set_nodelay
 
 ```c
-void net_set_nodelay(NetSocket* socket, bool nodelay);
+void net_set_nodelay(net_socket* socket, bool nodelay);
 ```
 
 Enable/disable TCP_NODELAY (Nagle's algorithm).
@@ -781,7 +781,7 @@ Deserialize message header from buffer.
 #### protocol_serialize_world_state
 
 ```c
-int protocol_serialize_world_state(const ProtoWorld* world, 
+int protocol_serialize_world_state(const proto_world* world, 
                                    uint8_t** buffer, size_t* len);
 ```
 
@@ -802,7 +802,7 @@ Serialize complete world state.
 
 ```c
 int protocol_deserialize_world_state(const uint8_t* buffer, size_t len,
-                                     ProtoWorld* world);
+                                     proto_world* world);
 ```
 
 Deserialize world state from buffer.

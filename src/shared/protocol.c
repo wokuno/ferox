@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <errno.h>
+#include <stdatomic.h>
 
 // Helper to write uint32_t in network byte order
 static void write_u32(uint8_t* buf, uint32_t val) {
@@ -73,7 +74,7 @@ int protocol_deserialize_header(const uint8_t* buffer, MessageHeader* header) {
     return MESSAGE_HEADER_SIZE;
 }
 
-int protocol_serialize_colony(const ProtoColony* colony, uint8_t* buffer) {
+int protocol_serialize_colony(const proto_colony* colony, uint8_t* buffer) {
     if (!colony || !buffer) return -1;
     
     int offset = 0;
@@ -135,7 +136,7 @@ int protocol_serialize_colony(const ProtoColony* colony, uint8_t* buffer) {
     return offset;
 }
 
-int protocol_deserialize_colony(const uint8_t* buffer, ProtoColony* colony) {
+int protocol_deserialize_colony(const uint8_t* buffer, proto_colony* colony) {
     if (!buffer || !colony) return -1;
     
     int offset = 0;
@@ -198,7 +199,7 @@ int protocol_deserialize_colony(const uint8_t* buffer, ProtoColony* colony) {
     return offset;
 }
 
-int protocol_serialize_world_state(const ProtoWorld* world, uint8_t** buffer, size_t* len) {
+int protocol_serialize_world_state(const proto_world* world, uint8_t** buffer, size_t* len) {
     if (!world || !buffer || !len) return -1;
     
     // Calculate required size for header + colonies
@@ -296,7 +297,7 @@ int protocol_serialize_world_state(const ProtoWorld* world, uint8_t** buffer, si
     return 0;
 }
 
-int protocol_deserialize_world_state(const uint8_t* buffer, size_t len, ProtoWorld* world) {
+int protocol_deserialize_world_state(const uint8_t* buffer, size_t len, proto_world* world) {
     if (!buffer || !world || len < 26) return -1;  // Minimum header size now 26 bytes
     
     int offset = 0;
@@ -486,13 +487,13 @@ static int recv_all(int socket, uint8_t* buffer, size_t len) {
 }
 
 int protocol_send_message(int socket, MessageType type, const uint8_t* payload, size_t len) {
-    static uint32_t sequence = 0;
+    static atomic_uint sequence = 0;
     
     MessageHeader header = {
         .magic = PROTOCOL_MAGIC,
         .type = type,
         .payload_len = (uint32_t)len,
-        .sequence = sequence++
+        .sequence = atomic_fetch_add(&sequence, 1)
     };
     
     uint8_t header_buf[MESSAGE_HEADER_SIZE];
@@ -547,16 +548,16 @@ int protocol_recv_message(int socket, MessageHeader* header, uint8_t** payload) 
     return 0;
 }
 
-// ProtoWorld grid memory management
-void proto_world_init(ProtoWorld* world) {
+// proto_world grid memory management
+void proto_world_init(proto_world* world) {
     if (!world) return;
-    memset(world, 0, sizeof(ProtoWorld));
+    memset(world, 0, sizeof(proto_world));
     world->grid = NULL;
     world->grid_size = 0;
     world->has_grid = false;
 }
 
-void proto_world_free(ProtoWorld* world) {
+void proto_world_free(proto_world* world) {
     if (!world) return;
     if (world->grid) {
         free(world->grid);
@@ -566,7 +567,7 @@ void proto_world_free(ProtoWorld* world) {
     world->has_grid = false;
 }
 
-void proto_world_alloc_grid(ProtoWorld* world, uint32_t width, uint32_t height) {
+void proto_world_alloc_grid(proto_world* world, uint32_t width, uint32_t height) {
     if (!world) return;
     
     uint32_t size = width * height;

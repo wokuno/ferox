@@ -11,6 +11,38 @@ permissions:
   contents: read
 
 jobs:
+  # Self-hosted runner jobs (when label "self-hosted" is applied)
+  build-and-test-selfhosted:
+    if: false  # Disabled by default - enable in PR comments
+    runs-on: self-hosted
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libsdl2-dev
+      
+      - name: Configure CMake
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      
+      - name: Build
+        run: |
+          cmake --build build --config ${{ matrix.build_type }} -j$(nproc)
+      
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure -C ${{ matrix.build_type }}
+
+  # Standard GitHub-hosted runner jobs
   build-and-test:
     strategy:
       matrix:
