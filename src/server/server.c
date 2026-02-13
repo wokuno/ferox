@@ -192,15 +192,26 @@ static void* accept_thread_func(void* arg) {
 static void* simulation_thread_func(void* arg) {
     Server* server = (Server*)arg;
     
+    int tick_counter = 0;
+    
     while (server->running) {
         long start_time = get_time_ms();
         
         if (!server->paused) {
             // Run simulation tick using atomic lock-free parallel processing
             atomic_tick(server->atomic_world);
+            tick_counter++;
             
-            // Broadcast world state to all clients
-            server_broadcast_world_state(server);
+            // At high speeds, skip some broadcasts to avoid flooding the network.
+            // Aim for ~15-30 broadcasts/sec max regardless of simulation speed.
+            int broadcast_every = 1;
+            float speed = server->speed_multiplier;
+            if (speed > 4.0f) broadcast_every = (int)(speed / 4.0f);
+            if (broadcast_every > 16) broadcast_every = 16;
+            
+            if (tick_counter % broadcast_every == 0) {
+                server_broadcast_world_state(server);
+            }
         }
         
         // Process client messages

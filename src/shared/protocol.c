@@ -443,29 +443,43 @@ int protocol_deserialize_command(const uint8_t* buffer, CommandType* cmd, void* 
     return offset;
 }
 
-// Send all bytes, handling partial sends
+// Send all bytes, handling partial sends and non-blocking EAGAIN
 static int send_all(int socket, const uint8_t* data, size_t len) {
     size_t sent = 0;
+    int retries = 0;
     while (sent < len) {
         ssize_t n = send(socket, data + sent, len - sent, 0);
         if (n <= 0) {
             if (n < 0 && errno == EINTR) continue;
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                if (++retries > 50) return -1;  // Give up after ~500ms
+                usleep(10000);  // 10ms backoff
+                continue;
+            }
             return -1;
         }
+        retries = 0;
         sent += n;
     }
     return 0;
 }
 
-// Receive exact number of bytes
+// Receive exact number of bytes, handling non-blocking EAGAIN
 static int recv_all(int socket, uint8_t* buffer, size_t len) {
     size_t received = 0;
+    int retries = 0;
     while (received < len) {
         ssize_t n = recv(socket, buffer + received, len - received, 0);
         if (n <= 0) {
             if (n < 0 && errno == EINTR) continue;
-            return -1;
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                if (++retries > 50) return -1;  // Give up after ~500ms
+                usleep(10000);  // 10ms backoff
+                continue;
+            }
+            return -1;  // Real error or connection closed
         }
+        retries = 0;
         received += n;
     }
     return 0;
