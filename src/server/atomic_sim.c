@@ -8,9 +8,9 @@
 #include "atomic_sim.h"
 #include "genetics.h"
 #include "simulation.h"
+#include "simulation_common.h"
 #include "../shared/utils.h"
 #include "../shared/names.h"
-#include "../shared/simulation_common.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>

@@ -1,7 +1,7 @@
 #include "simulation_common.h"
-#include "../server/world.h"
-#include "../server/genetics.h"
-#include "utils.h"
+#include "world.h"
+#include "genetics.h"
+#include "../shared/utils.h"
 #include <math.h>
 
 const int DX8[] = {0, 1, 1, 1, 0, -1, -1, -1};

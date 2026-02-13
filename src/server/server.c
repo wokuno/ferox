@@ -104,21 +104,10 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
         return NULL;
     }
     
-    if (pthread_mutex_init(&server->running_mutex, NULL) != 0) {
-        pthread_mutex_destroy(&server->clients_mutex);
-        atomic_world_destroy(server->atomic_world);
-        parallel_destroy(server->parallel_ctx);
-        threadpool_destroy(server->pool);
-        world_destroy(server->world);
-        net_server_destroy(server->listener);
-        free(server);
-        return NULL;
-    }
-    
     // Initialize state
     server->clients = NULL;
     server->client_count = 0;
-    server->running = false;
+    atomic_init(&server->running, false);
     server->paused = false;
     server->tick_rate_ms = DEFAULT_TICK_RATE_MS;
     server->speed_multiplier = 1.0f;
@@ -152,7 +141,6 @@ void server_destroy(Server* server) {
     
     // Destroy resources
     pthread_mutex_destroy(&server->clients_mutex);
-    pthread_mutex_destroy(&server->running_mutex);
     
     if (server->atomic_world) {
         atomic_world_destroy(server->atomic_world);
@@ -176,17 +164,13 @@ void server_destroy(Server* server) {
 static void* accept_thread_func(void* arg) {
     Server* server = (Server*)arg;
     
-    pthread_mutex_lock(&server->running_mutex);
-    bool running = server->running;
-    pthread_mutex_unlock(&server->running_mutex);
+    bool running = atomic_load(&server->running);
     
     while (running) {
         // Accept new connection (blocking)
         net_socket* socket = net_server_accept(server->listener);
         if (!socket) {
-            pthread_mutex_lock(&server->running_mutex);
-            running = server->running;
-            pthread_mutex_unlock(&server->running_mutex);
+            running = atomic_load(&server->running);
             if (!running) break;
             continue;
         }
@@ -213,9 +197,7 @@ static void* simulation_thread_func(void* arg) {
     
     int tick_counter = 0;
     
-    pthread_mutex_lock(&server->running_mutex);
-    bool running = server->running;
-    pthread_mutex_unlock(&server->running_mutex);
+    bool running = atomic_load(&server->running);
     
     while (running) {
         long start_time = get_time_ms();
@@ -251,9 +233,7 @@ static void* simulation_thread_func(void* arg) {
             sleep_ms(target_ms - (int)elapsed);
         }
         
-        pthread_mutex_lock(&server->running_mutex);
-        running = server->running;
-        pthread_mutex_unlock(&server->running_mutex);
+        running = atomic_load(&server->running);
     }
     
     return NULL;
@@ -262,19 +242,14 @@ static void* simulation_thread_func(void* arg) {
 void server_run(Server* server) {
     if (!server) return;
     
-    pthread_mutex_lock(&server->running_mutex);
-    if (server->running) {
-        pthread_mutex_unlock(&server->running_mutex);
+    if (atomic_load(&server->running)) {
         return;
     }
-    server->running = true;
-    pthread_mutex_unlock(&server->running_mutex);
+    atomic_store(&server->running, true);
     
     // Start accept thread
     if (pthread_create(&server->accept_thread, NULL, accept_thread_func, server) != 0) {
-        pthread_mutex_lock(&server->running_mutex);
-        server->running = false;
-        pthread_mutex_unlock(&server->running_mutex);
+        atomic_store(&server->running, false);
         return;
     }
     
@@ -288,13 +263,10 @@ void server_run(Server* server) {
 void server_stop(Server* server) {
     if (!server) return;
     
-    pthread_mutex_lock(&server->running_mutex);
-    if (!server->running) {
-        pthread_mutex_unlock(&server->running_mutex);
+    if (!atomic_load(&server->running)) {
         return;
     }
-    server->running = false;
-    pthread_mutex_unlock(&server->running_mutex);
+    atomic_store(&server->running, false);
     
     // Close listener to unblock accept
     if (server->listener) {

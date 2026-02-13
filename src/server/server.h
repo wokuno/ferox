@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <pthread.h>
 
 #include "../shared/network.h"
@@ -38,12 +39,11 @@ typedef struct Server {
     ThreadPool* pool;
     ParallelContext* parallel_ctx;
     AtomicWorld* atomic_world;    // Atomic simulation engine
-    bool running;
+    _Atomic bool running;
     bool paused;
     int tick_rate_ms;  // Milliseconds between ticks
     float speed_multiplier;
     pthread_mutex_t clients_mutex;
-    pthread_mutex_t running_mutex;  // Protects running flag
     pthread_t accept_thread;
     pthread_t simulation_thread;
     uint32_t next_client_id;

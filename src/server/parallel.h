@@ -29,7 +29,6 @@ typedef struct ParallelContext {
     int region_count;
     int regions_x;
     int regions_y;
-    pthread_mutex_t task_mutex;  // Protects task allocation
     
     // Pending buffers for spread phase (one per region)
     PendingBuffer** pending_buffers;
