@@ -729,7 +729,9 @@ void simulation_mutate(World* world) {
                     if (new_id > 0) {
                         // BFS from seed cell to transfer contiguous cells
                         int transferred = 0;
-                        int queue[400];  // Simple queue for BFS
+                        int q_cap = 1024;
+                        int* queue = (int*)malloc(q_cap * sizeof(int));
+                        if (!queue) continue;
                         int q_front = 0, q_back = 0;
                         queue[q_back++] = seed_y * world->width + seed_x;
                         
@@ -749,17 +751,25 @@ void simulation_mutate(World* world) {
                             int cy = idx / world->width;
                             int dx[] = {-1, 1, 0, 0};
                             int dy[] = {0, 0, -1, 1};
-                            for (int d = 0; d < 4 && q_back < 400; d++) {
+                            for (int d = 0; d < 4; d++) {
                                 int nx = cx + dx[d];
                                 int ny = cy + dy[d];
                                 if (nx >= 0 && nx < world->width && ny >= 0 && ny < world->height) {
                                     int nidx = ny * world->width + nx;
                                     if (world->cells[nidx].colony_id == colony->id) {
+                                        if (q_back >= q_cap) {
+                                            q_cap *= 2;
+                                            int* nq = (int*)realloc(queue, q_cap * sizeof(int));
+                                            if (!nq) break;
+                                            queue = nq;
+                                        }
                                         queue[q_back++] = nidx;
                                     }
                                 }
                             }
                         }
+                        
+                        free(queue);
                         
                         // Update new species cell count
                         Colony* new_col = world_get_colony(world, new_id);
@@ -1819,8 +1829,14 @@ void simulation_tick(World* world) {
     // Run simulation phases
     simulation_spread(world);
     simulation_mutate(world);
-    simulation_check_divisions(world);
-    simulation_check_recombinations(world);
+    // Division detection is expensive (flood-fill per colony) — only check every 10 ticks
+    if (world->tick % 10 == 0) {
+        simulation_check_divisions(world);
+    }
+    // Recombination is expensive (full grid scan) — only check every 15 ticks
+    if (world->tick % 15 == 5) {
+        simulation_check_recombinations(world);
+    }
     
     // Combat resolution for more dynamic battles
     simulation_resolve_combat(world);

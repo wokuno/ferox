@@ -745,11 +745,15 @@ void atomic_tick(AtomicWorld* aworld) {
     // Mutations (per-colony, serial)
     simulation_mutate(world);
     
-    // Division detection (requires flood-fill, serial)
-    simulation_check_divisions(world);
+    // Division detection is expensive (flood-fill per colony) — only check every 10 ticks
+    if (world->tick % 10 == 0) {
+        simulation_check_divisions(world);
+    }
     
-    // Recombination (serial)
-    simulation_check_recombinations(world);
+    // Recombination is expensive (full grid scan) — only check every 15 ticks
+    if (world->tick % 15 == 5) {
+        simulation_check_recombinations(world);
+    }
 
     // Keep introducing new lineages so ecosystem stays volatile.
     atomic_spawn_dynamic_colonies(world);
