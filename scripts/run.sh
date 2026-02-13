@@ -251,10 +251,12 @@ case "$MODE" in
         echo "   Colonies: $COLONIES"
         echo ""
         
-        # Start server in background with its own process group
-        # (prevents SIGINT from GUI terminal propagating to server)
-        setsid "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
-                      -t "$THREADS" -c "$COLONIES" -r "$TICK_RATE" &
+        # Start server in background, ignoring SIGINT so Ctrl+C on GUI
+        # doesn't kill the server (cleanup handles server shutdown)
+        ( trap '' INT
+          exec "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
+                        -t "$THREADS" -c "$COLONIES" -r "$TICK_RATE"
+        ) &
         SERVER_PID=$!
         
         # Wait for server to start
@@ -290,9 +292,12 @@ case "$MODE" in
         echo "   Colonies: $COLONIES"
         echo ""
         
-        # Start server in background with its own process group
-        setsid "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
-                      -t "$THREADS" -c "$COLONIES" -r "$TICK_RATE" &
+        # Start server in background, ignoring SIGINT so Ctrl+C on client
+        # doesn't kill the server (cleanup handles server shutdown)
+        ( trap '' INT
+          exec "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
+                        -t "$THREADS" -c "$COLONIES" -r "$TICK_RATE"
+        ) &
         SERVER_PID=$!
         
         # Wait for server to start
