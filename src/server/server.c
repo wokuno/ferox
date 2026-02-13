@@ -93,8 +93,19 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
         return NULL;
     }
     
-    // Initialize mutex
+    // Initialize mutexes
     if (pthread_mutex_init(&server->clients_mutex, NULL) != 0) {
+        atomic_world_destroy(server->atomic_world);
+        parallel_destroy(server->parallel_ctx);
+        threadpool_destroy(server->pool);
+        world_destroy(server->world);
+        net_server_destroy(server->listener);
+        free(server);
+        return NULL;
+    }
+    
+    if (pthread_mutex_init(&server->running_mutex, NULL) != 0) {
+        pthread_mutex_destroy(&server->clients_mutex);
         atomic_world_destroy(server->atomic_world);
         parallel_destroy(server->parallel_ctx);
         threadpool_destroy(server->pool);
@@ -126,9 +137,9 @@ void server_destroy(Server* server) {
     
     // Clean up all clients
     pthread_mutex_lock(&server->clients_mutex);
-    ClientSession* client = server->clients;
+    client_session* client = server->clients;
     while (client) {
-        ClientSession* next = client->next;
+        client_session* next = client->next;
         if (client->socket) {
             net_socket_close(client->socket);
         }
@@ -141,6 +152,7 @@ void server_destroy(Server* server) {
     
     // Destroy resources
     pthread_mutex_destroy(&server->clients_mutex);
+    pthread_mutex_destroy(&server->running_mutex);
     
     if (server->atomic_world) {
         atomic_world_destroy(server->atomic_world);
@@ -164,11 +176,18 @@ void server_destroy(Server* server) {
 static void* accept_thread_func(void* arg) {
     Server* server = (Server*)arg;
     
-    while (server->running) {
+    pthread_mutex_lock(&server->running_mutex);
+    bool running = server->running;
+    pthread_mutex_unlock(&server->running_mutex);
+    
+    while (running) {
         // Accept new connection (blocking)
-        NetSocket* socket = net_server_accept(server->listener);
+        net_socket* socket = net_server_accept(server->listener);
         if (!socket) {
-            if (!server->running) break;
+            pthread_mutex_lock(&server->running_mutex);
+            running = server->running;
+            pthread_mutex_unlock(&server->running_mutex);
+            if (!running) break;
             continue;
         }
         
@@ -177,7 +196,7 @@ static void* accept_thread_func(void* arg) {
         net_set_nodelay(socket, true);
         
         // Add client
-        ClientSession* client = server_add_client(server, socket);
+        client_session* client = server_add_client(server, socket);
         if (client) {
             printf("Client %u connected from %s:%u\n", 
                    client->id, socket->address, socket->port);
@@ -194,7 +213,11 @@ static void* simulation_thread_func(void* arg) {
     
     int tick_counter = 0;
     
-    while (server->running) {
+    pthread_mutex_lock(&server->running_mutex);
+    bool running = server->running;
+    pthread_mutex_unlock(&server->running_mutex);
+    
+    while (running) {
         long start_time = get_time_ms();
         
         if (!server->paused) {
@@ -227,19 +250,31 @@ static void* simulation_thread_func(void* arg) {
         if (elapsed < target_ms) {
             sleep_ms(target_ms - (int)elapsed);
         }
+        
+        pthread_mutex_lock(&server->running_mutex);
+        running = server->running;
+        pthread_mutex_unlock(&server->running_mutex);
     }
     
     return NULL;
 }
 
 void server_run(Server* server) {
-    if (!server || server->running) return;
+    if (!server) return;
     
+    pthread_mutex_lock(&server->running_mutex);
+    if (server->running) {
+        pthread_mutex_unlock(&server->running_mutex);
+        return;
+    }
     server->running = true;
+    pthread_mutex_unlock(&server->running_mutex);
     
     // Start accept thread
     if (pthread_create(&server->accept_thread, NULL, accept_thread_func, server) != 0) {
+        pthread_mutex_lock(&server->running_mutex);
         server->running = false;
+        pthread_mutex_unlock(&server->running_mutex);
         return;
     }
     
@@ -251,9 +286,15 @@ void server_run(Server* server) {
 }
 
 void server_stop(Server* server) {
-    if (!server || !server->running) return;
+    if (!server) return;
     
+    pthread_mutex_lock(&server->running_mutex);
+    if (!server->running) {
+        pthread_mutex_unlock(&server->running_mutex);
+        return;
+    }
     server->running = false;
+    pthread_mutex_unlock(&server->running_mutex);
     
     // Close listener to unblock accept
     if (server->listener) {
@@ -262,8 +303,8 @@ void server_stop(Server* server) {
     }
 }
 
-// Convert internal World/Colony to protocol ProtoWorld for serialization
-static void build_protocol_world(Server* server, ProtoWorld* proto_world) {
+// Convert internal World/Colony to protocol proto_world for serialization
+static void build_protocol_world(Server* server, proto_world* proto_world) {
     proto_world_init(proto_world);
     
     proto_world->width = (uint32_t)server->world->width;
@@ -291,9 +332,9 @@ static void build_protocol_world(Server* server, ProtoWorld* proto_world) {
     uint32_t count = 0;
     for (size_t i = 0; i < server->world->colony_count && count < MAX_COLONIES; i++) {
         if (server->world->colonies[i].active) {
-            ProtoColony* proto_colony = &proto_world->colonies[count];
+            proto_colony* proto_colony = &proto_world->colonies[count];
             
-            // Map fields from internal Colony (types.h) to protocol ProtoColony
+            // Map fields from internal Colony (types.h) to protocol proto_colony
             proto_colony->id = server->world->colonies[i].id;
             strncpy(proto_colony->name, server->world->colonies[i].name, MAX_COLONY_NAME - 1);
             proto_colony->name[MAX_COLONY_NAME - 1] = '\0';
@@ -348,7 +389,7 @@ void server_broadcast_world_state(Server* server) {
     if (!server) return;
     
     // Build protocol world state
-    ProtoWorld proto_world;
+    proto_world proto_world;
     build_protocol_world(server, &proto_world);
     
     // Serialize
@@ -361,11 +402,11 @@ void server_broadcast_world_state(Server* server) {
     
     // Broadcast to all clients
     pthread_mutex_lock(&server->clients_mutex);
-    ClientSession* client = server->clients;
-    ClientSession* prev = NULL;
+    client_session* client = server->clients;
+    client_session* prev = NULL;
     
     while (client) {
-        ClientSession* next = client->next;
+        client_session* next = client->next;
         
         if (client->active && client->socket && client->socket->connected) {
             int result = protocol_send_message(client->socket->fd, MSG_WORLD_STATE, buffer, len);
@@ -399,7 +440,7 @@ void server_broadcast_world_state(Server* server) {
     proto_world_free(&proto_world);
 }
 
-void server_send_colony_info(Server* server, ClientSession* client, uint32_t colony_id) {
+void server_send_colony_info(Server* server, client_session* client, uint32_t colony_id) {
     if (!server || !client || !client->socket || colony_id == 0) return;
     
     // Find colony index in internal world
@@ -416,8 +457,8 @@ void server_send_colony_info(Server* server, ClientSession* client, uint32_t col
     if (!found) return;
     
     // Build protocol colony
-    ProtoColony proto_colony;
-    memset(&proto_colony, 0, sizeof(ProtoColony));
+    proto_colony proto_colony;
+    memset(&proto_colony, 0, sizeof(proto_colony));
     proto_colony.id = colony_id;
     strncpy(proto_colony.name, server->world->colonies[colony_idx].name, MAX_COLONY_NAME - 1);
     proto_colony.name[MAX_COLONY_NAME - 1] = '\0';
@@ -431,7 +472,7 @@ void server_send_colony_info(Server* server, ClientSession* client, uint32_t col
     }
 }
 
-void server_handle_command(Server* server, ClientSession* client, CommandType cmd, void* data) {
+void server_handle_command(Server* server, client_session* client, CommandType cmd, void* data) {
     if (!server || !client) return;
     
     switch (cmd) {
@@ -494,10 +535,10 @@ void server_handle_command(Server* server, ClientSession* client, CommandType cm
     }
 }
 
-ClientSession* server_add_client(Server* server, NetSocket* socket) {
+client_session* server_add_client(Server* server, net_socket* socket) {
     if (!server || !socket) return NULL;
     
-    ClientSession* session = (ClientSession*)calloc(1, sizeof(ClientSession));
+    client_session* session = (client_session*)calloc(1, sizeof(client_session));
     if (!session) return NULL;
     
     session->socket = socket;
@@ -514,13 +555,13 @@ ClientSession* server_add_client(Server* server, NetSocket* socket) {
     return session;
 }
 
-void server_remove_client(Server* server, ClientSession* client) {
+void server_remove_client(Server* server, client_session* client) {
     if (!server || !client) return;
     
     pthread_mutex_lock(&server->clients_mutex);
     
-    ClientSession* prev = NULL;
-    ClientSession* curr = server->clients;
+    client_session* prev = NULL;
+    client_session* curr = server->clients;
     
     while (curr) {
         if (curr == client) {
@@ -548,10 +589,10 @@ void server_process_clients(Server* server) {
     if (!server) return;
     
     pthread_mutex_lock(&server->clients_mutex);
-    ClientSession* client = server->clients;
+    client_session* client = server->clients;
     
     while (client) {
-        ClientSession* next = client->next;
+        client_session* next = client->next;
         
         if (!client->active || !client->socket || !client->socket->connected) {
             client = next;

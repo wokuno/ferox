@@ -7,7 +7,9 @@ static uint64_t rng_state = 0;
 // xorshift64 algorithm for fast, decent quality random numbers
 static uint64_t xorshift64(void) {
     if (rng_state == 0) {
-        rng_state = (uint64_t)time(NULL);
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        rng_state = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
     }
     uint64_t x = rng_state;
     x ^= x << 13;

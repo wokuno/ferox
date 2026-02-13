@@ -325,7 +325,7 @@ static void draw_aa_line(SDL_Renderer* r, float x1, float y1, float x2, float y2
 }
 
 // Draw a single colony with organic shape
-void gui_renderer_draw_colony(GuiRenderer* renderer, const ProtoColony* colony, bool selected) {
+void gui_renderer_draw_colony(GuiRenderer* renderer, const proto_colony* colony, bool selected) {
     if (!renderer || !colony || !colony->alive) return;
     
     SDL_Renderer* r = renderer->renderer;
@@ -556,7 +556,7 @@ void gui_renderer_draw_petri_dish(GuiRenderer* renderer, int world_width, int wo
     SDL_RenderDrawLine(r, x2, y2, x2, y2 - corner_size);
 }
 
-void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
+void gui_renderer_draw_world(GuiRenderer* renderer, const proto_world* world) {
     if (!renderer || !world) return;
     
     SDL_Renderer* r = renderer->renderer;
@@ -597,7 +597,7 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
                 if (colony_id == 0) continue;  // Empty cell
                 
                 // Find colony data
-                const ProtoColony* colony = NULL;
+                const proto_colony* colony = NULL;
                 for (uint32_t i = 0; i < world->colony_count; i++) {
                     if (world->colonies[i].id == colony_id && world->colonies[i].alive) {
                         colony = &world->colonies[i];
@@ -667,7 +667,7 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
     } else {
         // Fallback: simple colony center rendering (no grid data)
         for (uint32_t i = 0; i < world->colony_count; i++) {
-            const ProtoColony* colony = &world->colonies[i];
+            const proto_colony* colony = &world->colonies[i];
             if (!colony->alive) continue;
             
             int cx, cy;
@@ -683,7 +683,7 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
     }
 }
 
-void gui_renderer_draw_colony_info(GuiRenderer* renderer, const ProtoColony* colony) {
+void gui_renderer_draw_colony_info(GuiRenderer* renderer, const proto_colony* colony) {
     if (!renderer || !renderer->show_info_panel) return;
     
     SDL_Renderer* r = renderer->renderer;

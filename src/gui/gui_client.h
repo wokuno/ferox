@@ -8,9 +8,9 @@
 #include "gui_renderer.h"
 
 typedef struct GuiClient {
-    NetSocket* socket;
+    net_socket* socket;
     GuiRenderer* renderer;
-    ProtoWorld local_world;       // Local copy of world state
+    proto_world local_world;       // Local copy of world state
     bool connected;
     bool running;
     uint32_t selected_colony;
@@ -42,6 +42,6 @@ void gui_client_select_next_colony(GuiClient* client);
 void gui_client_select_prev_colony(GuiClient* client);
 void gui_client_deselect_colony(GuiClient* client);
 void gui_client_select_colony_at(GuiClient* client, float world_x, float world_y);
-const ProtoColony* gui_client_get_selected_colony(GuiClient* client);
+const proto_colony* gui_client_get_selected_colony(GuiClient* client);
 
 #endif // GUI_CLIENT_H

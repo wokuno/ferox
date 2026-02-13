@@ -10,20 +10,67 @@
 #include "simulation.h"
 #include "../shared/utils.h"
 #include "../shared/names.h"
+#include "../shared/simulation_common.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
 
-// Direction offsets for 8-connectivity spreading  
-static const int DX8[] = {0, 1, 1, 1, 0, -1, -1, -1};
-static const int DY8[] = {-1, -1, 0, 1, 1, 1, 0, -1};
-// Diagonal probability correction: 1.0 for cardinal, 1/sqrt(2) for diagonal
-static const float DIR8_WEIGHT[] = {1.0f, 0.7071f, 1.0f, 0.7071f, 1.0f, 0.7071f, 1.0f, 0.7071f};
-
 // ============================================================================
-// Thread-local RNG for deterministic parallel processing
+// Lock-Free Parallel Simulation Engine
 // ============================================================================
+// 
+// This module implements a lock-free parallel simulation using C11 atomics.
+// The algorithm is designed for multi-threaded execution with minimal
+// synchronization overhead, and is structured to be adaptable for future
+// GPU/MPI/SHMEM acceleration.
+//
+// PARALLEL EXECUTION MODEL:
+// =========================
+// The simulation follows a three-phase pattern per tick:
+//   1. AGE PHASE:   All cells age in parallel (no dependencies)
+//   2. SPREAD PHASE: Colonies spread to neighbors using CAS operations
+//   3. SERIAL PHASE: Complex operations (nutrients, combat, mutations)
+//
+// LOCK-FREE CAS (Compare-And-Swap) LOGIC:
+// =======================================
+// The core of the parallel spread uses atomic CAS operations to safely
+// claim empty cells without locks:
+//
+//   atomic_cell_try_claim(neighbor, expected_value, new_value)
+//   
+//   This atomically performs:
+//     if (neighbor->colony_id == expected_value) {
+//         neighbor->colony_id = new_value;
+//         return true;
+//     }
+//     return false;
+//
+// WHY CAS IS ESSENTIAL:
+// - Without locks, multiple threads could try to claim the same empty cell
+// - CAS ensures exactly one thread succeeds; others fail and retry elsewhere
+// - This "optimistic concurrency" avoids lock contention entirely
+// - The " ABA problem" is avoided by checking colony_id is still 0 (empty)
+//
+// RACE CONDITION HANDLING:
+// =======================
+// Consider two threads T1 and T2 both trying to spread to cell X (empty):
+//   T1: reads X.colony_id = 0
+//   T2: reads X.colony_id = 0   (both see empty)
+//   T1: CAS(X, 0, colony_A) -> succeeds, X now belongs to colony A
+//   T2: CAS(X, 0, colony_B) -> fails because X.colony_id is now A
+//   T2: loop continues, tries other directions
+//
+// This ensures no cell is claimed by two colonies - deterministic result
+// regardless of thread scheduling.
+//
+// CELL AGING:
+// ===========
+// Cells age each tick to create temporal dynamics. Age affects:
+// - Death probability (older cells more likely to die)
+// - Visual representation (older cells appear different)
+// Age is applied atomically: atomic_cell_age() increments age with
+// saturation at 255 (max uint8_t value).
 
 static inline uint32_t xorshift32(uint32_t* state) {
     uint32_t x = *state;

@@ -71,6 +71,12 @@ ParallelContext* parallel_create(ThreadPool* pool, World* world, int regions_x, 
     ctx->regions_y = regions_y;
     ctx->region_count = region_count;
     
+    // Initialize task mutex
+    if (pthread_mutex_init(&ctx->task_mutex, NULL) != 0) {
+        free(ctx);
+        return NULL;
+    }
+    
     // Allocate regions array
     ctx->regions = (Region*)malloc(sizeof(Region) * region_count);
     if (ctx->regions == NULL) {
@@ -113,6 +119,7 @@ void parallel_destroy(ParallelContext* ctx) {
         free(ctx->pending_buffers);
     }
     
+    pthread_mutex_destroy(&ctx->task_mutex);
     free(ctx->regions);
     free(ctx);
 }
@@ -156,8 +163,11 @@ void parallel_age(ParallelContext* ctx) {
     
     // Submit an age task for each region
     for (int i = 0; i < ctx->region_count; i++) {
+        pthread_mutex_lock(&ctx->task_mutex);
         RegionTask* task = (RegionTask*)malloc(sizeof(RegionTask));
         if (task == NULL) {
+            pthread_mutex_unlock(&ctx->task_mutex);
+            fprintf(stderr, "Warning: Failed to allocate age task for region %d\n", i);
             continue;
         }
         
@@ -166,6 +176,7 @@ void parallel_age(ParallelContext* ctx) {
         task->region_index = i;
         
         threadpool_submit(ctx->pool, age_task, task);
+        pthread_mutex_unlock(&ctx->task_mutex);
     }
 }
 
@@ -176,8 +187,11 @@ void parallel_spread(ParallelContext* ctx) {
     
     // Submit a spread task for each region
     for (int i = 0; i < ctx->region_count; i++) {
+        pthread_mutex_lock(&ctx->task_mutex);
         RegionTask* task = (RegionTask*)malloc(sizeof(RegionTask));
         if (task == NULL) {
+            pthread_mutex_unlock(&ctx->task_mutex);
+            fprintf(stderr, "Warning: Failed to allocate spread task for region %d\n", i);
             continue;
         }
         
@@ -186,6 +200,7 @@ void parallel_spread(ParallelContext* ctx) {
         task->region_index = i;
         
         threadpool_submit(ctx->pool, spread_task, task);
+        pthread_mutex_unlock(&ctx->task_mutex);
     }
 }
 
@@ -196,8 +211,11 @@ void parallel_mutate(ParallelContext* ctx) {
     
     // Submit a mutate task for each region
     for (int i = 0; i < ctx->region_count; i++) {
+        pthread_mutex_lock(&ctx->task_mutex);
         RegionTask* task = (RegionTask*)malloc(sizeof(RegionTask));
         if (task == NULL) {
+            pthread_mutex_unlock(&ctx->task_mutex);
+            fprintf(stderr, "Warning: Failed to allocate mutate task for region %d\n", i);
             continue;
         }
         
@@ -206,6 +224,7 @@ void parallel_mutate(ParallelContext* ctx) {
         task->region_index = i;
         
         threadpool_submit(ctx->pool, mutate_task, task);
+        pthread_mutex_unlock(&ctx->task_mutex);
     }
 }
 

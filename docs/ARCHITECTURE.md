@@ -91,7 +91,7 @@ The server uses a multi-threaded architecture with three main execution contexts
 // Simplified accept loop
 void* accept_thread(void* arg) {
     while (server->running) {
-        NetSocket* socket = net_server_accept(server->listener);
+        net_socket* socket = net_server_accept(server->listener);
         if (socket) {
             pthread_mutex_lock(&server->clients_mutex);
             server_add_client(server, socket);
@@ -527,8 +527,8 @@ All layers use row-major indexing: `layer[y * width + x]`
 | `World` | Server | Server lifetime |
 | `Cell*` array | World | World lifetime |
 | `Colony*` array | World | World lifetime |
-| `ClientSession` | Server | Until disconnect |
-| `NetSocket` | Session owner | Until socket close |
+| `client_session` | Server | Until disconnect |
+| `net_socket` | Session owner | Until socket close |
 | `ThreadPool` | Server | Server lifetime |
 | Message payloads | Receiver | Must free after processing |
 
@@ -542,9 +542,9 @@ void server_destroy(Server* server) {
     pthread_join(server->simulation_thread, NULL);
     
     // 2. Close client connections
-    ClientSession* client = server->clients;
+    client_session* client = server->clients;
     while (client) {
-        ClientSession* next = client->next;
+        client_session* next = client->next;
         net_socket_close(client->socket);
         free(client);
         client = next;

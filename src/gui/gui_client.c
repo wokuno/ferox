@@ -121,9 +121,6 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
 void gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len) {
     if (!client || !data) return;
     
-    // Free old grid before deserializing new one
-    proto_world_free(&client->local_world);
-    
     if (protocol_deserialize_world_state(data, len, &client->local_world) < 0) {
         return;
     }
@@ -150,7 +147,7 @@ void gui_client_select_next_colony(GuiClient* client) {
             client->selected_index = check_index;
             client->selected_colony = client->local_world.colonies[check_index].id;
             
-            const ProtoColony* colony = &client->local_world.colonies[check_index];
+            const proto_colony* colony = &client->local_world.colonies[check_index];
             gui_renderer_center_on(client->renderer, colony->x, colony->y);
             client->renderer->selected_colony = client->selected_colony;
             return;
@@ -177,7 +174,7 @@ void gui_client_select_prev_colony(GuiClient* client) {
             client->selected_index = check_index;
             client->selected_colony = client->local_world.colonies[check_index].id;
             
-            const ProtoColony* colony = &client->local_world.colonies[check_index];
+            const proto_colony* colony = &client->local_world.colonies[check_index];
             gui_renderer_center_on(client->renderer, colony->x, colony->y);
             client->renderer->selected_colony = client->selected_colony;
             return;
@@ -199,7 +196,7 @@ void gui_client_select_colony_at(GuiClient* client, float world_x, float world_y
     
     // Find colony under cursor
     for (uint32_t i = 0; i < client->local_world.colony_count; i++) {
-        const ProtoColony* colony = &client->local_world.colonies[i];
+        const proto_colony* colony = &client->local_world.colonies[i];
         if (!colony->alive) continue;
         
         float dx = world_x - colony->x;
@@ -222,7 +219,7 @@ void gui_client_select_colony_at(GuiClient* client, float world_x, float world_y
     gui_client_deselect_colony(client);
 }
 
-const ProtoColony* gui_client_get_selected_colony(GuiClient* client) {
+const proto_colony* gui_client_get_selected_colony(GuiClient* client) {
     if (!client || client->selected_colony == 0) return NULL;
     
     for (uint32_t i = 0; i < client->local_world.colony_count; i++) {
@@ -405,7 +402,7 @@ static void gui_client_render(GuiClient* client) {
     gui_renderer_draw_world(client->renderer, &client->local_world);
     
     // Draw colony info panel
-    const ProtoColony* selected = gui_client_get_selected_colony(client);
+    const proto_colony* selected = gui_client_get_selected_colony(client);
     gui_renderer_draw_colony_info(client->renderer, selected);
     
     // Draw status bar
