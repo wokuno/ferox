@@ -628,13 +628,14 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
                     }
                 }
                 
-                // Get screen position
-                int sx, sy;
+                // Get screen position of this cell and next cell to ensure seamless tiling
+                int sx, sy, sx_next, sy_next;
                 gui_renderer_world_to_screen(renderer, (float)wx, (float)wy, &sx, &sy);
+                gui_renderer_world_to_screen(renderer, (float)(wx + 1), (float)(wy + 1), &sx_next, &sy_next);
                 
-                // Calculate cell size
-                int cell_w = (int)(cell_size_pixels + 0.5f);
-                int cell_h = (int)(cell_size_pixels + 0.5f);
+                // Cell size spans exactly to the next cell — no gaps
+                int cell_w = sx_next - sx;
+                int cell_h = sy_next - sy;
                 if (cell_w < 1) cell_w = 1;
                 if (cell_h < 1) cell_h = 1;
                 
