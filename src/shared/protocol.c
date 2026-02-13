@@ -201,27 +201,23 @@ int protocol_deserialize_colony(const uint8_t* buffer, ProtoColony* colony) {
 int protocol_serialize_world_state(const ProtoWorld* world, uint8_t** buffer, size_t* len) {
     if (!world || !buffer || !len) return -1;
     
-    // First, serialize grid if present
-    uint8_t* grid_buffer = NULL;
-    size_t grid_len = 0;
-    if (world->has_grid && world->grid && world->grid_size > 0) {
-        if (protocol_serialize_grid_rle(world->grid, world->grid_size, &grid_buffer, &grid_len) < 0) {
-            grid_buffer = NULL;
-            grid_len = 0;
-        }
-    }
-    
-    // Calculate required size
+    // Calculate required size for header + colonies
     // Header: width(4) + height(4) + tick(4) + colony_count(4) + paused(1) + speed(4) + has_grid(1) + grid_len(4)
     size_t header_size = 4 + 4 + 4 + 4 + 1 + 4 + 1 + 4;
     size_t colonies_size = world->colony_count * COLONY_SERIALIZED_SIZE;
-    size_t total_size = header_size + colonies_size + grid_len;
     
-    *buffer = (uint8_t*)malloc(total_size);
-    if (!*buffer) {
-        free(grid_buffer);
-        return -1;
+    // Estimate grid size: use RLE estimate (4-byte header + size/2 for compressed data)
+    bool serialize_grid = world->has_grid && world->grid && world->grid_size > 0;
+    size_t grid_capacity = 0;
+    if (serialize_grid) {
+        grid_capacity = 4 + (world->grid_size / 2);
+        size_t worst_case = 4 + (world->grid_size * 4);
+        if (grid_capacity > worst_case) grid_capacity = worst_case;
     }
+    
+    size_t total_size = header_size + colonies_size + grid_capacity;
+    *buffer = (uint8_t*)malloc(total_size);
+    if (!*buffer) return -1;
     
     int offset = 0;
     
@@ -242,28 +238,59 @@ int protocol_serialize_world_state(const ProtoWorld* world, uint8_t** buffer, si
     write_float(*buffer + offset, world->speed_multiplier);
     offset += 4;
     
-    // Grid metadata
-    (*buffer)[offset++] = (grid_buffer != NULL) ? 1 : 0;
-    write_u32(*buffer + offset, (uint32_t)grid_len);
-    offset += 4;
+    // Reserve space for grid metadata (has_grid + grid_len), fill in later
+    int grid_meta_offset = offset;
+    offset += 1 + 4;
     
     for (uint32_t i = 0; i < world->colony_count && i < MAX_COLONIES; i++) {
         int colony_size = protocol_serialize_colony(&world->colonies[i], *buffer + offset);
         if (colony_size < 0) {
             free(*buffer);
             *buffer = NULL;
-            free(grid_buffer);
             return -1;
         }
         offset += colony_size;
     }
     
-    // Append grid data
-    if (grid_buffer && grid_len > 0) {
-        memcpy(*buffer + offset, grid_buffer, grid_len);
-        offset += grid_len;
-        free(grid_buffer);
+    // Serialize grid directly into message buffer
+    size_t grid_len = 0;
+    if (serialize_grid) {
+        int grid_start = offset;
+        
+        // Write uncompressed size
+        write_u32(*buffer + offset, world->grid_size);
+        offset += 4;
+        
+        uint32_t gi = 0;
+        while (gi < world->grid_size) {
+            uint16_t value = world->grid[gi];
+            uint16_t count = 1;
+            while (gi + count < world->grid_size && world->grid[gi + count] == value && count < 65535) {
+                count++;
+            }
+            
+            // Grow buffer if needed
+            if ((size_t)offset + 4 > total_size) {
+                total_size = total_size * 2;
+                uint8_t* tmp = (uint8_t*)realloc(*buffer, total_size);
+                if (!tmp) { free(*buffer); *buffer = NULL; return -1; }
+                *buffer = tmp;
+            }
+            
+            write_u16(*buffer + offset, count);
+            offset += 2;
+            write_u16(*buffer + offset, value);
+            offset += 2;
+            
+            gi += count;
+        }
+        
+        grid_len = offset - grid_start;
     }
+    
+    // Fill in grid metadata now that we know the actual grid_len
+    (*buffer)[grid_meta_offset] = serialize_grid ? 1 : 0;
+    write_u32(*buffer + grid_meta_offset + 1, (uint32_t)grid_len);
     
     *len = offset;
     return 0;
@@ -547,10 +574,11 @@ void proto_world_alloc_grid(ProtoWorld* world, uint32_t width, uint32_t height) 
 int protocol_serialize_grid_rle(const uint16_t* grid, uint32_t size, uint8_t** buffer, size_t* len) {
     if (!grid || !buffer || !len || size == 0) return -1;
     
-    // Worst case: no compression, each cell is unique
-    // Each run is 4 bytes (count + value), plus 4 bytes header for total size
-    size_t max_size = 4 + (size * 4);
-    *buffer = (uint8_t*)malloc(max_size);
+    // Start with a reasonable estimate (RLE compresses well for sparse grids)
+    size_t capacity = 4 + (size / 2);
+    size_t worst_case = 4 + (size * 4);
+    if (capacity > worst_case) capacity = worst_case;
+    *buffer = (uint8_t*)malloc(capacity);
     if (!*buffer) return -1;
     
     int offset = 0;
@@ -569,6 +597,15 @@ int protocol_serialize_grid_rle(const uint16_t* grid, uint32_t size, uint8_t** b
             count++;
         }
         
+        // Grow buffer if needed
+        if ((size_t)offset + 4 > capacity) {
+            capacity = capacity * 2;
+            if (capacity > worst_case) capacity = worst_case;
+            uint8_t* tmp = (uint8_t*)realloc(*buffer, capacity);
+            if (!tmp) { free(*buffer); *buffer = NULL; return -1; }
+            *buffer = tmp;
+        }
+        
         write_u16(*buffer + offset, count);
         offset += 2;
         write_u16(*buffer + offset, value);
@@ -578,9 +615,6 @@ int protocol_serialize_grid_rle(const uint16_t* grid, uint32_t size, uint8_t** b
     }
     
     *len = offset;
-    
-    // Shrink buffer to actual size
-    *buffer = (uint8_t*)realloc(*buffer, *len);
     
     return 0;
 }
@@ -613,8 +647,8 @@ int protocol_deserialize_grid_rle(const uint8_t* buffer, size_t len, uint16_t* g
     }
     
     // Fill remaining with 0 if needed
-    while (cells_written < max_size) {
-        grid[cells_written++] = 0;
+    if (cells_written < max_size) {
+        memset(grid + cells_written, 0, (max_size - cells_written) * sizeof(uint16_t));
     }
     
     return 0;

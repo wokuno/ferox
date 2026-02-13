@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ferox - Test Script
-# Usage: ./scripts/test.sh [all|unit|stress|phase1|phase2|...] [verbose]
+# Usage: ./scripts/test.sh [all|unit|stress|perf|phase1|phase2|...] [verbose]
 
 set -e
 
@@ -73,6 +73,15 @@ case "$CATEGORY" in
     
     stress)
         run_ctest "stress" "stress tests"
+        ;;
+
+    perf|performance)
+        echo "⚡ Running performance evaluation tests..."
+        echo "   Tip: set FEROX_PERF_SCALE=2 (or higher) for heavier timing loops"
+        echo ""
+        echo "🧪 Running SIMD + performance eval tests (verbose timing output)..."
+        echo ""
+        ctest --output-on-failure -R "SimdEvalTests|PerformanceEvalTests" -V
         ;;
     
     phase1)
@@ -177,6 +186,7 @@ case "$CATEGORY" in
             echo "  all       Run all tests (default)"
             echo "  unit      Run all unit tests"
             echo "  stress    Run stress tests"
+            echo "  perf      Run SIMD/performance evaluation tests"
             echo "  quick     Run tests excluding stress tests"
             echo "  phase1    Phase 1 tests (types, names, colors)"
             echo "  phase2    Phase 2 tests (world, genetics)"

@@ -138,6 +138,10 @@ typedef struct {
     size_t colony_capacity;
     uint64_t tick;
     
+    // Colony lookup table (indexed by colony ID for O(1) access)
+    Colony** colony_by_id;       // array of pointers into colonies[]
+    size_t colony_by_id_capacity; // allocated size of colony_by_id
+    
     // Environmental layers
     float* nutrients;       // nutrient level per cell (0-1)
     float* toxins;          // toxin level per cell (0-1) 
@@ -145,6 +149,10 @@ typedef struct {
     float* alarm_signals;   // alarm signal level per cell (0-1) - warns of hostile contact
     uint32_t* signal_source; // which colony emitted signal at each cell
     uint32_t* alarm_source;  // which colony emitted alarm at each cell
+    
+    // Scratch buffers (allocated once, reused each tick)
+    float* scratch_signals;      // temp buffer for scent diffusion
+    uint32_t* scratch_sources;   // temp buffer for scent source tracking
 } World;
 
 #endif // FEROX_TYPES_H

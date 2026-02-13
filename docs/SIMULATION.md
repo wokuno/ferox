@@ -2,6 +2,13 @@
 
 This document explains how the simulation works, including the world grid, tick cycle, and all simulation phases.
 
+## Current Behavior Snapshot
+
+- **Atomic path order (`atomic_tick`)**: parallel age → parallel spread (CAS) → sync to `World` → nutrient update → scent update → combat resolution → cell turnover/death → mutation → division check → recombination check → dynamic colony spawn → stats/behavior update → sync back.
+- **Spread dynamics**: 8-neighbor spreading from occupied cells only, with age-0 cascade prevention; spread claims empty cells only in atomic phase (`neighbor_colony != 0` is skipped, not overtaken there).
+- **Strategy archetypes**: new genomes are seeded from 8 archetypes in `genome_create_random()` (`BERSERKER`, `TURTLE`, `SWARM`, `TOXIC`, `HIVE`, `NOMAD`, `PARASITE`, `CHAOTIC`), then mutated over time.
+- **Scent/quorum/biofilm/dormancy**: scent and neighbor sampling bias spread direction; quorum activation is derived from `signal_strength` vs `quorum_threshold`; biofilm grows/decays each tick; dormancy is stress-triggered and reduces turnover death while suppressing expansion pressure.
+
 ## World Grid Structure
 
 The simulation takes place on a 2D rectangular grid.
@@ -129,11 +136,17 @@ void atomic_tick(AtomicWorld* aworld) {
     // Sync atomic state back to regular world
     atomic_world_sync_to_world(aworld);
     
-    // Complex operations that require serial execution
+    simulation_update_nutrients(world);
+    simulation_update_scents(world);
+    simulation_resolve_combat(world);
+    atomic_apply_cell_turnover(world);
+
     simulation_mutate(world);
     simulation_check_divisions(world);
     simulation_check_recombinations(world);
+    atomic_spawn_dynamic_colonies(world);
     simulation_update_colony_stats(world);
+    atomic_update_colony_behavior(world);
     
     // Sync changes back to atomic world
     atomic_world_sync_from_world(aworld);
@@ -194,9 +207,7 @@ For each occupied cell (x, y) in parallel:
                 CAS: try to claim cell (only succeeds if still empty)
                 If success: increment population atomically
         Else if neighbor belongs to enemy:
-            If random() < aggression × (1 - enemy_resilience) × direction_weight:
-                CAS: try to overtake cell (only succeeds if still enemy)
-                If success: update populations atomically
+            Skip in atomic spread phase (combat is handled later in serial phase)
 
 // No pending queue needed - CAS resolves conflicts instantly
 ```
@@ -207,7 +218,7 @@ Before attempting to spread, colonies calculate a social influence multiplier ba
 
 ```c
 float social_mult = calculate_social_influence(world, grid, x, y, dx, dy, colony);
-spread_prob *= social_mult;  // Multiplier in range [0.5, 1.5]
+spread_prob *= social_mult;  // Multiplier in range [0.3, 2.0]
 ```
 
 **Influence Calculation:**
@@ -841,9 +852,9 @@ Colonies can exist in different behavioral states that affect their metabolism a
 
 | State | Spread Rate | Resilience | Metabolism | Description |
 |-------|-------------|------------|------------|-------------|
-| NORMAL | 100% | Base | 100% | Standard active growth |
-| STRESSED | 50% | +20% | 70% | Transitional, preparing for dormancy |
-| DORMANT | 10% | +50% | 30% | Survival mode, minimal activity |
+| NORMAL | Baseline from genome traits | Baseline | Baseline | Standard active growth |
+| STRESSED | Context-dependent combat pressure | Context-dependent | Context-dependent | Transitional state when stress > 0.5 |
+| DORMANT | Strongly reduced expansion pressure | Higher effective survival | Lower effective activity | Triggered by stress + sporulation/dormancy thresholds |
 
 ### Stress Accumulation
 

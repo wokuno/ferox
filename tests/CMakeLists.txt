@@ -89,12 +89,33 @@ target_compile_definitions(test_visual_stability PRIVATE STANDALONE_TEST)
 add_test(NAME VisualStabilityTests COMMAND test_visual_stability)
 set_tests_properties(VisualStabilityTests PROPERTIES TIMEOUT 300)
 
+# SIMD correctness and performance evaluation tests
+add_executable(test_simd_eval test_simd_eval.c)
+target_link_libraries(test_simd_eval PRIVATE ferox_server_lib)
+target_compile_definitions(test_simd_eval PRIVATE STANDALONE_TEST)
+add_test(NAME SimdEvalTests COMMAND test_simd_eval)
+set_tests_properties(SimdEvalTests PROPERTIES TIMEOUT 120)
+
+# Broad performance evaluation tests
+add_executable(test_performance_eval test_performance_eval.c)
+target_link_libraries(test_performance_eval PRIVATE ferox_server_lib)
+target_compile_definitions(test_performance_eval PRIVATE STANDALONE_TEST)
+add_test(NAME PerformanceEvalTests COMMAND test_performance_eval)
+set_tests_properties(PerformanceEvalTests PROPERTIES TIMEOUT 180)
+
 # Combat system tests
 add_executable(test_combat_system test_combat_system.c)
 target_link_libraries(test_combat_system PRIVATE ferox_server_lib)
 target_compile_definitions(test_combat_system PRIVATE STANDALONE_TEST)
 add_test(NAME CombatSystemTests COMMAND test_combat_system)
 set_tests_properties(CombatSystemTests PROPERTIES TIMEOUT 120)
+
+# Growth shape quality tests
+add_executable(test_growth_shapes test_growth_shapes.c)
+target_link_libraries(test_growth_shapes PRIVATE ferox_server_lib)
+target_compile_definitions(test_growth_shapes PRIVATE STANDALONE_TEST)
+add_test(NAME GrowthShapeTests COMMAND test_growth_shapes)
+set_tests_properties(GrowthShapeTests PROPERTIES TIMEOUT 300)
 
 # GUI unit tests (no SDL dependency - tests logic only)
 add_executable(test_gui test_gui.c)
@@ -108,11 +129,14 @@ add_executable(test_runner test_runner.c
     test_world_advanced.c
     test_simulation_stress.c
     test_simulation_logic.c
+    test_simd_eval.c
+    test_performance_eval.c
     test_visual_stability.c
     test_threadpool_stress.c
     test_protocol_edge.c
     test_names_exhaustive.c
-    test_colors_exhaustive.c)
+    test_colors_exhaustive.c
+    test_growth_shapes.c)
 target_link_libraries(test_runner PRIVATE ferox_server_lib ferox_client_lib)
 add_test(NAME AllTests COMMAND test_runner)
 set_tests_properties(AllTests PROPERTIES TIMEOUT 300)

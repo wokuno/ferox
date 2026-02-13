@@ -2,6 +2,13 @@
 
 This document describes the technical architecture of the Ferox bacterial colony simulator.
 
+## Current Implementation Notes
+
+- The server currently broadcasts full `MSG_WORLD_STATE` snapshots each tick; `MSG_WORLD_DELTA` exists in protocol definitions but is not emitted by `server.c`.
+- Command handling is implemented for pause/resume/speed/reset/select; `CMD_SPAWN_COLONY` is currently logged but not applied to world state.
+- TUI and GUI share protocol/state parity for core controls, but GUI has extra interaction features (mouse selection, zoom, grid/info toggles) and TUI alone has `--demo`.
+- `scripts/run.sh` normalizes client/server startup around port `8765` and only auto-kills existing listeners when they are `ferox_server` processes.
+
 ## System Architecture
 
 ```
@@ -19,7 +26,7 @@ This document describes the technical architecture of the Ferox bacterial colony
     │  │                   │  │                   │  │                   │  │
     │  │ Listens for new   │  │                   │  │ Runs tick loop    │  │
     │  │ client connections│  │                   │  │ at configured     │  │
-    │  │                   │  │                   │  │ rate (100ms)      │  │
+    │  │                   │  │                   │  │ tick rate         │  │
     │  └─────────┬─────────┘  │                   │  └─────────┬─────────┘  │
     │            │            │                   │            │            │
     │            ▼            │                   │            ▼            │
@@ -96,7 +103,7 @@ void* accept_thread(void* arg) {
 
 ### 2. Simulation Thread
 - **Purpose**: Runs the simulation tick loop
-- **Tick Rate**: Configurable (default 100ms = 10 ticks/second)
+- **Tick Rate**: Configurable (server binary default currently 50ms; `scripts/run.sh` default is 100ms)
 - **Responsibilities**:
   - Advance world state
   - Broadcast updates to clients
@@ -362,7 +369,7 @@ The SDL2-based graphical client provides enhanced visualization using cell-based
 |-------|--------|
 | Scroll wheel | Zoom in/out |
 | Left click | Select colony |
-| Left drag | Pan viewport |
+| Right/Middle drag | Pan viewport |
 
 ## Key Data Structures
 

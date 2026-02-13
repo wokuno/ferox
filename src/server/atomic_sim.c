@@ -9,6 +9,7 @@
 #include "genetics.h"
 #include "simulation.h"
 #include "../shared/utils.h"
+#include "../shared/names.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -17,6 +18,8 @@
 // Direction offsets for 8-connectivity spreading  
 static const int DX8[] = {0, 1, 1, 1, 0, -1, -1, -1};
 static const int DY8[] = {-1, -1, 0, 1, 1, 1, 0, -1};
+// Diagonal probability correction: 1.0 for cardinal, 1/sqrt(2) for diagonal
+static const float DIR8_WEIGHT[] = {1.0f, 0.7071f, 1.0f, 0.7071f, 1.0f, 0.7071f, 1.0f, 0.7071f};
 
 // ============================================================================
 // Thread-local RNG for deterministic parallel processing
@@ -151,6 +154,189 @@ static float calculate_social_influence(
 }
 
 // ============================================================================
+// Long-run dynamics helpers (serial, post-parallel)
+// ============================================================================
+
+static void atomic_apply_cell_turnover(World* world) {
+    if (!world) return;
+
+    for (int i = 0; i < world->width * world->height; i++) {
+        Cell* cell = &world->cells[i];
+        if (cell->colony_id == 0) continue;
+
+        Colony* colony = world_get_colony(world, cell->colony_id);
+        if (!colony || !colony->active) continue;
+
+        float death_chance = 0.0015f;
+
+        // Larger colonies are harder to supply internally.
+        death_chance += utils_clamp_f((float)colony->cell_count / 60000.0f, 0.0f, 0.012f);
+
+        if (world->nutrients) {
+            float nutrient = world->nutrients[i];
+            if (nutrient < 0.25f) {
+                death_chance += (0.25f - nutrient) * 0.08f *
+                                (1.0f - colony->genome.efficiency * 0.7f);
+            }
+        }
+
+        if (world->toxins) {
+            float toxin = world->toxins[i];
+            if (toxin > 0.25f) {
+                death_chance += (toxin - 0.25f) * 0.10f *
+                                (1.0f - colony->genome.toxin_resistance);
+            }
+        }
+
+        // Interior decay pressure to keep colonies breathing/churning.
+        if (!cell->is_border && colony->cell_count > 80) {
+            death_chance *= 1.25f;
+        }
+
+        // Persister-like dormancy: better survival, weaker expansion elsewhere.
+        if (colony->is_dormant) {
+            float dormancy_factor = 0.50f - colony->genome.dormancy_resistance * 0.30f;
+            death_chance *= utils_clamp_f(dormancy_factor, 0.18f, 0.50f);
+        }
+
+        if (cell->age > 140) {
+            death_chance += ((float)cell->age - 140.0f) * 0.0008f;
+        }
+
+        death_chance = utils_clamp_f(death_chance, 0.0f, 0.35f);
+        if (rand_float() < death_chance) {
+            if (world->nutrients) {
+                world->nutrients[i] = utils_clamp_f(world->nutrients[i] + 0.2f, 0.0f, 1.0f);
+            }
+            cell->colony_id = 0;
+            cell->age = 0;
+            cell->is_border = false;
+        }
+    }
+}
+
+static void atomic_spawn_dynamic_colonies(World* world) {
+    if (!world) return;
+
+    int active_colonies = 0;
+    int total_cells = 0;
+    for (size_t i = 0; i < world->colony_count; i++) {
+        if (world->colonies[i].active) {
+            active_colonies++;
+            total_cells += (int)world->colonies[i].cell_count;
+        }
+    }
+
+    int world_size = world->width * world->height;
+    float empty_ratio = 1.0f - (float)total_cells / (float)world_size;
+    bool force_spawn = active_colonies < 4;
+
+    float spawn_chance = 0.04f + empty_ratio * 0.20f;
+    if (active_colonies < 12) spawn_chance += 0.18f;
+
+    if ((active_colonies < 240 && rand_float() < spawn_chance) || force_spawn) {
+        for (int attempts = 0; attempts < 80; attempts++) {
+            int x = rand() % world->width;
+            int y = rand() % world->height;
+            Cell* cell = world_get_cell(world, x, y);
+            if (!cell || cell->colony_id != 0) continue;
+
+            Colony colony;
+            memset(&colony, 0, sizeof(Colony));
+            colony.genome = genome_create_random();
+            colony.color = colony.genome.body_color;
+            colony.cell_count = 1;
+            colony.max_cell_count = 1;
+            colony.active = true;
+            colony.parent_id = 0;
+            colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
+            colony.wobble_phase = (float)(rand() % 628) / 100.0f;
+            colony.shape_evolution = (float)(rand() % 1000) / 1000.0f;
+            colony.state = COLONY_STATE_NORMAL;
+            colony.is_dormant = false;
+            colony.stress_level = 0.0f;
+            colony.biofilm_strength = 0.0f;
+            colony.drift_x = 0.0f;
+            colony.drift_y = 0.0f;
+            colony.signal_strength = 0.0f;
+            colony.last_population = 1;
+            generate_scientific_name(colony.name, sizeof(colony.name));
+
+            uint32_t id = world_add_colony(world, colony);
+            if (id > 0) {
+                cell->colony_id = id;
+                cell->age = 0;
+                cell->is_border = true;
+            }
+            break;
+        }
+    }
+}
+
+static void atomic_update_colony_behavior(World* world) {
+    if (!world) return;
+
+    for (size_t i = 0; i < world->colony_count; i++) {
+        Colony* colony = &world->colonies[i];
+        if (!colony->active) continue;
+        if (colony->cell_count == 0) {
+            colony->active = false;
+            continue;
+        }
+
+        float colony_density = (float)colony->cell_count / (float)(world->width * world->height);
+        float scaled_density = utils_clamp_f(colony_density * 900.0f, 0.0f, 1.0f);
+        float ai_input = scaled_density * colony->genome.signal_emission *
+                         (0.7f + colony->genome.signal_sensitivity * 0.6f);
+        if (colony->is_dormant) ai_input *= 0.6f;
+        colony->signal_strength = utils_clamp_f(
+            colony->signal_strength * 0.92f + ai_input * 0.35f, 0.0f, 1.0f
+        );
+
+        float quorum_activation = 0.0f;
+        float threshold = colony->genome.quorum_threshold;
+        if (colony->signal_strength > threshold) {
+            quorum_activation = utils_clamp_f(
+                (colony->signal_strength - threshold) / (1.0f - threshold + 0.001f),
+                0.0f, 1.0f
+            );
+        }
+
+        if (quorum_activation > 0.0f && colony->genome.biofilm_tendency > 0.3f) {
+            colony->biofilm_strength = utils_clamp_f(
+                colony->biofilm_strength + 0.002f + quorum_activation * 0.004f,
+                0.0f, 1.0f
+            );
+        }
+
+        colony->stress_level = utils_clamp_f(colony->stress_level - 0.002f, 0.0f, 1.0f);
+
+        if (colony->genome.biofilm_investment > 0.3f) {
+            float target_biofilm = colony->genome.biofilm_investment * colony->genome.biofilm_tendency;
+            if (colony->biofilm_strength < target_biofilm) {
+                colony->biofilm_strength = utils_clamp_f(colony->biofilm_strength + 0.01f, 0.0f, 1.0f);
+            }
+        }
+        colony->biofilm_strength = utils_clamp_f(colony->biofilm_strength - 0.002f, 0.0f, 1.0f);
+
+        if (colony->stress_level > colony->genome.sporulation_threshold &&
+            colony->genome.dormancy_threshold > 0.3f) {
+            colony->state = COLONY_STATE_DORMANT;
+            colony->is_dormant = true;
+        } else if (colony->stress_level > 0.5f) {
+            colony->state = COLONY_STATE_STRESSED;
+            colony->is_dormant = false;
+        } else {
+            colony->state = COLONY_STATE_NORMAL;
+            colony->is_dormant = false;
+        }
+
+        colony->shape_evolution += 0.002f;
+        if (colony->shape_evolution > 100.0f) colony->shape_evolution -= 100.0f;
+    }
+}
+
+// ============================================================================
 // Initialization / Cleanup
 // ============================================================================
 
@@ -210,6 +396,19 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
         aworld->thread_seeds[i] = (uint32_t)(12345 + i * 7919);  // Prime offset
     }
     
+    // Preallocate region work items
+    int regions_per_side = thread_count > 4 ? 4 : 2;
+    aworld->region_work_count = regions_per_side * regions_per_side;
+    aworld->region_work = (AtomicRegionWork*)calloc(aworld->region_work_count, sizeof(AtomicRegionWork));
+    if (!aworld->region_work) {
+        free(aworld->thread_seeds);
+        free(aworld->colony_stats);
+        free(aworld->grid.buffers[0]);
+        free(aworld->grid.buffers[1]);
+        free(aworld);
+        return NULL;
+    }
+    
     // Sync from world
     atomic_world_sync_from_world(aworld);
     
@@ -219,6 +418,7 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
 void atomic_world_destroy(AtomicWorld* aworld) {
     if (!aworld) return;
     
+    free(aworld->region_work);
     free(aworld->thread_seeds);
     free(aworld->colony_stats);
     free(aworld->grid.buffers[0]);
@@ -267,18 +467,24 @@ void atomic_world_sync_from_world(AtomicWorld* aworld) {
         atomic_store(&aworld->colony_stats[i].cell_count, 0);
     }
     
-    // Copy cell data and count populations
+    // Copy cell data only where changed and count populations
     for (int i = 0; i < world->width * world->height; i++) {
         Cell* cell = &world->cells[i];
         
-        atomic_store(&current[i].colony_id, cell->colony_id);
-        atomic_store(&current[i].age, cell->age);
-        current[i].is_border = cell->is_border ? 1 : 0;
+        uint32_t cur_colony = atomic_load(&current[i].colony_id);
+        uint8_t cur_age = atomic_load(&current[i].age);
+        uint8_t cur_border = current[i].is_border;
+        uint8_t cell_border = cell->is_border ? 1 : 0;
         
-        // Also init next buffer
-        atomic_store(&next[i].colony_id, cell->colony_id);
-        atomic_store(&next[i].age, cell->age);
-        next[i].is_border = cell->is_border ? 1 : 0;
+        if (cur_colony != cell->colony_id || cur_age != cell->age || cur_border != cell_border) {
+            atomic_store(&current[i].colony_id, cell->colony_id);
+            atomic_store(&current[i].age, cell->age);
+            current[i].is_border = cell_border;
+            
+            atomic_store(&next[i].colony_id, cell->colony_id);
+            atomic_store(&next[i].age, cell->age);
+            next[i].is_border = cell_border;
+        }
         
         // Count population
         if (cell->colony_id != 0 && cell->colony_id < aworld->max_colonies) {
@@ -305,11 +511,19 @@ void atomic_world_sync_to_world(AtomicWorld* aworld) {
     World* world = aworld->world;
     AtomicCell* current = grid_current(&aworld->grid);
     
-    // Copy cell data back
+    // Copy cell data back only where changed
     for (int i = 0; i < world->width * world->height; i++) {
-        world->cells[i].colony_id = atomic_load(&current[i].colony_id);
-        world->cells[i].age = atomic_load(&current[i].age);
-        world->cells[i].is_border = current[i].is_border != 0;
+        uint32_t atomic_colony = atomic_load(&current[i].colony_id);
+        uint8_t atomic_age = atomic_load(&current[i].age);
+        bool atomic_border = current[i].is_border != 0;
+        
+        if (world->cells[i].colony_id != atomic_colony ||
+            world->cells[i].age != atomic_age ||
+            world->cells[i].is_border != atomic_border) {
+            world->cells[i].colony_id = atomic_colony;
+            world->cells[i].age = atomic_age;
+            world->cells[i].is_border = atomic_border;
+        }
     }
     
     // Update colony stats
@@ -338,28 +552,28 @@ void atomic_world_sync_to_world(AtomicWorld* aworld) {
 static void spread_task_func(void* arg) {
     AtomicRegionWork* work = (AtomicRegionWork*)arg;
     atomic_spread_region(work);
-    free(work);
 }
 
 static void age_task_func(void* arg) {
     AtomicRegionWork* work = (AtomicRegionWork*)arg;
     atomic_age_region(work);
-    free(work);
 }
 
 void atomic_spread_region(AtomicRegionWork* work) {
     AtomicWorld* aworld = work->aworld;
     World* world = aworld->world;
     DoubleBufferedGrid* grid = &aworld->grid;
+    AtomicCell* current = grid_current(grid);
+    const int width = grid->width;
     
     // Thread-local RNG
     uint32_t rng_state = aworld->thread_seeds[work->thread_id];
     
     // Process each cell in region
     for (int y = work->start_y; y < work->end_y; y++) {
+        int idx = y * width + work->start_x;
         for (int x = work->start_x; x < work->end_x; x++) {
-            AtomicCell* cell = grid_get_cell(grid, x, y);
-            if (!cell) continue;
+            AtomicCell* cell = &current[idx++];
             
             uint32_t colony_id = atomic_load(&cell->colony_id);
             if (colony_id == 0) continue;  // Empty cell
@@ -389,10 +603,15 @@ void atomic_spread_region(AtomicRegionWork* work) {
                 
                 uint32_t neighbor_colony = atomic_load(&neighbor->colony_id);
                 
-                // Calculate base spread probability
+                // Calculate base spread probability with diagonal correction
                 float spread_prob = colony->genome.spread_rate * 
                                    colony->genome.metabolism *
-                                   colony->genome.spread_weights[d];
+                                   colony->genome.spread_weights[d] *
+                                   DIR8_WEIGHT[d];  // 1/√2 for diagonals
+                
+                // Per-cell stochastic noise for organic/irregular edges
+                float noise = 0.6f + rand_float_local(&rng_state) * 0.8f;
+                spread_prob *= noise;
                 
                 // Apply social influence (chemotaxis toward/away from neighbors)
                 float social_mult = calculate_social_influence(
@@ -428,11 +647,14 @@ void atomic_spread_region(AtomicRegionWork* work) {
 
 void atomic_age_region(AtomicRegionWork* work) {
     DoubleBufferedGrid* grid = &work->aworld->grid;
+    AtomicCell* current = grid_current(grid);
+    const int width = grid->width;
     
     for (int y = work->start_y; y < work->end_y; y++) {
+        int idx = y * width + work->start_x;
         for (int x = work->start_x; x < work->end_x; x++) {
-            AtomicCell* cell = grid_get_cell(grid, x, y);
-            if (cell && atomic_load(&cell->colony_id) != 0) {
+            AtomicCell* cell = &current[idx++];
+            if (atomic_load(&cell->colony_id) != 0) {
                 atomic_cell_age(cell);
             }
         }
@@ -451,20 +673,19 @@ static void submit_region_tasks(AtomicWorld* aworld, void (*task_func)(void*)) {
     int region_width = aworld->grid.width / regions_x;
     int region_height = aworld->grid.height / regions_y;
     
-    int thread_id = 0;
+    int task_idx = 0;
     
     for (int ry = 0; ry < regions_y; ry++) {
         for (int rx = 0; rx < regions_x; rx++) {
-            AtomicRegionWork* work = (AtomicRegionWork*)malloc(sizeof(AtomicRegionWork));
-            if (!work) continue;
+            AtomicRegionWork* work = &aworld->region_work[task_idx];
             
             work->aworld = aworld;
             work->start_x = rx * region_width;
             work->start_y = ry * region_height;
             work->end_x = (rx == regions_x - 1) ? aworld->grid.width : (rx + 1) * region_width;
             work->end_y = (ry == regions_y - 1) ? aworld->grid.height : (ry + 1) * region_height;
-            work->thread_id = thread_id % aworld->thread_count;
-            thread_id++;
+            work->thread_id = task_idx % aworld->thread_count;
+            task_idx++;
             
             threadpool_submit(aworld->pool, task_func, work);
         }
@@ -509,8 +730,17 @@ void atomic_tick(AtomicWorld* aworld) {
     // Sync atomic state back to regular world for complex operations
     atomic_world_sync_to_world(aworld);
     
+    // Resource and chemical fields drive long-term dynamics.
+    simulation_update_nutrients(world);
+
     // Update scent field (colonies emit and scent diffuses)
     simulation_update_scents(world);
+
+    // Border combat keeps territories fluid and competitive.
+    simulation_resolve_combat(world);
+
+    // Continuous turnover prevents late-game lockup/static equilibria.
+    atomic_apply_cell_turnover(world);
     
     // Mutations (per-colony, serial)
     simulation_mutate(world);
@@ -520,9 +750,13 @@ void atomic_tick(AtomicWorld* aworld) {
     
     // Recombination (serial)
     simulation_check_recombinations(world);
+
+    // Keep introducing new lineages so ecosystem stays volatile.
+    atomic_spawn_dynamic_colonies(world);
     
     // Update colony stats (wobble animation, shape evolution)
     simulation_update_colony_stats(world);
+    atomic_update_colony_behavior(world);
     
     // Sync any changes back to atomic world
     atomic_world_sync_from_world(aworld);

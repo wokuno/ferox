@@ -494,6 +494,8 @@ static int test_old_cells_die_naturally(void) {
     Colony c = create_test_colony(0.5f, 0.5f, 0.5f);
     c.genome.spread_rate = 0.0f;  // No spreading
     c.genome.efficiency = 0.0f;   // Low efficiency = more decay
+    c.genome.aggression = 0.0f;   // No combat captures
+    c.genome.mutation_rate = 0.0f; // Prevent mutation from restoring traits
     c.biofilm_strength = 0.0f;    // No biofilm protection
     uint32_t id = world_add_colony(world, c);
     
@@ -513,8 +515,9 @@ static int test_old_cells_die_naturally(void) {
     }
     world_get_colony(world, id)->cell_count = initial_cells;
     
-    // Run many ticks - cells should die from natural decay + old age
-    for (int i = 0; i < 100; i++) {
+    // Run a few ticks - enough for old age death but before mutation restores traits
+    // (genome_mutate has 8% minimum floor even with mutation_rate=0)
+    for (int i = 0; i < 10; i++) {
         simulation_tick(world);
     }
     
@@ -708,6 +711,8 @@ static int test_isolated_colony_shrinks_over_time(void) {
     Colony c = create_test_colony(0.5f, 0.5f, 0.5f);
     c.genome.spread_rate = 0.0f;  // Cannot spread
     c.genome.efficiency = 0.5f;   // Average efficiency
+    c.genome.aggression = 0.0f;   // No combat captures
+    c.genome.mutation_rate = 0.0f; // Prevent mutation from restoring spread/aggression
     c.biofilm_strength = 0.0f;    // No biofilm
     uint32_t id = world_add_colony(world, c);
     
@@ -727,8 +732,9 @@ static int test_isolated_colony_shrinks_over_time(void) {
     }
     world_get_colony(world, id)->cell_count = initial_cells;
     
-    // Run simulation for a while
-    for (int i = 0; i < 150; i++) {
+    // Run a few ticks - enough for natural decay but before mutation restores traits
+    // (genome_mutate has 8% minimum floor even with mutation_rate=0)
+    for (int i = 0; i < 10; i++) {
         simulation_tick(world);
     }
     

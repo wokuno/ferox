@@ -16,6 +16,15 @@ A multi-threaded bacterial colony simulation with client-server architecture.
 - **GUI client (SDL2)** - grid-based rendering with zoom/pan
 - **Demo mode** - standalone visualization without server
 
+## Current Implementation Snapshot
+
+- **Client/server architecture:** one server process runs the simulation tick and broadcasts `MSG_WORLD_STATE` snapshots; terminal and GUI clients both consume the same protocol/grid stream (`src/server/server.c`, `src/shared/protocol.h`).
+- **Atomic simulation path:** each tick runs parallel age → parallel CAS spread (8-neighbor, no age-0 cascade) → serial nutrient/scents/combat/turnover/mutation/division/recombination/dynamic-spawn/behavior updates (`src/server/atomic_sim.c`).
+- **Strategy archetypes:** genomes are seeded from 8 randomized archetypes (`BERSERKER`, `TURTLE`, `SWARM`, `TOXIC`, `HIVE`, `NOMAD`, `PARASITE`, `CHAOTIC`) in `genome_create_random()` (`src/server/genetics.c`).
+- **Scent/quorum/biofilm/dormancy:** scent fields bias spread direction; quorum activation comes from `signal_strength` vs `quorum_threshold`; biofilm is accumulated/decayed each tick; dormancy is stress-triggered and trades expansion for survival (`src/server/atomic_sim.c`, `src/server/simulation.c`).
+- **TUI/GUI parity:** both clients support pause/speed/reset/selection over the same server protocol, but GUI adds mouse + zoom/grid/info controls while demo mode exists only in TUI (`src/client/*`, `src/gui/*`).
+- **`run.sh` port behavior:** script default is `8765`, `-p/--port` overrides env/default, and server-starting modes auto-stop an existing `ferox_server` on that port but refuse to kill non-ferox listeners (`scripts/run.sh`).
+
 ## Project Structure
 
 ```
@@ -59,6 +68,8 @@ make -j$(nproc)
 | `BUILD_DOCS` | OFF | Build documentation |
 | `ENABLE_SANITIZERS` | OFF | Enable address/undefined sanitizers |
 
+Server builds automatically enable SIMD hot-loop kernels when supported (`AVX2` on x86_64 via target attributes, `NEON` on arm64), with scalar fallbacks retained for portability.
+
 ```bash
 # Example: Build with sanitizers enabled
 cmake -DENABLE_SANITIZERS=ON ..
@@ -79,7 +90,12 @@ ctest -R Phase1Tests
 
 # Run with verbose output
 ctest -V
+
+# Run SIMD + performance evaluation tests
+./scripts/test.sh perf
 ```
+
+Performance baseline workflow and known bottlenecks are documented in `docs/PERFORMANCE.md`.
 
 ### Installation
 
@@ -118,7 +134,7 @@ make install
 **Starting the Server:**
 
 ```bash
-./ferox_server -p 8765 -w 100 -H 100 -c 10 -t 4
+./ferox_server -p 8080 -w 200 -H 100 -c 20 -t 4 -r 50
 ```
 
 | Option | Description |
@@ -128,19 +144,22 @@ make install
 | `-H, --height` | World grid height |
 | `-c, --colonies` | Initial colony count |
 | `-t, --threads` | Thread pool size |
+| `-r, --rate` | Tick rate in ms (default: 50 from `main.c`) |
 
 **Starting Clients:**
 
 ```bash
 # Terminal client
-./ferox_client localhost 8765
+./ferox_client -h 127.0.0.1 -p 8080
 
 # Terminal client in demo mode
 ./ferox_client --demo
 
 # GUI client (requires SDL2)
-./ferox_gui localhost 8765
+./ferox_gui -h 127.0.0.1 -p 8080
 ```
+
+> Note: standalone client defaults differ (`ferox_client`: 7890, `ferox_gui`: 7777), so pass `-p` explicitly unless using `scripts/run.sh`.
 
 ## Contributing
 

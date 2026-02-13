@@ -122,6 +122,61 @@ check_executable() {
     fi
 }
 
+is_port_in_use() {
+    local port="$1"
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+stop_ferox_server_on_port() {
+    local port="$1"
+    local pids
+    pids="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    [[ -z "$pids" ]] && return 0
+
+    for pid in $pids; do
+        local cmd
+        cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+        if [[ "$cmd" == *ferox_server* ]]; then
+            echo "⚠️  Stopping existing ferox server on port $port (PID $pid)..."
+            if ! kill "$pid" 2>/dev/null; then
+                echo "❌ Failed to send SIGTERM to ferox server PID $pid"
+                echo "   Check process ownership/permissions and try again."
+                return 1
+            fi
+            for _ in {1..30}; do
+                if ! kill -0 "$pid" 2>/dev/null || ! lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q "^${pid}$"; then
+                    break
+                fi
+                sleep 0.1
+            done
+            if kill -0 "$pid" 2>/dev/null; then
+                echo "⚠️  PID $pid still alive after SIGTERM, sending SIGKILL..."
+                if ! kill -9 "$pid" 2>/dev/null; then
+                    echo "❌ Could not force-stop existing ferox server PID $pid"
+                    return 1
+                fi
+                for _ in {1..20}; do
+                    if ! kill -0 "$pid" 2>/dev/null || ! lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q "^${pid}$"; then
+                        break
+                    fi
+                    sleep 0.1
+                done
+                if kill -0 "$pid" 2>/dev/null && lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q "^${pid}$"; then
+                    echo "❌ Could not stop existing ferox server PID $pid"
+                    return 1
+                fi
+            fi
+        else
+            echo "❌ Port $port is in use by a non-ferox process."
+            echo "   Refusing to kill it automatically."
+            lsof -nP -iTCP:"$port" -sTCP:LISTEN || true
+            return 1
+        fi
+    done
+
+    return 0
+}
+
 # Cleanup function
 cleanup() {
     echo ""
@@ -148,6 +203,9 @@ echo ""
 case "$MODE" in
     server)
         check_executable "$SERVER_BIN"
+        if is_port_in_use "$PORT"; then
+            stop_ferox_server_on_port "$PORT" || exit 1
+        fi
         echo "🦠 Starting server on port $PORT..."
         echo "   World: ${WORLD_WIDTH}x${WORLD_HEIGHT}"
         echo "   Threads: $THREADS"
@@ -183,15 +241,19 @@ case "$MODE" in
     gui+)
         check_executable "$SERVER_BIN"
         check_executable "$GUI_BIN"
-        
+        if is_port_in_use "$PORT"; then
+            stop_ferox_server_on_port "$PORT" || exit 1
+        fi
+
         echo "🦠 Starting server on port $PORT..."
         echo "   World: ${WORLD_WIDTH}x${WORLD_HEIGHT}"
         echo "   Threads: $THREADS"
         echo "   Colonies: $COLONIES"
         echo ""
         
-        # Start server in background
-        "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
+        # Start server in background with its own process group
+        # (prevents SIGINT from GUI terminal propagating to server)
+        setsid "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
                       -t "$THREADS" -c "$COLONIES" -r "$TICK_RATE" &
         SERVER_PID=$!
         
@@ -208,29 +270,28 @@ case "$MODE" in
         echo "🖼️  Starting GUI client..."
         echo ""
         
-        # Start GUI client in foreground
-        "$GUI_BIN" -h "$HOST" -p "$PORT"
-        GUI_PID=$!
+        # Start GUI client in foreground (blocks until user quits)
+        "$GUI_BIN" -h "$HOST" -p "$PORT" || true
         
-        # Wait for GUI to exit
-        wait "$GUI_PID" 2>/dev/null || true
-        
-        # Cleanup
+        # Cleanup server after GUI exits
         cleanup
         ;;
     
     both)
         check_executable "$SERVER_BIN"
         check_executable "$CLIENT_BIN"
-        
+        if is_port_in_use "$PORT"; then
+            stop_ferox_server_on_port "$PORT" || exit 1
+        fi
+
         echo "🦠 Starting server on port $PORT..."
         echo "   World: ${WORLD_WIDTH}x${WORLD_HEIGHT}"
         echo "   Threads: $THREADS"
         echo "   Colonies: $COLONIES"
         echo ""
         
-        # Start server in background
-        "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
+        # Start server in background with its own process group
+        setsid "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
                       -t "$THREADS" -c "$COLONIES" -r "$TICK_RATE" &
         SERVER_PID=$!
         
@@ -247,14 +308,10 @@ case "$MODE" in
         echo "🖥️  Starting client..."
         echo ""
         
-        # Start client in foreground
-        "$CLIENT_BIN" -h "$HOST" -p "$PORT"
-        CLIENT_PID=$!
+        # Start client in foreground (blocks until user quits)
+        "$CLIENT_BIN" -h "$HOST" -p "$PORT" || true
         
-        # Wait for client to exit
-        wait "$CLIENT_PID" 2>/dev/null || true
-        
-        # Cleanup
+        # Cleanup server after client exits
         cleanup
         ;;
     

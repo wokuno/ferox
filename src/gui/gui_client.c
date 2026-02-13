@@ -190,7 +190,8 @@ void gui_client_select_prev_colony(GuiClient* client) {
 void gui_client_deselect_colony(GuiClient* client) {
     if (!client) return;
     client->selected_colony = 0;
-    client->renderer->selected_colony = 0;
+    if (client->renderer)
+        client->renderer->selected_colony = 0;
 }
 
 void gui_client_select_colony_at(GuiClient* client, float world_x, float world_y) {
@@ -312,20 +313,32 @@ static void gui_client_process_input(GuiClient* client, GuiInputState* input) {
             break;
             
         case GUI_INPUT_PAN_UP:
-            gui_renderer_pan(client->renderer, 0, -PAN_SPEED / client->renderer->zoom);
+        {
+            float z = client->renderer->zoom > 0.001f ? client->renderer->zoom : 1.0f;
+            gui_renderer_pan(client->renderer, 0, -PAN_SPEED / z);
             break;
+        }
             
         case GUI_INPUT_PAN_DOWN:
-            gui_renderer_pan(client->renderer, 0, PAN_SPEED / client->renderer->zoom);
+        {
+            float z = client->renderer->zoom > 0.001f ? client->renderer->zoom : 1.0f;
+            gui_renderer_pan(client->renderer, 0, PAN_SPEED / z);
             break;
+        }
             
         case GUI_INPUT_PAN_LEFT:
-            gui_renderer_pan(client->renderer, -PAN_SPEED / client->renderer->zoom, 0);
+        {
+            float z = client->renderer->zoom > 0.001f ? client->renderer->zoom : 1.0f;
+            gui_renderer_pan(client->renderer, -PAN_SPEED / z, 0);
             break;
+        }
             
         case GUI_INPUT_PAN_RIGHT:
-            gui_renderer_pan(client->renderer, PAN_SPEED / client->renderer->zoom, 0);
+        {
+            float z = client->renderer->zoom > 0.001f ? client->renderer->zoom : 1.0f;
+            gui_renderer_pan(client->renderer, PAN_SPEED / z, 0);
             break;
+        }
             
         case GUI_INPUT_CLICK:
             {
@@ -349,9 +362,10 @@ static void gui_client_process_input(GuiClient* client, GuiInputState* input) {
     
     // Handle mouse drag for panning (independent of action)
     if (input->mouse_right_down || input->mouse_middle_down) {
+        float z = client->renderer->zoom > 0.001f ? client->renderer->zoom : 1.0f;
         gui_renderer_pan(client->renderer,
-                         -input->mouse_dx / client->renderer->zoom,
-                         -input->mouse_dy / client->renderer->zoom);
+                         -input->mouse_dx / z,
+                         -input->mouse_dy / z);
     }
 }
 

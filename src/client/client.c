@@ -263,24 +263,28 @@ static void client_process_input(Client* client) {
 }
 
 static void client_receive_updates(Client* client) {
-    if (!client->socket || !net_has_data(client->socket)) return;
-    
-    MessageHeader header;
-    uint8_t* payload = NULL;
-    
-    // Set blocking temporarily for receive
-    net_set_nonblocking(client->socket, false);
-    
-    if (protocol_recv_message(client->socket->fd, &header, &payload) == 0) {
-        client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
-        free(payload);
-    } else {
-        // Connection lost
-        client->connected = false;
-        client->running = false;
+    if (!client->socket) return;
+
+    int messages_processed = 0;
+    const int max_messages_per_frame = 50;
+
+    while (net_has_data(client->socket) && messages_processed < max_messages_per_frame) {
+        MessageHeader header;
+        uint8_t* payload = NULL;
+
+        int result = protocol_recv_message(client->socket->fd, &header, &payload);
+        if (result == 0) {
+            client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
+            free(payload);
+            messages_processed++;
+        } else if (result < 0) {
+            client->connected = false;
+            client->running = false;
+            break;
+        } else {
+            break;
+        }
     }
-    
-    net_set_nonblocking(client->socket, true);
 }
 
 static void client_render(Client* client) {

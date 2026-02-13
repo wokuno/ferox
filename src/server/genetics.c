@@ -114,14 +114,16 @@ Genome genome_create_random(void) {
     growth_bias = utils_clamp_f(growth_bias + (rand_float() - 0.5f) * chaos * 0.4f, 0.0f, 1.0f);
     defense_bias = utils_clamp_f(defense_bias + (rand_float() - 0.5f) * chaos * 0.4f, 0.0f, 1.0f);
     
-    // === SPREAD WEIGHTS: Extreme directional preferences ===
+    // === SPREAD WEIGHTS: Mild directional preferences for organic shapes ===
+    // All directions start with a strong base; slight variation creates gentle asymmetry
     for (int i = 0; i < 8; i++) {
-        g.spread_weights[i] = rand_float() * 0.5f;  // Base weak
+        g.spread_weights[i] = 0.7f + rand_float() * 0.3f;  // 0.7-1.0 base
     }
-    // 1-3 very strong directions
-    int strong_dirs = 1 + rand() % 3;
+    // 1-2 slightly preferred directions
+    int strong_dirs = 1 + rand() % 2;
     for (int i = 0; i < strong_dirs; i++) {
-        g.spread_weights[rand() % 8] = 0.8f + rand_float() * 0.2f;
+        int dir = rand() % 8;
+        g.spread_weights[dir] = 0.9f + rand_float() * 0.1f;
     }
     
     // === CORE TRAITS: Heavily influenced by strategy ===
@@ -132,7 +134,7 @@ Genome genome_create_random(void) {
     g.metabolism = utils_clamp_f(growth_bias * 0.7f + rand_float() * 0.3f, 0.2f, 1.0f);
     
     // === SOCIAL BEHAVIOR: Extreme variance ===
-    g.detection_range = utils_clamp_f(social_bias * 0.5f + mobility_bias * 0.3f + rand_float() * 0.2f, 0.0f, 1.0f);
+    g.detection_range = utils_clamp_f(rand_float() * 0.7f + social_bias * 0.3f, 0.0f, 1.0f);
     g.max_tracked = (uint8_t)(1 + (int)(social_bias * 5));
     g.social_factor = utils_clamp_f((social_bias - 0.5f) * 2.5f + (rand_float() - 0.5f) * 0.5f, -1.0f, 1.0f);
     g.merge_affinity = social_bias * 0.6f + rand_float() * 0.2f;

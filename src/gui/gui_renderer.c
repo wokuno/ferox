@@ -211,15 +211,16 @@ void gui_renderer_world_to_screen(GuiRenderer* renderer, float wx, float wy, int
 void gui_renderer_screen_to_world(GuiRenderer* renderer, int sx, int sy, float* wx, float* wy) {
     float cx = renderer->window_width / 2.0f;
     float cy = renderer->window_height / 2.0f;
+    float zoom = renderer->zoom > 0.001f ? renderer->zoom : 1.0f;
     
-    *wx = renderer->view_x + (sx - cx) / renderer->zoom;
-    *wy = renderer->view_y + (sy - cy) / renderer->zoom;
+    *wx = renderer->view_x + (sx - cx) / zoom;
+    *wy = renderer->view_y + (sy - cy) / zoom;
 }
 
 void gui_renderer_set_zoom(GuiRenderer* renderer, float zoom) {
     if (!renderer) return;
     renderer->zoom = zoom;
-    if (renderer->zoom < 1.0f) renderer->zoom = 1.0f;
+    if (renderer->zoom < 0.1f) renderer->zoom = 0.1f;
     if (renderer->zoom > 50.0f) renderer->zoom = 50.0f;
 }
 
@@ -617,6 +618,10 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
                         break;
                     }
                     int nidx = ny * (int)world->width + nx;
+                    if (nidx < 0 || nidx >= (int)world->grid_size) {
+                        is_border = true;
+                        break;
+                    }
                     if (world->grid[nidx] != colony_id) {
                         is_border = true;
                         break;

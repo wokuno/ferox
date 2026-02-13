@@ -117,6 +117,21 @@ jobs:
       
       - name: Run Names Exhaustive tests
         run: ./build/tests/test_names_exhaustive
+      
+      - name: Run Simulation Logic tests
+        run: ./build/tests/test_simulation_logic
+      
+      - name: Run SIMD Eval tests
+        run: ./build/tests/test_simd_eval
+      
+      - name: Run Performance Eval tests
+        run: ./build/tests/test_performance_eval
+      
+      - name: Run Combat System tests
+        run: ./build/tests/test_combat_system
+      
+      - name: Run Growth Shape tests
+        run: ./build/tests/test_growth_shapes
 
   sanitizers:
     runs-on: ubuntu-latest

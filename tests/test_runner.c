@@ -14,10 +14,13 @@ extern int run_genetics_advanced_tests(void);
 extern int run_world_advanced_tests(void);
 extern int run_simulation_stress_tests(void);
 extern int run_simulation_logic_tests(void);
+extern int run_simd_eval_tests(void);
+extern int run_performance_eval_tests(void);
 extern int run_threadpool_stress_tests(void);
 extern int run_protocol_edge_tests(void);
 extern int run_names_exhaustive_tests(void);
 extern int run_colors_exhaustive_tests(void);
+extern int run_growth_shapes_tests(void);
 
 // Track overall results
 typedef struct {
@@ -36,7 +39,7 @@ int main(int argc, char* argv[]) {
     // Initialize random seed for reproducibility
     rng_seed(42);
     
-    TestSuiteResult results[8];
+    TestSuiteResult results[12];
     int suite_index = 0;
     int total_failures = 0;
     
@@ -81,7 +84,23 @@ int main(int argc, char* argv[]) {
         suite_index++;
     }
     
-    // 5. Thread Pool Stress Tests
+    // 5. SIMD Eval Tests
+    if (!specific_suite || strcmp(specific_suite, "simd") == 0) {
+        results[suite_index].name = "SIMD Eval";
+        results[suite_index].failures = run_simd_eval_tests();
+        results[suite_index].run = 1;
+        suite_index++;
+    }
+    
+    // 6. Performance Eval Tests
+    if (!specific_suite || strcmp(specific_suite, "perf") == 0) {
+        results[suite_index].name = "Performance Eval";
+        results[suite_index].failures = run_performance_eval_tests();
+        results[suite_index].run = 1;
+        suite_index++;
+    }
+    
+    // 7. Thread Pool Stress Tests
     if (!specific_suite || strcmp(specific_suite, "threadpool") == 0) {
         results[suite_index].name = "Thread Pool Stress";
         results[suite_index].failures = run_threadpool_stress_tests();
@@ -89,7 +108,7 @@ int main(int argc, char* argv[]) {
         suite_index++;
     }
     
-    // 6. Protocol Edge Tests
+    // 8. Protocol Edge Tests
     if (!specific_suite || strcmp(specific_suite, "protocol") == 0) {
         results[suite_index].name = "Protocol Edge";
         results[suite_index].failures = run_protocol_edge_tests();
@@ -97,7 +116,7 @@ int main(int argc, char* argv[]) {
         suite_index++;
     }
     
-    // 7. Names Exhaustive Tests
+    // 9. Names Exhaustive Tests
     if (!specific_suite || strcmp(specific_suite, "names") == 0) {
         results[suite_index].name = "Names Exhaustive";
         results[suite_index].failures = run_names_exhaustive_tests();
@@ -105,10 +124,18 @@ int main(int argc, char* argv[]) {
         suite_index++;
     }
     
-    // 8. Colors Exhaustive Tests
+    // 10. Colors Exhaustive Tests
     if (!specific_suite || strcmp(specific_suite, "colors") == 0) {
         results[suite_index].name = "Colors Exhaustive";
         results[suite_index].failures = run_colors_exhaustive_tests();
+        results[suite_index].run = 1;
+        suite_index++;
+    }
+    
+    // 11. Growth Shape Tests
+    if (!specific_suite || strcmp(specific_suite, "growth") == 0) {
+        results[suite_index].name = "Growth Shapes";
+        results[suite_index].failures = run_growth_shapes_tests();
         results[suite_index].run = 1;
         suite_index++;
     }

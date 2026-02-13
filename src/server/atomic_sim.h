@@ -12,6 +12,16 @@
 #include "../shared/types.h"
 #include "threadpool.h"
 
+/**
+ * Work item for region-based processing.
+ */
+typedef struct {
+    struct AtomicWorldStruct* aworld;
+    int start_x, start_y;
+    int end_x, end_y;
+    int thread_id;
+} AtomicRegionWork;
+
 // ============================================================================
 // Atomic World - Enhanced world with atomic operations
 // ============================================================================
@@ -22,7 +32,7 @@
  * The atomic grid allows lock-free parallel spreading.
  * Colony stats are updated atomically during the spread phase.
  */
-typedef struct {
+typedef struct AtomicWorldStruct {
     DoubleBufferedGrid grid;         // Double-buffered atomic cells
     AtomicColonyStats* colony_stats; // Per-colony atomic counters
     size_t max_colonies;             // Capacity of colony_stats array
@@ -36,6 +46,10 @@ typedef struct {
     
     // RNG seeds per thread for deterministic parallel RNG
     uint32_t* thread_seeds;
+    
+    // Preallocated region work items to avoid per-tick malloc
+    AtomicRegionWork* region_work;
+    int region_work_count;
 } AtomicWorld;
 
 // ============================================================================
@@ -102,16 +116,6 @@ void atomic_barrier(AtomicWorld* aworld);
 // ============================================================================
 // Thread-Local Work Functions (for thread pool tasks)
 // ============================================================================
-
-/**
- * Work item for region-based processing.
- */
-typedef struct {
-    AtomicWorld* aworld;
-    int start_x, start_y;
-    int end_x, end_y;
-    int thread_id;
-} AtomicRegionWork;
 
 /**
  * Spread cells in a region using atomic operations.
