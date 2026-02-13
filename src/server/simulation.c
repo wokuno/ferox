@@ -595,7 +595,7 @@ void simulation_spread(World* world) {
                                         env_modifier * dir_weight * scent_modifier * 
                                         strategic_modifier * history_bonus * biomass_pressure *
                                         quorum_boost * dormancy_factor * curvature *
-                                        iso_correction * noise * perception * 3.0f;
+                                        iso_correction * noise * perception * 2.0f;
                     
                     if (rand_float() < spread_prob) {
                         if (pending_count >= pending_capacity) {
@@ -1064,8 +1064,8 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                         defense *= (1.0f + get_quorum_activation(enemy) * 0.3f);
                         float combat_chance = attack / (attack + defense + 0.05f);
                         
-                        // Attack if random check passes (40% base + 60% from combat_chance)
-                        if (rand_float() < 0.4f + combat_chance * 0.6f) {
+                        // Attack if random check passes (25% base + 50% from combat_chance)
+                        if (rand_float() < 0.25f + combat_chance * 0.5f) {
                             pending_buffer_add(pending, nx, ny, cell->colony_id);
                         } else {
                             // DEFENSE REWARD: Defender successfully repelled attack

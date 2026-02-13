@@ -69,7 +69,7 @@ WORLD_WIDTH="${WORLD_WIDTH:-400}"
 WORLD_HEIGHT="${WORLD_HEIGHT:-200}"
 THREADS="${THREADS:-4}"
 COLONIES="${COLONIES:-50}"
-TICK_RATE="${TICK_RATE:-100}"
+TICK_RATE="${TICK_RATE:-120}"
 
 # Parse additional arguments
 shift 2>/dev/null || true
