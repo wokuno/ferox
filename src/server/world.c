@@ -332,11 +332,14 @@ void world_colony_add_cell(World* world, uint32_t colony_id, uint32_t cell_idx) 
     colony->cell_indices[colony->cell_indices_count++] = cell_idx;
     
     // Update centroid using running average
-    if (colony->cell_count > 0) {
+    // Note: cell_count is already incremented by caller, so use cell_count - 1 for old count
+    if (colony->cell_count > 1) {
         int x = cell_idx % world->width;
         int y = cell_idx / world->width;
-        colony->centroid_x = (colony->centroid_x * (float)colony->cell_count + (float)x) / (float)(colony->cell_count + 1);
-        colony->centroid_y = (colony->centroid_y * (float)colony->cell_count + (float)y) / (float)(colony->cell_count + 1);
+        float old_count = (float)(colony->cell_count - 1);
+        float new_count = (float)colony->cell_count;
+        colony->centroid_x = (colony->centroid_x * old_count + (float)x) / new_count;
+        colony->centroid_y = (colony->centroid_y * old_count + (float)y) / new_count;
     } else {
         colony->centroid_x = (float)(cell_idx % world->width);
         colony->centroid_y = (float)(cell_idx / world->width);
@@ -345,10 +348,22 @@ void world_colony_add_cell(World* world, uint32_t colony_id, uint32_t cell_idx) 
 
 void world_colony_remove_cell(World* world, uint32_t colony_id, uint32_t cell_idx) {
     if (!world || colony_id == 0) return;
-    
+
     Colony* colony = world_get_colony(world, colony_id);
     if (!colony || colony->cell_count == 0) return;
-    
+
+    // Remove cell_idx from cell_indices array
+    for (size_t i = 0; i < colony->cell_indices_count; i++) {
+        if (colony->cell_indices[i] == cell_idx) {
+            // Shift remaining elements to fill the gap
+            for (size_t j = i; j < colony->cell_indices_count - 1; j++) {
+                colony->cell_indices[j] = colony->cell_indices[j + 1];
+            }
+            colony->cell_indices_count--;
+            break;
+        }
+    }
+
     // Update centroid using running average (remove contribution)
     int x = cell_idx % world->width;
     int y = cell_idx / world->width;

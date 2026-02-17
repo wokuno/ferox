@@ -120,7 +120,10 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
 
 void gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len) {
     if (!client || !data) return;
-    
+
+    // Free previous world data to prevent memory leaks
+    proto_world_free(&client->local_world);
+
     if (protocol_deserialize_world_state(data, len, &client->local_world) < 0) {
         return;
     }

@@ -120,11 +120,6 @@ typedef struct Genome {
     
     Color body_color;
     Color border_color;
-    
-    CombatStats combat;
-    GrowthStats growth;
-    BehaviorStats behavior;
-    TraitStats traits;
 } Genome;
 
 typedef struct {
