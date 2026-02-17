@@ -583,8 +583,6 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const proto_world* world) {
     if (end_x > (int)world->width) end_x = (int)world->width;
     if (end_y > (int)world->height) end_y = (int)world->height;
     
-    float cell_size_pixels = renderer->zoom;
-    
     // Use grid-based rendering if grid data is available
     if (world->has_grid && world->grid && world->grid_size > 0) {
         // Direct cell rendering from grid data
