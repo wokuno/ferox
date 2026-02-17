@@ -28,7 +28,7 @@ Client* client_create(void) {
     client->selected_index = 0;
     
     // Initialize local world
-    memset(&client->local_world, 0, sizeof(ProtoWorld));
+    proto_world_init(&client->local_world);
     client->local_world.speed_multiplier = 1.0f;
     
     return client;
@@ -76,7 +76,10 @@ void client_disconnect(Client* client) {
     
     // Send disconnect message (best effort)
     if (client->socket) {
-        protocol_send_message(client->socket->fd, MSG_DISCONNECT, NULL, 0);
+        int result = protocol_send_message(client->socket->fd, MSG_DISCONNECT, NULL, 0);
+        if (result < 0) {
+            fprintf(stderr, "Warning: Failed to send disconnect message\n");
+        }
         net_socket_close(client->socket);
         client->socket = NULL;
     }
@@ -91,7 +94,9 @@ void client_send_command(Client* client, CommandType cmd, void* data) {
     int len = protocol_serialize_command(cmd, data, buffer);
     if (len < 0) return;
     
-    protocol_send_message(client->socket->fd, MSG_COMMAND, buffer, (size_t)len);
+    if (protocol_send_message(client->socket->fd, MSG_COMMAND, buffer, (size_t)len) < 0) {
+        fprintf(stderr, "Warning: Failed to send command\n");
+    }
 }
 
 void client_handle_message(Client* client, MessageType type, const uint8_t* payload, size_t len) {
@@ -159,7 +164,7 @@ void client_select_next_colony(Client* client) {
             client->selected_colony = client->local_world.colonies[check_index].id;
             
             // Center view on selected colony
-            const ProtoColony* colony = &client->local_world.colonies[check_index];
+            const proto_colony* colony = &client->local_world.colonies[check_index];
             renderer_center_on(client->renderer, (int)colony->x, (int)colony->y);
             return;
         }
@@ -174,7 +179,7 @@ void client_deselect_colony(Client* client) {
     client->selected_colony = 0;
 }
 
-const ProtoColony* client_get_selected_colony(Client* client) {
+const proto_colony* client_get_selected_colony(Client* client) {
     if (!client || client->selected_colony == 0) return NULL;
     
     for (uint32_t i = 0; i < client->local_world.colony_count; i++) {
@@ -302,7 +307,7 @@ static void client_render(Client* client) {
     renderer_draw_world(client->renderer, &client->local_world);
     
     // Draw colony info panel
-    const ProtoColony* selected = client_get_selected_colony(client);
+    const proto_colony* selected = client_get_selected_colony(client);
     renderer_draw_colony_info(client->renderer, selected);
     
     // Draw status bar

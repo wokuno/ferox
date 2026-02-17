@@ -158,6 +158,7 @@ void parallel_age(ParallelContext* ctx) {
     for (int i = 0; i < ctx->region_count; i++) {
         RegionTask* task = (RegionTask*)malloc(sizeof(RegionTask));
         if (task == NULL) {
+            fprintf(stderr, "Warning: Failed to allocate age task for region %d\n", i);
             continue;
         }
         
@@ -178,6 +179,7 @@ void parallel_spread(ParallelContext* ctx) {
     for (int i = 0; i < ctx->region_count; i++) {
         RegionTask* task = (RegionTask*)malloc(sizeof(RegionTask));
         if (task == NULL) {
+            fprintf(stderr, "Warning: Failed to allocate spread task for region %d\n", i);
             continue;
         }
         
@@ -198,6 +200,7 @@ void parallel_mutate(ParallelContext* ctx) {
     for (int i = 0; i < ctx->region_count; i++) {
         RegionTask* task = (RegionTask*)malloc(sizeof(RegionTask));
         if (task == NULL) {
+            fprintf(stderr, "Warning: Failed to allocate mutate task for region %d\n", i);
             continue;
         }
         

@@ -61,7 +61,7 @@ Color generate_body_color(void) {
 Color generate_border_color(Color body_color) {
     // Create a contrasting border by adjusting brightness
     // Lighter body -> darker border, darker body -> lighter border
-    int brightness = (body_color.r + body_color.g + body_color.b) / 3;
+    float brightness = (body_color.r + body_color.g + body_color.b) / 3.0f;
     
     Color border;
     if (brightness > 127) {

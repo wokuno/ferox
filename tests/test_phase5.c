@@ -104,12 +104,12 @@ int test_server_adds_and_removes_clients(void) {
     TEST_ASSERT(server != NULL, "Server should be created");
     
     // Create a mock socket (we won't actually connect)
-    NetSocket* mock_socket = (NetSocket*)calloc(1, sizeof(NetSocket));
+    net_socket* mock_socket = (net_socket*)calloc(1, sizeof(net_socket));
     mock_socket->fd = -1;  // Invalid but we won't use it
     mock_socket->connected = true;
     
     // Add client
-    ClientSession* client = server_add_client(server, mock_socket);
+    client_session* client = server_add_client(server, mock_socket);
     TEST_ASSERT(client != NULL, "Client should be added");
     TEST_ASSERT_EQ(client->socket, mock_socket, "Socket should be set");
     TEST_ASSERT_EQ(client->active, true, "Client should be active");
@@ -119,11 +119,11 @@ int test_server_adds_and_removes_clients(void) {
     TEST_ASSERT(client_id > 0, "Client should have valid ID");
     
     // Add another client
-    NetSocket* mock_socket2 = (NetSocket*)calloc(1, sizeof(NetSocket));
+    net_socket* mock_socket2 = (net_socket*)calloc(1, sizeof(net_socket));
     mock_socket2->fd = -1;
     mock_socket2->connected = true;
     
-    ClientSession* client2 = server_add_client(server, mock_socket2);
+    client_session* client2 = server_add_client(server, mock_socket2);
     TEST_ASSERT(client2 != NULL, "Second client should be added");
     TEST_ASSERT_NEQ(client2->id, client_id, "Clients should have different IDs");
     TEST_ASSERT_EQ(server->client_count, 2, "Client count should be 2");
@@ -149,10 +149,10 @@ int test_server_handles_pause_resume_commands(void) {
     TEST_ASSERT(server != NULL, "Server should be created");
     
     // Create mock client
-    NetSocket* mock_socket = (NetSocket*)calloc(1, sizeof(NetSocket));
+    net_socket* mock_socket = (net_socket*)calloc(1, sizeof(net_socket));
     mock_socket->fd = -1;
     mock_socket->connected = true;
-    ClientSession* client = server_add_client(server, mock_socket);
+    client_session* client = server_add_client(server, mock_socket);
     TEST_ASSERT(client != NULL, "Client should be added");
     
     // Test pause command
@@ -237,7 +237,7 @@ static void* client_connect_thread(void* arg) {
     usleep(100000);  // 100ms
     
     // Connect to server
-    NetSocket* socket = net_client_connect("127.0.0.1", data->port);
+    net_socket* socket = net_client_connect("127.0.0.1", data->port);
     if (!socket) {
         return NULL;
     }

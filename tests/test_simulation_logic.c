@@ -1111,7 +1111,7 @@ TEST(wobble_phase_preserved_across_sync) {
 // ============================================================================
 
 TEST(protocol_preserves_shape_seed) {
-    ProtoColony original = {0};
+    proto_colony original = {0};
     original.id = 42;
     strncpy(original.name, "Test Colony", MAX_COLONY_NAME);
     original.shape_seed = 0xCAFEBABE;
@@ -1122,7 +1122,7 @@ TEST(protocol_preserves_shape_seed) {
     int written = protocol_serialize_colony(&original, buffer);
     ASSERT_GT(written, 0);
     
-    ProtoColony restored = {0};
+    proto_colony restored = {0};
     int read = protocol_deserialize_colony(buffer, &restored);
     ASSERT_GT(read, 0);
     
@@ -1130,7 +1130,7 @@ TEST(protocol_preserves_shape_seed) {
 }
 
 TEST(protocol_preserves_wobble_phase) {
-    ProtoColony original = {0};
+    proto_colony original = {0};
     original.id = 42;
     strncpy(original.name, "Test Colony", MAX_COLONY_NAME);
     original.shape_seed = 0;
@@ -1141,7 +1141,7 @@ TEST(protocol_preserves_wobble_phase) {
     int written = protocol_serialize_colony(&original, buffer);
     ASSERT_GT(written, 0);
     
-    ProtoColony restored = {0};
+    proto_colony restored = {0};
     int read = protocol_deserialize_colony(buffer, &restored);
     ASSERT_GT(read, 0);
     
@@ -1150,7 +1150,7 @@ TEST(protocol_preserves_wobble_phase) {
 }
 
 TEST(protocol_population_round_trip) {
-    ProtoColony original = {0};
+    proto_colony original = {0};
     original.id = 1;
     original.population = 12345;
     original.max_population = 99999;
@@ -1158,7 +1158,7 @@ TEST(protocol_population_round_trip) {
     uint8_t buffer[COLONY_SERIALIZED_SIZE];
     protocol_serialize_colony(&original, buffer);
     
-    ProtoColony restored = {0};
+    proto_colony restored = {0};
     protocol_deserialize_colony(buffer, &restored);
     
     ASSERT_EQ(restored.population, original.population);

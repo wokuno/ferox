@@ -809,21 +809,17 @@ void simulation_check_divisions(World* world) {
             }
             
             // Create new colonies for non-largest components (min 5 cells to avoid tiny fragments)
-            // Track cells that get orphaned (tiny fragments)
-            int orphaned_cells = 0;
-            
             for (int c = 0; c < num_components; c++) {
                 if (c == largest_idx) continue;
                 if (sizes[c] < 5) {
                     // Tiny fragment - these cells will be orphaned (removed)
                     // Clear these cells from the grid
                     for (int j = 0; j < world->width * world->height; j++) {
-                        if (world->cells[j].colony_id == colony->id && 
+                        if (world->cells[j].colony_id == colony->id &&
                             world->cells[j].component_id == c) {
                             world->cells[j].colony_id = 0;
                             world->cells[j].age = 0;
                             world->cells[j].is_border = false;
-                            orphaned_cells++;
                         }
                     }
                     continue;

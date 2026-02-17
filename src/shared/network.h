@@ -6,38 +6,38 @@
 #include <stdbool.h>
 
 // Socket wrapper for cross-platform compatibility
-typedef struct NetSocket {
+typedef struct net_socket {
     int fd;
     bool connected;
     char address[64];
     uint16_t port;
-} NetSocket;
+} net_socket;
 
 // Server socket
-typedef struct NetServer {
+typedef struct net_server {
     int fd;
     uint16_t port;
     bool listening;
-} NetServer;
+} net_server;
 
 // Server functions
-NetServer* net_server_create(uint16_t port);
-void net_server_destroy(NetServer* server);
-NetSocket* net_server_accept(NetServer* server);  // Blocking accept
+net_server* net_server_create(uint16_t port);
+void net_server_destroy(net_server* server);
+net_socket* net_server_accept(net_server* server);  // Blocking accept
 
 // Client functions
-NetSocket* net_client_connect(const char* host, uint16_t port);
-void net_socket_close(NetSocket* socket);
+net_socket* net_client_connect(const char* host, uint16_t port);
+void net_socket_close(net_socket* socket);
 
 // Data transfer
-int net_send(NetSocket* socket, const uint8_t* data, size_t len);
-int net_recv(NetSocket* socket, uint8_t* buffer, size_t max_len);
+int net_send(net_socket* socket, const uint8_t* data, size_t len);
+int net_recv(net_socket* socket, uint8_t* buffer, size_t max_len);
 
 // Non-blocking check if data available
-bool net_has_data(NetSocket* socket);
+bool net_has_data(net_socket* socket);
 
 // Set socket options
-void net_set_nonblocking(NetSocket* socket, bool nonblocking);
-void net_set_nodelay(NetSocket* socket, bool nodelay);
+void net_set_nonblocking(net_socket* socket, bool nonblocking);
+void net_set_nodelay(net_socket* socket, bool nodelay);
 
 #endif // NETWORK_H

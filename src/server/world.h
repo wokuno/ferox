@@ -24,4 +24,8 @@ uint32_t world_add_colony(World* world, Colony colony);
 // Remove a colony from the world
 void world_remove_colony(World* world, uint32_t id);
 
+// Track cell addition for O(active_cells) removal and centroid
+void world_colony_add_cell(World* world, uint32_t colony_id, uint32_t cell_idx);
+void world_colony_remove_cell(World* world, uint32_t colony_id, uint32_t cell_idx);
+
 #endif // FEROX_WORLD_H

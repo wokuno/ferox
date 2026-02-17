@@ -52,13 +52,13 @@ void gui_renderer_clear(GuiRenderer* renderer);
 void gui_renderer_present(GuiRenderer* renderer);
 
 // World rendering
-void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world);
-void gui_renderer_draw_colony(GuiRenderer* renderer, const ProtoColony* colony, bool selected);
+void gui_renderer_draw_world(GuiRenderer* renderer, const proto_world* world);
+void gui_renderer_draw_colony(GuiRenderer* renderer, const proto_colony* colony, bool selected);
 void gui_renderer_draw_grid(GuiRenderer* renderer, int world_width, int world_height);
 void gui_renderer_draw_petri_dish(GuiRenderer* renderer, int world_width, int world_height);
 
 // UI rendering
-void gui_renderer_draw_colony_info(GuiRenderer* renderer, const ProtoColony* colony);
+void gui_renderer_draw_colony_info(GuiRenderer* renderer, const proto_colony* colony);
 void gui_renderer_draw_status_bar(GuiRenderer* renderer, uint32_t tick, int colony_count, 
                                    bool paused, float speed, float fps);
 void gui_renderer_draw_controls_help(GuiRenderer* renderer);

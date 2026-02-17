@@ -22,6 +22,81 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+/**
+ * ============================================================================
+ * STRATEGY ARCHETYPES - Colony Behavioral Types
+ * ============================================================================
+ * 
+ * When a new colony is born, it randomly selects one of 8 strategy archetypes.
+ * Each archetype biases certain genome traits to create distinct playstyles.
+ * The chaos factor adds variation within each archetype for organic diversity.
+ * 
+ * ARCHETYPE DEFINITIONS:
+ * ----------------------
+ * 
+ * 1. BERSERKER (strategy = 0)
+ *    - Traits: Very high aggression (0.9-1.0), high growth (0.8-1.0), low defense
+ *    - Playstyle: Aggressive expansion, charges at enemy colonies, ignores threats
+ *    - Metaphor: Shock troops, glass cannon - hits hard but vulnerable
+ *    - Use case: Fast territory capture, aggressive early-game expansion
+ * 
+ * 2. TURTLE (strategy = 1)
+ *    - Traits: Maximum defense (0.9-1.0), slow growth (0.2-0.5), minimal aggression
+ *    - Playstyle: Slow but nearly indestructible, waits for对手 to come
+ *    - Metaphor: Defensive fortress - hard to kill, but doesn't expand fast
+ *    - Use case: Late-game survival, holding territory against swarms
+ * 
+ * 3. SWARM (strategy = 2)
+ *    - Traits: Maximum growth (0.95-1.0), moderate aggression, low individual defense
+ *    - Playstyle: Overwhelm with sheer numbers, fast territorial expansion
+ *    - Metaphor: Zerg rush - weak individually but overwhelming in mass
+ *    - Use case: Fast expansion, occupying all available space quickly
+ * 
+ * 4. TOXIC (strategy = 3)
+ *    - Traits: Very high toxin production (0.95-1.0), moderate aggression
+ *    - Playstyle: Chemical warfare, poisons surroundings, kills enemy cells
+ *    - Metaphor: Poisonous organism - leaves death in its wake
+ *    - Use case: Area denial, eliminating competition through toxins
+ * 
+ * 5. HIVE (strategy = 4)
+ *    - Traits: Maximum social (0.9-1.0), cooperative behavior, signal-based coordination
+ *    - Playstyle: Cooperative expansion, forms biofilms, reacts to quorum signals
+ *    - Metaphor: eusocial insects - strong as a collective, coordinated
+ *    - Use case: Cooperative defense, forming complex structures
+ * 
+ * 6. NOMAD (strategy = 5)
+ *    - Traits: Maximum mobility (0.95-1.0), constantly shifting position
+ *    - Playstyle: Keeps moving, hard to pin down, exploratory
+ *    - Metaphor: Wanderers - never settle, always seeking new territory
+ *    - Use case: Escaping threats, rapid exploration, avoiding confrontation
+ * 
+ * 7. PARASITE (strategy = 6)
+ *    - Traits: High aggression, seeks out other colonies, moderate social
+ *    - Playstyle: Infiltrates near others, drains resources, aggressive neighbor contact
+ *    - Metaphor: Parasitic organism - lives off others, weakens hosts
+ *    - Use case: Competitive ecosystems, hunting weaker colonies
+ * 
+ * 8. CHAOTIC (strategy = 7 / default)
+ *    - Traits: Completely random, extra chaos factor (0.8-1.0)
+ *    - Playstyle: Unpredictable, highly variable behavior, adaptive
+ *    - Metaphor: Wild card - anything can happen, evolution in action
+ *    - Use case: Testing, exploring unusual trait combinations
+ * 
+ * TRAIT BIASES APPLIED:
+ * ---------------------
+ * Each archetype sets these bias values (0.0-1.0 scale):
+ * - aggression_bias:   Tendency to attack/expand into enemies
+ * - growth_bias:       Rate of cell division/spread
+ * - social_bias:       Tendency to cooperate/merge with same species
+ * - toxin_bias:        Production of poisonous chemicals
+ * - defense_bias:      Resilience against threats
+ * - mobility_bias:     Tendency to move/change position
+ * 
+ * These biases are then combined with randomness and chaos to produce
+ * the final genome traits, ensuring every colony is unique even within
+ * the same archetype.
+ */
+
 Genome genome_create_random(void) {
     Genome g;
     memset(&g, 0, sizeof(Genome));
@@ -210,9 +285,12 @@ Genome genome_create_random(void) {
     }
     
     // Ensure minimum brightness of 30 for all channels
-    g.body_color.r = (uint8_t)(30 + (uint8_t)(r * 225));
-    g.body_color.g = (uint8_t)(30 + (uint8_t)(gr * 225));
-    g.body_color.b = (uint8_t)(30 + (uint8_t)(b * 225));
+    float r_val = 30.0f + r * 225.0f;
+    float g_val = 30.0f + gr * 225.0f;
+    float b_val = 30.0f + b * 225.0f;
+    g.body_color.r = (uint8_t)(r_val > 255.0f ? 255 : r_val);
+    g.body_color.g = (uint8_t)(g_val > 255.0f ? 255 : g_val);
+    g.body_color.b = (uint8_t)(b_val > 255.0f ? 255 : b_val);
     g.border_color.r = (uint8_t)(g.body_color.r * 0.5f);
     g.border_color.g = (uint8_t)(g.body_color.g * 0.5f);
     g.border_color.b = (uint8_t)(g.body_color.b * 0.5f);

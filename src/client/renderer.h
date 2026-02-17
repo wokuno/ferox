@@ -52,10 +52,12 @@ void renderer_destroy(Renderer* renderer);
 
 // Rendering functions
 void renderer_clear(Renderer* renderer);
-void renderer_draw_world(Renderer* renderer, const ProtoWorld* world);
+void renderer_draw_world(Renderer* renderer, const proto_world* world);
+void renderer_draw_world_grid(Renderer* renderer, const proto_world* world);
+void renderer_draw_world_centroid(Renderer* renderer, const proto_world* world);
 void renderer_draw_cell(Renderer* renderer, int x, int y, uint8_t r, uint8_t g, uint8_t b, bool is_border);
 void renderer_draw_border(Renderer* renderer, int world_width, int world_height);
-void renderer_draw_colony_info(Renderer* renderer, const ProtoColony* colony);
+void renderer_draw_colony_info(Renderer* renderer, const proto_colony* colony);
 void renderer_draw_status(Renderer* renderer, uint32_t tick, int colony_count, bool paused, float speed);
 void renderer_present(Renderer* renderer);  // Output to terminal
 

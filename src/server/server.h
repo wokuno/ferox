@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <pthread.h>
 
 #include "../shared/network.h"
@@ -21,24 +22,24 @@
 #define DEFAULT_TICK_RATE_MS 100
 
 // Client session represents a connected client
-typedef struct ClientSession {
-    NetSocket* socket;
+typedef struct client_session {
+    net_socket* socket;
     uint32_t id;
     bool active;
     uint32_t selected_colony;  // Colony selected for detailed view
-    struct ClientSession* next;
-} ClientSession;
+    struct client_session* next;
+} client_session;
 
 // Server structure
 typedef struct Server {
-    NetServer* listener;
-    ClientSession* clients;
+    net_server* listener;
+    client_session* clients;
     int client_count;
     World* world;
     ThreadPool* pool;
     ParallelContext* parallel_ctx;
     AtomicWorld* atomic_world;    // Atomic simulation engine
-    bool running;
+    _Atomic bool running;
     bool paused;
     int tick_rate_ms;  // Milliseconds between ticks
     float speed_multiplier;
@@ -89,31 +90,10 @@ void server_broadcast_world_state(Server* server);
  * @param client The client session
  * @param colony_id ID of the colony to send info for
  */
-void server_send_colony_info(Server* server, ClientSession* client, uint32_t colony_id);
-
-/**
- * Handle a command from a client.
- * @param server The server
- * @param client The client session that sent the command
- * @param cmd The command type
- * @param data Command-specific data (may be NULL)
- */
-void server_handle_command(Server* server, ClientSession* client, CommandType cmd, void* data);
-
-/**
- * Add a new client to the server.
- * @param server The server
- * @param socket The client's socket
- * @return Pointer to the new client session, or NULL on failure
- */
-ClientSession* server_add_client(Server* server, NetSocket* socket);
-
-/**
- * Remove a client from the server.
- * @param server The server
- * @param client The client session to remove
- */
-void server_remove_client(Server* server, ClientSession* client);
+void server_send_colony_info(Server* server, client_session* client, uint32_t colony_id);
+void server_handle_command(Server* server, client_session* client, CommandType cmd, void* data);
+client_session* server_add_client(Server* server, net_socket* socket);
+void server_remove_client(Server* server, client_session* client);
 
 /**
  * Process incoming data from all clients.

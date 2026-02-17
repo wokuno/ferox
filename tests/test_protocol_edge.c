@@ -44,8 +44,8 @@ static int tests_failed = 0;
 // ============================================================================
 
 TEST(empty_world_serialization) {
-    ProtoWorld world;
-    memset(&world, 0, sizeof(ProtoWorld));
+    proto_world world;
+    memset(&world, 0, sizeof(proto_world));
     world.width = 100;
     world.height = 100;
     world.tick = 0;
@@ -62,7 +62,7 @@ TEST(empty_world_serialization) {
     ASSERT(len > 0, "Buffer length should be > 0");
     
     // Deserialize and verify
-    ProtoWorld deserialized;
+    proto_world deserialized;
     result = protocol_deserialize_world_state(buffer, len, &deserialized);
     ASSERT_EQ(result, 0);
     ASSERT_EQ(deserialized.width, 100);
@@ -77,8 +77,8 @@ TEST(empty_world_serialization) {
 // ============================================================================
 
 TEST(world_with_max_colonies) {
-    ProtoWorld world;
-    memset(&world, 0, sizeof(ProtoWorld));
+    proto_world world;
+    memset(&world, 0, sizeof(proto_world));
     world.width = 200;
     world.height = 200;
     world.tick = 12345;
@@ -109,7 +109,7 @@ TEST(world_with_max_colonies) {
     ASSERT_NOT_NULL(buffer);
     
     // Deserialize
-    ProtoWorld deserialized;
+    proto_world deserialized;
     result = protocol_deserialize_world_state(buffer, len, &deserialized);
     ASSERT_EQ(result, 0);
     ASSERT_EQ(deserialized.colony_count, MAX_COLONIES);
@@ -122,8 +122,8 @@ TEST(world_with_max_colonies) {
 }
 
 TEST(world_with_1000_colonies_capped) {
-    ProtoWorld world;
-    memset(&world, 0, sizeof(ProtoWorld));
+    proto_world world;
+    memset(&world, 0, sizeof(proto_world));
     world.colony_count = MAX_COLONIES;  // Cap at max
     
     for (uint32_t i = 0; i < MAX_COLONIES; i++) {
@@ -137,7 +137,7 @@ TEST(world_with_1000_colonies_capped) {
     int result = protocol_serialize_world_state(&world, &buffer, &len);
     ASSERT_EQ(result, 0);
     
-    ProtoWorld deserialized;
+    proto_world deserialized;
     result = protocol_deserialize_world_state(buffer, len, &deserialized);
     ASSERT_EQ(result, 0);
     ASSERT_EQ(deserialized.colony_count, MAX_COLONIES);
@@ -214,8 +214,8 @@ TEST(header_all_message_types) {
 // ============================================================================
 
 TEST(zero_length_payload) {
-    ProtoWorld world;
-    memset(&world, 0, sizeof(ProtoWorld));
+    proto_world world;
+    memset(&world, 0, sizeof(proto_world));
     world.width = 10;
     world.height = 10;
     world.colony_count = 0;
@@ -233,8 +233,8 @@ TEST(zero_length_payload) {
 }
 
 TEST(partial_message_handling) {
-    ProtoWorld world;
-    memset(&world, 0, sizeof(ProtoWorld));
+    proto_world world;
+    memset(&world, 0, sizeof(proto_world));
     world.width = 50;
     world.height = 50;
     world.colony_count = 5;
@@ -251,7 +251,7 @@ TEST(partial_message_handling) {
     ASSERT_EQ(result, 0);
     
     // Try to deserialize with truncated buffer
-    ProtoWorld partial;
+    proto_world partial;
     result = protocol_deserialize_world_state(buffer, 10, &partial);  // Too short
     ASSERT_EQ(result, -1);  // Should fail
     
@@ -263,8 +263,8 @@ TEST(partial_message_handling) {
 // ============================================================================
 
 TEST(maximum_length_colony_name) {
-    ProtoColony colony;
-    memset(&colony, 0, sizeof(ProtoColony));
+    proto_colony colony;
+    memset(&colony, 0, sizeof(proto_colony));
     colony.id = 1;
     
     // Fill name to max length
@@ -277,7 +277,7 @@ TEST(maximum_length_colony_name) {
     int size = protocol_serialize_colony(&colony, buffer);
     ASSERT(size > 0, "Serialization should succeed");
     
-    ProtoColony deserialized;
+    proto_colony deserialized;
     size = protocol_deserialize_colony(buffer, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     
@@ -285,8 +285,8 @@ TEST(maximum_length_colony_name) {
 }
 
 TEST(special_characters_in_names) {
-    ProtoColony colony;
-    memset(&colony, 0, sizeof(ProtoColony));
+    proto_colony colony;
+    memset(&colony, 0, sizeof(proto_colony));
     colony.id = 42;
     strncpy(colony.name, "Test!@#$%^&*()_+-=[]", MAX_COLONY_NAME - 1);
     colony.name[MAX_COLONY_NAME - 1] = '\0';
@@ -295,7 +295,7 @@ TEST(special_characters_in_names) {
     int size = protocol_serialize_colony(&colony, buffer);
     ASSERT(size > 0, "Serialization should succeed");
     
-    ProtoColony deserialized;
+    proto_colony deserialized;
     size = protocol_deserialize_colony(buffer, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     
@@ -303,8 +303,8 @@ TEST(special_characters_in_names) {
 }
 
 TEST(unicode_like_bytes_in_names) {
-    ProtoColony colony;
-    memset(&colony, 0, sizeof(ProtoColony));
+    proto_colony colony;
+    memset(&colony, 0, sizeof(proto_colony));
     colony.id = 1;
     
     // High byte values (would be UTF-8 multi-byte chars)
@@ -316,14 +316,14 @@ TEST(unicode_like_bytes_in_names) {
     int size = protocol_serialize_colony(&colony, buffer);
     ASSERT(size > 0, "Serialization should succeed");
     
-    ProtoColony deserialized;
+    proto_colony deserialized;
     size = protocol_deserialize_colony(buffer, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
 }
 
 TEST(empty_colony_name) {
-    ProtoColony colony;
-    memset(&colony, 0, sizeof(ProtoColony));
+    proto_colony colony;
+    memset(&colony, 0, sizeof(proto_colony));
     colony.id = 1;
     colony.name[0] = '\0';  // Empty name
     
@@ -331,7 +331,7 @@ TEST(empty_colony_name) {
     int size = protocol_serialize_colony(&colony, buffer);
     ASSERT(size > 0, "Serialization should succeed");
     
-    ProtoColony deserialized;
+    proto_colony deserialized;
     size = protocol_deserialize_colony(buffer, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     ASSERT_EQ(strlen(deserialized.name), 0);
@@ -417,7 +417,7 @@ TEST(null_inputs_handled) {
     ASSERT_EQ(protocol_serialize_colony(NULL, buffer), -1);
     ASSERT_EQ(protocol_serialize_colony(NULL, NULL), -1);
     
-    ProtoColony colony;
+    proto_colony colony;
     ASSERT_EQ(protocol_serialize_colony(&colony, NULL), -1);
     ASSERT_EQ(protocol_deserialize_colony(NULL, &colony), -1);
     ASSERT_EQ(protocol_deserialize_colony(buffer, NULL), -1);
@@ -427,7 +427,7 @@ TEST(null_inputs_handled) {
     size_t len;
     ASSERT_EQ(protocol_serialize_world_state(NULL, &buf_ptr, &len), -1);
     
-    ProtoWorld world;
+    proto_world world;
     ASSERT_EQ(protocol_serialize_world_state(&world, NULL, &len), -1);
     ASSERT_EQ(protocol_serialize_world_state(&world, &buf_ptr, NULL), -1);
     
@@ -440,8 +440,8 @@ TEST(null_inputs_handled) {
 // ============================================================================
 
 TEST(extreme_float_values) {
-    ProtoColony colony;
-    memset(&colony, 0, sizeof(ProtoColony));
+    proto_colony colony;
+    memset(&colony, 0, sizeof(proto_colony));
     colony.id = 1;
     strcpy(colony.name, "Test");
     colony.x = 999999.999f;
@@ -453,7 +453,7 @@ TEST(extreme_float_values) {
     int size = protocol_serialize_colony(&colony, buffer);
     ASSERT(size > 0, "Serialization should succeed");
     
-    ProtoColony deserialized;
+    proto_colony deserialized;
     size = protocol_deserialize_colony(buffer, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     
@@ -462,15 +462,15 @@ TEST(extreme_float_values) {
 }
 
 TEST(max_population_value) {
-    ProtoColony colony;
-    memset(&colony, 0, sizeof(ProtoColony));
+    proto_colony colony;
+    memset(&colony, 0, sizeof(proto_colony));
     colony.id = 1;
     colony.population = 0xFFFFFFFF;  // Max uint32
     
     uint8_t buffer[COLONY_SERIALIZED_SIZE];
     protocol_serialize_colony(&colony, buffer);
     
-    ProtoColony deserialized;
+    proto_colony deserialized;
     protocol_deserialize_colony(buffer, &deserialized);
     
     ASSERT_EQ(deserialized.population, 0xFFFFFFFF);
