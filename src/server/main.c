@@ -14,16 +14,18 @@
 #include "world.h"
 #include "atomic_sim.h"
 
-// Global server pointer for signal handler
-static Server* g_server = NULL;
+static volatile sig_atomic_t g_shutdown_requested = 0;
 
 // Signal handler for graceful shutdown
 static void signal_handler(int sig) {
     (void)sig;
-    printf("\nReceived shutdown signal, stopping server...\n");
-    if (g_server) {
-        server_stop(g_server);
-    }
+    g_shutdown_requested = 1;
+}
+
+static void* server_thread_main(void* arg) {
+    Server* server = (Server*)arg;
+    server_run(server);
+    return NULL;
 }
 
 // Print usage information
@@ -142,9 +144,6 @@ int main(int argc, char* argv[]) {
         atomic_world_sync_from_world(server->atomic_world);
     }
     
-    // Set global server for signal handler
-    g_server = server;
-    
     // Setup signal handlers
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -158,13 +157,25 @@ int main(int argc, char* argv[]) {
     printf("Server listening on port %u\n", server_get_port(server));
     printf("Press Ctrl+C to stop\n\n");
     
-    // Run server (blocking)
-    server_run(server);
+    // Run server in a dedicated thread and handle shutdown in main thread
+    pthread_t server_thread;
+    if (pthread_create(&server_thread, NULL, server_thread_main, server) != 0) {
+        fprintf(stderr, "Error: Failed to start server thread\n");
+        server_destroy(server);
+        return 1;
+    }
+
+    while (!g_shutdown_requested) {
+        pause();
+    }
+
+    printf("\nReceived shutdown signal, stopping server...\n");
+    server_stop(server);
+    pthread_join(server_thread, NULL);
     
     // Cleanup
     printf("Shutting down...\n");
     server_destroy(server);
-    g_server = NULL;
     
     printf("Server stopped.\n");
     return 0;
