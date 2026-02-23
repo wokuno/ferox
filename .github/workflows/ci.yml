@@ -5,6 +5,7 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 # Restrict default permissions for all jobs
 permissions:
@@ -44,7 +45,7 @@ jobs:
           ctest --output-on-failure -C ${{ matrix.build_type }}
 
   build-and-test-ferox:
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         build_type: [Release, Debug]
