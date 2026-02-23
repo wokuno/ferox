@@ -2,27 +2,44 @@ name: Update Preview GIF
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - "src/**"
-      - "tools/**"
-      - "scripts/generate_preview_gif.py"
-      - "**/CMakeLists.txt"
-      - ".github/workflows/update-preview-gif.yml"
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 jobs:
   refresh-preview:
-    if: github.actor != 'github-actions[bot]'
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.head_repository.full_name == github.repository
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
+      - name: Resolve target branch
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BRANCH="${GITHUB_REF_NAME}"
+          else
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+          fi
+
+          if [ -z "$BRANCH" ]; then
+            echo "Unable to determine target branch"
+            exit 1
+          fi
+
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: ${{ steps.target.outputs.branch }}
           persist-credentials: true
 
       - name: Install uv
@@ -48,5 +65,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add assets/preview.gif
-          git commit -m "chore: refresh preview gif [skip ci]"
-          git push
+          git commit -m "chore: refresh preview gif"
+          git push origin "HEAD:${{ steps.target.outputs.branch }}"
