@@ -448,12 +448,13 @@ TEST(directional_spread_weights_affect_shape) {
 
     int min_x, min_y, max_x, max_y;
     colony_bbox(world, cid, &min_x, &min_y, &max_x, &max_y);
-    int bbox_w = max_x - min_x + 1;
-    int bbox_h = max_y - min_y + 1;
+    int seed_x = world->width / 2;
+    int east_extent = max_x - seed_x;
+    int west_extent = seed_x - min_x;
 
-    // With strong east bias, colony should extend further east than north/south
-    float aspect = (float)bbox_w / (float)(bbox_h > 0 ? bbox_h : 1);
-    ASSERT_GT(aspect, 0.6f);  // At least somewhat wider (stochastic noise may equalize)
+    // With strong east bias, eastward reach should exceed westward reach.
+    // This is more stable across platforms than bbox aspect ratio.
+    ASSERT_GT(east_extent, west_extent);
 
     world_destroy(world);
 }

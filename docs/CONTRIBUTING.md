@@ -291,14 +291,17 @@ Brief description of changes.
 ### Review Process
 
 1. **Submit PR**: Open pull request against `main`
-2. **CI checks**: Automated tests must pass
-3. **Code review**: At least one approval required
-4. **Address feedback**: Make requested changes
-5. **Merge**: Squash and merge when approved
+2. **Request Codex review**: Comment `@codex review` on the PR
+3. **CI checks**: Required automated checks must pass for the latest commit
+4. **Code review**: At least one approval required when branch protection requires it
+5. **Address feedback**: Make requested changes
+6. **Re-run gates after changes**: After any follow-up commit, wait for both Codex + CI again
+7. **Merge**: Squash and merge only after all required gates are green
 
 ### Merge Requirements
 
-- All CI checks pass
+- Codex review feedback has been addressed on the latest commit
+- All required CI checks pass on the latest commit
 - At least one approval from maintainer
 - No merge conflicts
 - Commits squashed into logical units
