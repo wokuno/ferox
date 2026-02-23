@@ -25,21 +25,24 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             BRANCH="${GITHUB_REF_NAME}"
+            REF="$BRANCH"
           else
             BRANCH="${{ github.event.workflow_run.head_branch }}"
+            REF="${{ github.event.workflow_run.head_sha }}"
           fi
 
-          if [ -z "$BRANCH" ]; then
-            echo "Unable to determine target branch"
+          if [ -z "$BRANCH" ] || [ -z "$REF" ]; then
+            echo "Unable to determine target branch/ref"
             exit 1
           fi
 
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ steps.target.outputs.branch }}
+          ref: ${{ steps.target.outputs.ref }}
           persist-credentials: true
 
       - name: Install uv
