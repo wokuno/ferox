@@ -229,6 +229,7 @@ ferox/
 - [API Reference](API.md) - Function documentation
 - [Testing](TESTING.md) - Test organization and coverage
 - [Contributing](CONTRIBUTING.md) - Development guidelines
+- [Self-Hosted Runner Ops](RUNNER_OPS.md) - Operations and incident response for CI runner
 
 ## License
 

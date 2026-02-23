@@ -1449,40 +1449,38 @@ TEST(cell_count_concurrent_consistency) {
     AtomicWorld* aworld = atomic_world_create(world, pool, 4);
     ASSERT_NOT_NULL(aworld);
     
-    // Run many ticks checking for cell count jumps
-    int jump_count = 0;
-    size_t prev_counts[256] = {0};
-    
-    for (size_t i = 0; i < world->colony_count && i < 256; i++) {
-        prev_counts[i] = world->colonies[i].cell_count;
-    }
+    // Run many ticks and verify per-colony counts stay synchronized with grid state.
+    int mismatch_count = 0;
     
     for (int tick = 0; tick < 200; tick++) {
         atomic_tick(aworld);
+
+        size_t total_grid_cells = 0;
+        size_t total_colony_cells = 0;
         
         for (size_t i = 0; i < world->colony_count && i < 256; i++) {
             Colony* col = &world->colonies[i];
             if (!col->active) continue;
-            
-            // Cell count should not jump by more than reasonable spread
-            // With more aggressive spreading and combat, allow up to 100% growth per tick
-            int64_t diff = (int64_t)col->cell_count - (int64_t)prev_counts[i];
-            int64_t max_expected = (int64_t)prev_counts[i] + 20;  // Allow full doubling + buffer
-            
-            if (diff < 0) diff = -diff;
-            
-            if (diff > max_expected && prev_counts[i] > 0) {
-                jump_count++;
-                printf("\n    [WARNING] Cell count jumped: %zu -> %zu (tick %d, colony %u)\n",
-                       prev_counts[i], col->cell_count, tick, col->id);
+
+            size_t grid_count = (size_t)count_colony_cells(world, col->id);
+            total_grid_cells += grid_count;
+            total_colony_cells += col->cell_count;
+
+            if (grid_count != col->cell_count) {
+                mismatch_count++;
+                printf("\n    [WARNING] Cell count mismatch (tick %d, colony %u): grid=%zu stats=%zu\n",
+                       tick, col->id, grid_count, col->cell_count);
             }
-            
-            prev_counts[i] = col->cell_count;
+        }
+
+        if (total_grid_cells != total_colony_cells) {
+            mismatch_count++;
+            printf("\n    [WARNING] Total count mismatch (tick %d): grid=%zu stats=%zu\n",
+                   tick, total_grid_cells, total_colony_cells);
         }
     }
     
-    // No unexplained jumps should occur
-    ASSERT_EQ(jump_count, 0);
+    ASSERT_EQ(mismatch_count, 0);
     
     atomic_world_destroy(aworld);
     threadpool_destroy(pool);
@@ -1730,4 +1728,3 @@ int main(void) {
     return run_simulation_logic_tests() > 0 ? 1 : 0;
 }
 #endif
-
