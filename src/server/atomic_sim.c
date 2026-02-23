@@ -85,6 +85,23 @@ static inline float rand_float_local(uint32_t* state) {
     return (float)(xorshift32(state) & 0x7FFFFFFF) / (float)0x7FFFFFFF;
 }
 
+typedef struct {
+    float social_factor;
+    float nearest_norm_dx;
+    float nearest_norm_dy;
+    uint8_t has_social_effect;
+} SocialInfluenceContext;
+
+static const float DIR8_NORM_DX[8] = {
+    0.0f, 0.70710677f, 1.0f, 0.70710677f,
+    0.0f, -0.70710677f, -1.0f, -0.70710677f
+};
+
+static const float DIR8_NORM_DY[8] = {
+    -1.0f, -0.70710677f, 0.0f, 0.70710677f,
+    1.0f, 0.70710677f, 0.0f, -0.70710677f
+};
+
 // ============================================================================
 // Social/Chemotaxis behavior - neighbor detection and influence
 // ============================================================================
@@ -99,11 +116,80 @@ static inline float rand_float_local(uint32_t* state) {
  * 
  * Returns a multiplier 0.3-2.0 to apply to spread probability.
  */
-static float calculate_social_influence(
+static SocialInfluenceContext calculate_social_context(
     World* world,
     DoubleBufferedGrid* grid,
+    AtomicCell* current,
+    int cell_x,
+    int cell_y,
+    Colony* colony
+) {
+    SocialInfluenceContext context;
+    context.social_factor = colony->genome.social_factor;
+    context.nearest_norm_dx = 0.0f;
+    context.nearest_norm_dy = 0.0f;
+    context.has_social_effect = 0;
+
+    if (fabsf(context.social_factor) <= 0.01f) {
+        return context;
+    }
+
+    int detect_radius = (int)(colony->genome.detection_range *
+                              (world->width + world->height) / 4.0f);
+    if (detect_radius < 5) detect_radius = 5;
+    if (detect_radius > 30) detect_radius = 30;
+
+    const int width = grid->width;
+    const int height = grid->height;
+    const uint32_t colony_id = colony->id;
+    int step = detect_radius / 4;
+    if (step < 2) step = 2;
+
+    float nearest_dx = 0.0f;
+    float nearest_dy = 0.0f;
+    float nearest_dist_sq = (float)(detect_radius * detect_radius + 1);
+    int found = 0;
+
+    for (int dy = -detect_radius; dy <= detect_radius && found < colony->genome.max_tracked; dy += step) {
+        int check_y = cell_y + dy;
+        if (check_y < 0 || check_y >= height) continue;
+        int row_idx = check_y * width;
+
+        for (int dx = -detect_radius; dx <= detect_radius && found < colony->genome.max_tracked; dx += step) {
+            if (dx == 0 && dy == 0) continue;
+
+            int check_x = cell_x + dx;
+            if (check_x < 0 || check_x >= width) continue;
+
+            uint32_t check_colony_id = atomic_load_explicit(&current[row_idx + check_x].colony_id, memory_order_relaxed);
+            if (check_colony_id == 0 || check_colony_id == colony_id) continue;
+
+            float dist_sq = (float)(dx * dx + dy * dy);
+            if (dist_sq < nearest_dist_sq) {
+                nearest_dist_sq = dist_sq;
+                nearest_dx = (float)dx;
+                nearest_dy = (float)dy;
+                found++;
+            }
+        }
+    }
+
+    if (found > 0) {
+        float inv_dist = 1.0f / sqrtf(nearest_dist_sq);
+        context.nearest_norm_dx = nearest_dx * inv_dist;
+        context.nearest_norm_dy = nearest_dy * inv_dist;
+        context.has_social_effect = 1;
+    }
+
+    return context;
+}
+
+static float calculate_social_influence(
+    World* world,
+    const SocialInfluenceContext* context,
     int cell_x, int cell_y,
     int spread_dx, int spread_dy,
+    int direction,
     Colony* colony
 ) {
     const Genome* genome = &colony->genome;
@@ -136,61 +222,21 @@ static float calculate_social_influence(
     }
     
     // Also check direct neighbor detection for immediate threats
-    if (fabsf(genome->social_factor) > 0.01f) {
-        // Calculate detection radius in cells (scale by world size)
-        int detect_radius = (int)(genome->detection_range * 
-                                  (world->width + world->height) / 4.0f);
-        if (detect_radius < 5) detect_radius = 5;
-        if (detect_radius > 30) detect_radius = 30;
-    
-        // Find nearest different colonies (sample grid sparsely for performance)
-        float nearest_dx = 0, nearest_dy = 0;
-        float nearest_dist_sq = (float)(detect_radius * detect_radius + 1);
-        int found = 0;
-        int step = detect_radius / 4;
-        if (step < 2) step = 2;
-        
-        for (int dy = -detect_radius; dy <= detect_radius && found < genome->max_tracked; dy += step) {
-            for (int dx = -detect_radius; dx <= detect_radius && found < genome->max_tracked; dx += step) {
-                if (dx == 0 && dy == 0) continue;
-                
-                int check_x = cell_x + dx;
-                int check_y = cell_y + dy;
-                
-                AtomicCell* check_cell = grid_get_cell(grid, check_x, check_y);
-                if (!check_cell) continue;
-                
-                uint32_t check_colony_id = atomic_load(&check_cell->colony_id);
-                if (check_colony_id == 0 || check_colony_id == colony->id) continue;
-                
-                float dist_sq = (float)(dx * dx + dy * dy);
-                if (dist_sq < nearest_dist_sq) {
-                    nearest_dist_sq = dist_sq;
-                    nearest_dx = (float)dx;
-                    nearest_dy = (float)dy;
-                    found++;
-                }
-            }
+    if (context->has_social_effect) {
+        float spread_norm_dx;
+        float spread_norm_dy;
+        if (direction >= 0 && direction < 8) {
+            spread_norm_dx = DIR8_NORM_DX[direction];
+            spread_norm_dy = DIR8_NORM_DY[direction];
+        } else {
+            float inv_spread_len = 1.0f / sqrtf((float)(spread_dx * spread_dx + spread_dy * spread_dy));
+            spread_norm_dx = (float)spread_dx * inv_spread_len;
+            spread_norm_dy = (float)spread_dy * inv_spread_len;
         }
-        
-        // Apply social factor based on nearest neighbor direction
-        if (found > 0) {
-            float dist = sqrtf(nearest_dist_sq);
-            if (dist >= 1.0f) {
-                float norm_dx = nearest_dx / dist;
-                float norm_dy = nearest_dy / dist;
-                
-                float spread_len = sqrtf((float)(spread_dx * spread_dx + spread_dy * spread_dy));
-                if (spread_len >= 0.1f) {
-                    float spread_norm_dx = (float)spread_dx / spread_len;
-                    float spread_norm_dy = (float)spread_dy / spread_len;
-                    
-                    // Dot product: positive if spreading toward neighbor
-                    float dot = spread_norm_dx * norm_dx + spread_norm_dy * norm_dy;
-                    influence *= 1.0f + genome->social_factor * dot * 0.4f;
-                }
-            }
-        }
+
+        float dot = spread_norm_dx * context->nearest_norm_dx +
+                    spread_norm_dy * context->nearest_norm_dy;
+        influence *= 1.0f + context->social_factor * dot * 0.4f;
     }
     
     // Clamp to reasonable range
@@ -612,6 +658,7 @@ void atomic_spread_region(AtomicRegionWork* work) {
     DoubleBufferedGrid* grid = &aworld->grid;
     AtomicCell* current = grid_current(grid);
     const int width = grid->width;
+    const int height = grid->height;
     
     // Thread-local RNG
     uint32_t rng_state = aworld->thread_seeds[work->thread_id];
@@ -622,7 +669,7 @@ void atomic_spread_region(AtomicRegionWork* work) {
         for (int x = work->start_x; x < work->end_x; x++) {
             AtomicCell* cell = &current[idx++];
             
-            uint32_t colony_id = atomic_load(&cell->colony_id);
+            uint32_t colony_id = atomic_load_explicit(&cell->colony_id, memory_order_relaxed);
             if (colony_id == 0) continue;  // Empty cell
             
             // Skip cells with colony IDs beyond our tracking capacity
@@ -631,24 +678,26 @@ void atomic_spread_region(AtomicRegionWork* work) {
             
             // Don't spread from cells with age=0 (just claimed this tick)
             // This prevents cascade spreading within a single tick
-            uint8_t age = atomic_load(&cell->age);
+            uint8_t age = atomic_load_explicit(&cell->age, memory_order_relaxed);
             if (age == 0) continue;
             
             // Get colony for spread parameters
             Colony* colony = world_get_colony(world, colony_id);
             if (!colony || !colony->active) continue;
             
+            SocialInfluenceContext social_context = calculate_social_context(
+                world, grid, current, x, y, colony);
+
             // Try to spread to neighbors using 8-connectivity
             for (int d = 0; d < 8; d++) {
                 int dx = DX8[d];
                 int dy = DY8[d];
                 int nx = x + dx;
                 int ny = y + dy;
-                
-                AtomicCell* neighbor = grid_get_cell(grid, nx, ny);
-                if (!neighbor) continue;
-                
-                uint32_t neighbor_colony = atomic_load(&neighbor->colony_id);
+                if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+
+                AtomicCell* neighbor = &current[ny * width + nx];
+                uint32_t neighbor_colony = atomic_load_explicit(&neighbor->colony_id, memory_order_relaxed);
                 
                 // Calculate base spread probability with diagonal correction
                 float spread_prob = colony->genome.spread_rate * 
@@ -662,7 +711,7 @@ void atomic_spread_region(AtomicRegionWork* work) {
                 
                 // Apply social influence (chemotaxis toward/away from neighbors)
                 float social_mult = calculate_social_influence(
-                    world, grid, x, y, dx, dy, colony);
+                    world, &social_context, x, y, dx, dy, d, colony);
                 spread_prob *= social_mult;
                 
                 if (neighbor_colony == 0) {
