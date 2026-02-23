@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 7777
@@ -51,6 +52,19 @@ static void print_usage(const char* program) {
     printf("  Q/Escape     Quit\n");
 }
 
+static bool parse_port_arg(const char* arg, uint16_t* out_port) {
+    if (!arg || !out_port) return false;
+
+    errno = 0;
+    char* end = NULL;
+    long parsed = strtol(arg, &end, 10);
+    if (errno != 0 || end == arg || *end != '\0') return false;
+    if (parsed < 0 || parsed > 65535) return false;
+
+    *out_port = (uint16_t)parsed;
+    return true;
+}
+
 int main(int argc, char* argv[]) {
     const char* host = DEFAULT_HOST;
     uint16_t port = DEFAULT_PORT;
@@ -63,7 +77,11 @@ int main(int argc, char* argv[]) {
         } else if ((strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--host") == 0) && i + 1 < argc) {
             host = argv[++i];
         } else if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) && i + 1 < argc) {
-            port = (uint16_t)atoi(argv[++i]);
+            const char* port_arg = argv[++i];
+            if (!parse_port_arg(port_arg, &port)) {
+                fprintf(stderr, "Invalid port: %s\n", port_arg);
+                return 1;
+            }
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             print_usage(argv[0]);

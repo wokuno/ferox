@@ -402,8 +402,8 @@ int protocol_serialize_command(CommandType cmd, const void* data, uint8_t* buffe
     return offset;
 }
 
-int protocol_deserialize_command(const uint8_t* buffer, CommandType* cmd, void* data) {
-    if (!buffer || !cmd) return -1;
+int protocol_deserialize_command(const uint8_t* buffer, size_t len, CommandType* cmd, void* data) {
+    if (!buffer || !cmd || len < 4) return -1;
     
     int offset = 0;
     
@@ -412,14 +412,22 @@ int protocol_deserialize_command(const uint8_t* buffer, CommandType* cmd, void* 
     
     switch (*cmd) {
         case CMD_SELECT_COLONY:
+            if (len < (size_t)(offset + 4)) {
+                return -1;
+            }
             if (data) {
                 CommandSelectColony* sel = (CommandSelectColony*)data;
                 sel->colony_id = read_u32(buffer + offset);
+                offset += 4;
+            } else {
                 offset += 4;
             }
             break;
             
         case CMD_SPAWN_COLONY:
+            if (len < (size_t)(offset + 8 + MAX_COLONY_NAME)) {
+                return -1;
+            }
             if (data) {
                 CommandSpawnColony* spawn = (CommandSpawnColony*)data;
                 spawn->x = read_float(buffer + offset);
@@ -429,6 +437,8 @@ int protocol_deserialize_command(const uint8_t* buffer, CommandType* cmd, void* 
                 memcpy(spawn->name, buffer + offset, MAX_COLONY_NAME);
                 spawn->name[MAX_COLONY_NAME - 1] = '\0';
                 offset += MAX_COLONY_NAME;
+            } else {
+                offset += 8 + MAX_COLONY_NAME;
             }
             break;
             
@@ -439,6 +449,9 @@ int protocol_deserialize_command(const uint8_t* buffer, CommandType* cmd, void* 
         case CMD_RESET:
             // No additional data
             break;
+
+        default:
+            return -1;
     }
     
     return offset;

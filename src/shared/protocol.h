@@ -118,7 +118,7 @@ int protocol_serialize_colony(const proto_colony* colony, uint8_t* buffer);
 int protocol_deserialize_colony(const uint8_t* buffer, proto_colony* colony);
 
 int protocol_serialize_command(CommandType cmd, const void* data, uint8_t* buffer);
-int protocol_deserialize_command(const uint8_t* buffer, CommandType* cmd, void* data);
+int protocol_deserialize_command(const uint8_t* buffer, size_t len, CommandType* cmd, void* data);
 
 // Grid serialization with RLE compression
 int protocol_serialize_grid_rle(const uint16_t* grid, uint32_t size, uint8_t** buffer, size_t* len);

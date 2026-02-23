@@ -22,6 +22,7 @@
 // Forward declarations for thread functions
 static void* accept_thread_func(void* arg);
 static void* simulation_thread_func(void* arg);
+static bool server_rebuild_world_state(Server* server, int width, int height, int initial_colonies);
 
 // Helper to get current time in milliseconds
 static long get_time_ms(void) {
@@ -274,6 +275,57 @@ void server_stop(Server* server) {
     }
 }
 
+static bool server_rebuild_world_state(Server* server, int width, int height, int initial_colonies) {
+    if (!server || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    World* new_world = world_create(width, height);
+    if (!new_world) {
+        return false;
+    }
+
+    if (initial_colonies > 0) {
+        world_init_random_colonies(new_world, initial_colonies);
+    }
+
+    int regions = server->pool && server->pool->thread_count > 1 ? 4 : 2;
+    ParallelContext* new_parallel = parallel_create(server->pool, new_world, regions, regions);
+    if (!new_parallel) {
+        world_destroy(new_world);
+        return false;
+    }
+    parallel_init_regions(new_parallel, width, height);
+
+    int thread_count = server->pool ? server->pool->thread_count : 1;
+    AtomicWorld* new_atomic = atomic_world_create(new_world, server->pool, thread_count);
+    if (!new_atomic) {
+        parallel_destroy(new_parallel);
+        world_destroy(new_world);
+        return false;
+    }
+
+    AtomicWorld* old_atomic = server->atomic_world;
+    ParallelContext* old_parallel = server->parallel_ctx;
+    World* old_world = server->world;
+
+    server->world = new_world;
+    server->parallel_ctx = new_parallel;
+    server->atomic_world = new_atomic;
+
+    if (old_atomic) {
+        atomic_world_destroy(old_atomic);
+    }
+    if (old_parallel) {
+        parallel_destroy(old_parallel);
+    }
+    if (old_world) {
+        world_destroy(old_world);
+    }
+
+    return true;
+}
+
 // Convert internal World/Colony to protocol proto_world for serialization
 static void build_protocol_world(Server* server, proto_world* proto_world) {
     proto_world_init(proto_world);
@@ -513,12 +565,14 @@ void server_handle_command(Server* server, client_session* client, CommandType c
             break;
             
         case CMD_RESET:
-            // Reset world
-            world_destroy(server->world);
-            server->world = world_create(server->parallel_ctx->regions[0].end_x * server->parallel_ctx->regions_x,
-                                          server->parallel_ctx->regions[0].end_y * server->parallel_ctx->regions_y);
+            // Reset world while preserving dimensions
             if (server->world) {
-                world_init_random_colonies(server->world, 5);
+                int width = server->world->width;
+                int height = server->world->height;
+                if (!server_rebuild_world_state(server, width, height, 5)) {
+                    fprintf(stderr, "Failed to reset world for client %u\n", client->id);
+                    break;
+                }
             }
             printf("World reset by client %u\n", client->id);
             break;
@@ -627,7 +681,7 @@ void server_process_clients(Server* server) {
                     case MSG_COMMAND: {
                         CommandType cmd;
                         uint8_t cmd_data[256];
-                        if (protocol_deserialize_command(payload, &cmd, cmd_data) > 0) {
+                        if (protocol_deserialize_command(payload, header.payload_len, &cmd, cmd_data) > 0) {
                             server_handle_command(server, client, cmd, cmd_data);
                         }
                         break;
