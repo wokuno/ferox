@@ -79,6 +79,17 @@ static void perf_increment_task(void* arg) {
     atomic_fetch_add(&perf_task_counter, 1);
 }
 
+typedef struct {
+    int iterations;
+} PerfTaskBatch;
+
+static void perf_increment_task_batch(void* arg) {
+    PerfTaskBatch* batch = (PerfTaskBatch*)arg;
+    for (int i = 0; i < batch->iterations; i++) {
+        atomic_fetch_add(&perf_task_counter, 1);
+    }
+}
+
 TEST(shared_name_color_generation_throughput) {
     const int scale = get_perf_scale();
     const int iters = 50000 * scale;
@@ -185,6 +196,82 @@ TEST(protocol_world_serialize_deserialize_throughput) {
     proto_world_free(&world);
 }
 
+TEST(protocol_world_path_breakdown_eval) {
+    const int scale = get_perf_scale();
+    const int iters = 120 * scale;
+
+    proto_world world;
+    proto_world_init(&world);
+    world.width = 320;
+    world.height = 180;
+    world.tick = 54321;
+    world.colony_count = 72;
+    world.paused = false;
+    world.speed_multiplier = 1.0f;
+    proto_world_alloc_grid(&world, world.width, world.height);
+    ASSERT_NOT_NULL(world.grid);
+
+    for (uint32_t i = 0; i < world.colony_count; i++) {
+        world.colonies[i].id = i + 1;
+        snprintf(world.colonies[i].name, MAX_COLONY_NAME, "Breakdown%u", i + 1);
+        world.colonies[i].x = (float)(i % world.width);
+        world.colonies[i].y = (float)(i % world.height);
+        world.colonies[i].radius = 10.0f + (float)(i % 7);
+        world.colonies[i].population = 200 + i * 5;
+        world.colonies[i].max_population = world.colonies[i].population + 60;
+        world.colonies[i].growth_rate = 0.45f;
+        world.colonies[i].alive = true;
+    }
+
+    for (uint32_t i = 0; i < world.grid_size; i++) {
+        world.grid[i] = (uint16_t)((i % 17 == 0) ? (i % world.colony_count) + 1 : 0);
+    }
+
+    uint8_t* encoded = NULL;
+    size_t encoded_len = 0;
+    int rc = protocol_serialize_world_state(&world, &encoded, &encoded_len);
+    ASSERT_EQ(rc, 0);
+    ASSERT_NOT_NULL(encoded);
+
+    double ser_start = now_ms();
+    for (int i = 0; i < iters; i++) {
+        uint8_t* buf = NULL;
+        size_t len = 0;
+        rc = protocol_serialize_world_state(&world, &buf, &len);
+        ASSERT_EQ(rc, 0);
+        ASSERT_NOT_NULL(buf);
+        free(buf);
+    }
+    double ser_ms = now_ms() - ser_start;
+
+    double de_start = now_ms();
+    for (int i = 0; i < iters; i++) {
+        proto_world decoded;
+        proto_world_init(&decoded);
+        rc = protocol_deserialize_world_state(encoded, encoded_len, &decoded);
+        ASSERT_EQ(rc, 0);
+        proto_world_free(&decoded);
+    }
+    double de_ms = now_ms() - de_start;
+
+    print_metric("protocol serialize only", ser_ms, (double)iters);
+    print_metric("protocol deserialize only", de_ms, (double)iters);
+    printf("    [perf] protocol size per frame: %zu bytes\n", encoded_len);
+
+    if (ser_ms > de_ms * 1.5) {
+        printf("    [hint] serialization dominates; consider buffer reuse or layout simplification\n");
+    } else if (de_ms > ser_ms * 1.5) {
+        printf("    [hint] deserialization dominates; consider faster bounds checks or memcpy strategy\n");
+    } else {
+        printf("    [hint] serialize/deserialize costs are balanced\n");
+    }
+
+    ASSERT(ser_ms > 0.0 && de_ms > 0.0, "protocol timing must be positive");
+
+    free(encoded);
+    proto_world_free(&world);
+}
+
 TEST(simulation_tick_throughput) {
     const int scale = get_perf_scale();
     const int ticks = 35 * scale;
@@ -271,6 +358,96 @@ TEST(threadpool_task_throughput) {
     threadpool_destroy(pool);
 }
 
+TEST(atomic_tick_thread_scaling_eval) {
+    const int scale = get_perf_scale();
+    const int ticks = 20 * scale;
+    const int thread_options[3] = {1, 2, 4};
+    double elapsed_ms[3] = {0.0, 0.0, 0.0};
+
+    for (int idx = 0; idx < 3; idx++) {
+        int threads = thread_options[idx];
+        World* world = create_seeded_world(320, 180, 55, 9000u);
+        ASSERT_NOT_NULL(world);
+
+        ThreadPool* pool = threadpool_create(threads);
+        ASSERT_NOT_NULL(pool);
+        AtomicWorld* aworld = atomic_world_create(world, pool, threads);
+        ASSERT_NOT_NULL(aworld);
+
+        for (int i = 0; i < 4; i++) atomic_tick(aworld);
+
+        double start = now_ms();
+        for (int i = 0; i < ticks; i++) atomic_tick(aworld);
+        elapsed_ms[idx] = now_ms() - start;
+
+        print_metric(threads == 1 ? "atomic_tick (1 thread)" :
+                     (threads == 2 ? "atomic_tick (2 threads)" : "atomic_tick (4 threads)"),
+                     elapsed_ms[idx], (double)ticks);
+
+        atomic_world_destroy(aworld);
+        threadpool_destroy(pool);
+        world_destroy(world);
+    }
+
+    double base = elapsed_ms[0];
+    double speedup_2 = base > 0.0 ? base / elapsed_ms[1] : 0.0;
+    double speedup_4 = base > 0.0 ? base / elapsed_ms[2] : 0.0;
+
+    printf("    [perf] speedup vs 1-thread: 2-thread=%.2fx 4-thread=%.2fx\n", speedup_2, speedup_4);
+    if (speedup_4 < 1.0) {
+        printf("    [hint] 4-thread slower than 1-thread; inspect scheduling overhead and false sharing\n");
+    }
+
+    ASSERT(elapsed_ms[2] <= elapsed_ms[0] * 8.0 + 5.0, "4-thread atomic path regressed severely");
+}
+
+TEST(threadpool_granularity_eval) {
+    const int scale = get_perf_scale();
+    const int total_increments = 50000 * scale;
+    const int chunk = 250;
+    const int batch_tasks = total_increments / chunk;
+
+    ThreadPool* pool = threadpool_create(4);
+    ASSERT_NOT_NULL(pool);
+
+    atomic_store(&perf_task_counter, 0);
+    double tiny_start = now_ms();
+    for (int i = 0; i < total_increments; i++) {
+        threadpool_submit(pool, perf_increment_task, NULL);
+    }
+    threadpool_wait(pool);
+    double tiny_ms = now_ms() - tiny_start;
+    ASSERT_EQ(atomic_load(&perf_task_counter), total_increments);
+
+    PerfTaskBatch* batches = (PerfTaskBatch*)calloc((size_t)batch_tasks, sizeof(PerfTaskBatch));
+    ASSERT_NOT_NULL(batches);
+    for (int i = 0; i < batch_tasks; i++) {
+        batches[i].iterations = chunk;
+    }
+
+    atomic_store(&perf_task_counter, 0);
+    double batched_start = now_ms();
+    for (int i = 0; i < batch_tasks; i++) {
+        threadpool_submit(pool, perf_increment_task_batch, &batches[i]);
+    }
+    threadpool_wait(pool);
+    double batched_ms = now_ms() - batched_start;
+    ASSERT_EQ(atomic_load(&perf_task_counter), total_increments);
+
+    print_metric("threadpool tiny tasks", tiny_ms, (double)total_increments);
+    print_metric("threadpool batched tasks", batched_ms, (double)total_increments);
+
+    if (batched_ms > 0.0) {
+        printf("    [perf] tiny/batched ratio: %.2fx\n", tiny_ms / batched_ms);
+        if (tiny_ms / batched_ms > 2.0) {
+            printf("    [hint] task submission overhead is high; consider coarser work units\n");
+        }
+    }
+
+    free(batches);
+    threadpool_destroy(pool);
+}
+
 int run_performance_eval_tests(void) {
     tests_passed = 0;
     tests_failed = 0;
@@ -281,9 +458,12 @@ int run_performance_eval_tests(void) {
     RUN_TEST(shared_name_color_generation_throughput);
     RUN_TEST(world_lifecycle_throughput);
     RUN_TEST(protocol_world_serialize_deserialize_throughput);
+    RUN_TEST(protocol_world_path_breakdown_eval);
     RUN_TEST(simulation_tick_throughput);
     RUN_TEST(atomic_tick_throughput_and_speedup_eval);
+    RUN_TEST(atomic_tick_thread_scaling_eval);
     RUN_TEST(threadpool_task_throughput);
+    RUN_TEST(threadpool_granularity_eval);
 
     printf("\n--- Performance Eval Results ---\n");
     printf("Passed: %d\n", tests_passed);
@@ -297,4 +477,3 @@ int main(void) {
     return run_performance_eval_tests() > 0 ? 1 : 0;
 }
 #endif
-

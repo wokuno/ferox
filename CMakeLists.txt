@@ -9,6 +9,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_DOCS "Build documentation" OFF)
 option(ENABLE_SANITIZERS "Enable address/undefined sanitizers" OFF)
+option(ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
 
 # Compiler warnings
 add_compile_options(-Wall -Wextra -Wpedantic)
@@ -21,6 +22,16 @@ set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
 if(ENABLE_SANITIZERS)
     add_compile_options(-fsanitize=address -fsanitize=undefined)
     add_link_options(-fsanitize=address -fsanitize=undefined)
+endif()
+
+# Coverage instrumentation (for CI/local coverage reports)
+if(ENABLE_COVERAGE)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        add_compile_options(-O0 -g --coverage)
+        add_link_options(--coverage)
+    else()
+        message(WARNING "Coverage requested but compiler does not support --coverage flags")
+    endif()
 endif()
 
 # Find required packages

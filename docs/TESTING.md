@@ -40,6 +40,25 @@ tests/
 
 ## Running Tests
 
+### Coverage (macOS focus)
+
+Use CMake coverage instrumentation and `gcovr` to measure line/branch coverage:
+
+```bash
+uv tool install gcovr
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+cmake --build build -j$(sysctl -n hw.ncpu)
+cd build
+ctest --output-on-failure -C Debug
+cd ..
+uvx gcovr --root . --print-summary --txt
+uvx gcovr --root . --html-details coverage.html
+```
+
+Notes:
+- Coverage mode is enabled via `-DENABLE_COVERAGE=ON`.
+- CI also runs a macOS coverage job on pull requests and includes a summary.
+
 ### Compile and Run Individual Tests
 
 ```bash
