@@ -11,13 +11,12 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  build-and-test-macos:
     strategy:
       matrix:
-        os: [macos-latest]
         build_type: [Release, Debug]
 
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     permissions:
       contents: read
 
@@ -38,6 +37,40 @@ jobs:
       - name: Build
         run: |
           cmake --build build --config ${{ matrix.build_type }} -j$(sysctl -n hw.ncpu)
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure -C ${{ matrix.build_type }}
+
+  build-and-test-ferox:
+    if: github.event_name == 'push'
+    strategy:
+      matrix:
+        build_type: [Release, Debug]
+
+    runs-on: [self-hosted, Linux, X64, ferox]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Verify dependencies
+        run: |
+          cmake --version
+          sdl2-config --version
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: |
+          cmake --build build --config ${{ matrix.build_type }} -j$(nproc)
 
       - name: Run tests
         run: |
