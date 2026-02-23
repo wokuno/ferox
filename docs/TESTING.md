@@ -47,11 +47,6 @@ tests/
 Use CMake coverage instrumentation and `gcovr` to measure line/branch coverage:
 
 ```bash
-if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
-fi
-
 cmake -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
 cmake --build build-coverage --parallel
 cd build-coverage
@@ -63,7 +58,7 @@ uvx gcovr --root . --xml-pretty --output coverage.xml
 
 Notes:
 - Coverage mode is enabled via `-DENABLE_COVERAGE=ON`.
-- CI runs macOS coverage on all events (`coverage-macos`).
+- CI runs macOS coverage on pull requests (`coverage-macos`).
 - CI runs self-hosted Linux coverage only on non-PR events (`coverage-ferox`).
 - CI excludes `PerformanceEvalTests` and `AllTests` during coverage runs.
 - CI writes `coverage-summary.txt` and `coverage.xml`, then appends a short summary to the job summary.

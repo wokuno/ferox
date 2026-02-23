@@ -330,6 +330,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   coverage-macos:
+    if: github.event_name == 'pull_request'
     runs-on: macos-latest
     permissions:
       contents: read
@@ -342,15 +343,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install cmake sdl2
-
-      - name: Verify uv
-        run: |
-          if ! command -v uv >/dev/null 2>&1; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-            export PATH="$HOME/.local/bin:$PATH"
-          fi
-          uv --version
+          brew install cmake sdl2 uv
 
       - name: Configure coverage build
         run: |
@@ -367,7 +360,6 @@ jobs:
 
       - name: Generate coverage summary
         run: |
-          export PATH="$HOME/.local/bin:$PATH"
           uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --print-summary --txt > coverage-summary.txt
           uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --xml-pretty --output coverage.xml
           cat coverage-summary.txt
