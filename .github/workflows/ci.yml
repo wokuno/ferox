@@ -210,7 +210,7 @@ jobs:
       - name: Run tests for coverage
         run: |
           cd build-coverage
-          ctest --output-on-failure --timeout 600 -C Debug
+          ctest --output-on-failure --timeout 600 -C Debug -E "(PerformanceEvalTests|AllTests)"
 
       - name: Generate coverage summary
         run: |
