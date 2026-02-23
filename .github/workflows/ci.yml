@@ -367,14 +367,14 @@ jobs:
       - name: Add coverage to job summary
         run: |
           {
-            echo "### Coverage Summary (macOS)";
+            echo "### Coverage Summary (ferox Linux)";
             echo "";
             sed -n '1,20p' coverage-summary.txt;
           } >> "$GITHUB_STEP_SUMMARY"
 
   pr-test-summary:
     if: always() && github.event_name == 'pull_request'
-    needs: [build-and-test-macos, coverage-macos]
+    needs: [build-and-test-macos]
     runs-on: macos-latest
     permissions:
       contents: read
