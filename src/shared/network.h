@@ -22,6 +22,7 @@ typedef struct net_server {
 
 // Server functions
 net_server* net_server_create(uint16_t port);
+void net_server_stop(net_server* server);
 void net_server_destroy(net_server* server);
 net_socket* net_server_accept(net_server* server);  // Blocking accept
 
