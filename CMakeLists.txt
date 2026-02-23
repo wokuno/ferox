@@ -10,6 +10,7 @@ option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_DOCS "Build documentation" OFF)
 option(ENABLE_SANITIZERS "Enable address/undefined sanitizers" OFF)
 option(ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
+option(BUILD_TOOLS "Build developer tooling binaries" ON)
 
 # Compiler warnings
 add_compile_options(-Wall -Wextra -Wpedantic)
@@ -42,6 +43,10 @@ add_subdirectory(src/shared)
 add_subdirectory(src/server)
 add_subdirectory(src/client)
 add_subdirectory(src/gui)
+
+if(BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
 
 if(BUILD_TESTS)
     enable_testing()

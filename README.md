@@ -2,6 +2,8 @@
 
 A multi-threaded bacterial colony simulation with client-server architecture.
 
+![Ferox live simulation preview](assets/preview.gif)
+
 ## Features
 
 - **Real-time bacterial colony simulation** with genetic evolution
