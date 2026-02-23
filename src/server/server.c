@@ -591,7 +591,7 @@ void server_process_clients(Server* server) {
                     case MSG_COMMAND: {
                         CommandType cmd;
                         uint8_t cmd_data[256];
-                        if (protocol_deserialize_command(payload, &cmd, cmd_data) > 0) {
+                        if (protocol_deserialize_command(payload, header.payload_len, &cmd, cmd_data) > 0) {
                             server_handle_command(server, client, cmd, cmd_data);
                         }
                         break;

@@ -353,7 +353,7 @@ TEST(all_command_types) {
         ASSERT(size > 0, "Command serialization should succeed");
         
         CommandType deserialized;
-        size = protocol_deserialize_command(buffer, &deserialized, NULL);
+        size = protocol_deserialize_command(buffer, (size_t)size, &deserialized, NULL);
         ASSERT(size > 0, "Command deserialization should succeed");
         ASSERT_EQ(deserialized, commands[i]);
     }
@@ -368,7 +368,7 @@ TEST(select_colony_command) {
     
     CommandType cmd;
     CommandSelectColony deserialized;
-    size = protocol_deserialize_command(buffer, &cmd, &deserialized);
+    size = protocol_deserialize_command(buffer, (size_t)size, &cmd, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     ASSERT_EQ(cmd, CMD_SELECT_COLONY);
     ASSERT_EQ(deserialized.colony_id, 12345);
@@ -388,13 +388,29 @@ TEST(spawn_colony_command) {
     
     CommandType cmd;
     CommandSpawnColony deserialized;
-    size = protocol_deserialize_command(buffer, &cmd, &deserialized);
+    size = protocol_deserialize_command(buffer, (size_t)size, &cmd, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     ASSERT_EQ(cmd, CMD_SPAWN_COLONY);
     
     // Float comparison with tolerance
     ASSERT(fabsf(deserialized.x - 123.456f) < 0.001f, "X should match");
     ASSERT(fabsf(deserialized.y - 789.012f) < 0.001f, "Y should match");
+}
+
+TEST(rejects_truncated_command_payload) {
+    uint8_t buffer[128];
+    CommandType cmd;
+
+    CommandSelectColony select_data = { .colony_id = 123 };
+    int select_size = protocol_serialize_command(CMD_SELECT_COLONY, &select_data, buffer);
+    ASSERT(select_size > 0, "Serialization should succeed");
+    ASSERT_EQ(protocol_deserialize_command(buffer, 4, &cmd, NULL), -1);
+
+    CommandSpawnColony spawn_data = { .x = 1.0f, .y = 2.0f };
+    strncpy(spawn_data.name, "tiny", MAX_COLONY_NAME);
+    int spawn_size = protocol_serialize_command(CMD_SPAWN_COLONY, &spawn_data, buffer);
+    ASSERT(spawn_size > 0, "Serialization should succeed");
+    ASSERT_EQ(protocol_deserialize_command(buffer, 8, &cmd, NULL), -1);
 }
 
 // ============================================================================
@@ -512,6 +528,7 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(all_command_types);
     RUN_TEST(select_colony_command);
     RUN_TEST(spawn_colony_command);
+    RUN_TEST(rejects_truncated_command_payload);
     
     printf("\nNull Input Tests:\n");
     RUN_TEST(null_inputs_handled);
