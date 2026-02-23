@@ -47,6 +47,11 @@ tests/
 Use CMake coverage instrumentation and `gcovr` to measure line/branch coverage:
 
 ```bash
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
 cmake -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
 cmake --build build-coverage --parallel
 cd build-coverage
