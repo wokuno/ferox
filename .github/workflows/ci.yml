@@ -100,7 +100,7 @@ jobs:
       matrix:
         build_type: [Release, Debug]
 
-    runs-on: [self-hosted, Linux, X64, ferox]
+    runs-on: [self-hosted, Linux, X64, ferox, rocky10]
     permissions:
       contents: read
 
@@ -177,9 +177,9 @@ jobs:
           - Details: ${{ steps.run_tests.outputs.run_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
           EOF
 
-  coverage-macos:
-    if: github.event_name == 'pull_request'
-    runs-on: macos-latest
+  coverage-ferox:
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, Linux, X64, ferox, rocky10]
     permissions:
       contents: read
 
@@ -189,26 +189,32 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install dependencies
+      - name: Verify dependencies
         run: |
-          brew install cmake sdl2
-          brew install uv
+          cmake --version
+          sdl2-config --version
+          if ! command -v uv >/dev/null 2>&1; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            export PATH="$HOME/.local/bin:$PATH"
+          fi
+          uv --version
 
       - name: Configure coverage build
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+          cmake -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
 
       - name: Build
         run: |
-          cmake --build build -j$(sysctl -n hw.ncpu)
+          cmake --build build-coverage -j$(nproc)
 
       - name: Run tests for coverage
         run: |
-          cd build
+          cd build-coverage
           ctest --output-on-failure --timeout 600 -C Debug
 
       - name: Generate coverage summary
         run: |
+          export PATH="$HOME/.local/bin:$PATH"
           uvx gcovr --root . --print-summary --txt > coverage-summary.txt
           uvx gcovr --root . --xml-pretty --output coverage.xml
           cat coverage-summary.txt
@@ -216,14 +222,14 @@ jobs:
       - name: Add coverage to job summary
         run: |
           {
-            echo "### Coverage Summary (macOS)";
+            echo "### Coverage Summary (ferox Linux)";
             echo "";
             sed -n '1,20p' coverage-summary.txt;
           } >> "$GITHUB_STEP_SUMMARY"
 
   pr-test-summary:
     if: always() && github.event_name == 'pull_request'
-    needs: [build-and-test-macos, coverage-macos]
+    needs: [build-and-test-macos]
     runs-on: macos-latest
     permissions:
       contents: read
@@ -264,7 +270,7 @@ jobs:
           tracked = []
           for job in jobs:
               name = job.get("name", "")
-              if name.startswith("build-and-test-") or name.startswith("coverage-macos"):
+              if name.startswith("build-and-test-") or name.startswith("coverage-ferox"):
                   tracked.append({
                       "name": name,
                       "conclusion": job.get("conclusion", "unknown"),

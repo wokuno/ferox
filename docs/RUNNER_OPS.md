@@ -5,7 +5,7 @@ This document describes how to operate the `ferox` self-hosted GitHub Actions ru
 ## Runner Profile
 
 - Hostname: `ferox`
-- Labels: `self-hosted`, `Linux`, `X64`, `ferox`
+- Labels: `self-hosted`, `Linux`, `X64`, `ferox`, `rocky10`
 - Runner path: `/home/plover/actions-runner-ferox`
 - Service user: `plover`
 
