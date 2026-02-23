@@ -64,6 +64,12 @@ target_link_libraries(test_protocol_edge PRIVATE ferox_server_lib)
 target_compile_definitions(test_protocol_edge PRIVATE STANDALONE_TEST)
 add_test(NAME ProtocolEdgeTests COMMAND test_protocol_edge)
 
+# Parallel orchestration edge branch tests
+add_executable(test_parallel_edge test_parallel_edge.c)
+target_link_libraries(test_parallel_edge PRIVATE ferox_server_lib)
+target_compile_definitions(test_parallel_edge PRIVATE STANDALONE_TEST)
+add_test(NAME ParallelEdgeTests COMMAND test_parallel_edge)
+
 # Exhaustive name tests
 add_executable(test_names_exhaustive test_names_exhaustive.c)
 target_link_libraries(test_names_exhaustive PRIVATE ferox_shared)
@@ -81,6 +87,12 @@ add_executable(test_simulation_logic test_simulation_logic.c)
 target_link_libraries(test_simulation_logic PRIVATE ferox_server_lib)
 target_compile_definitions(test_simulation_logic PRIVATE STANDALONE_TEST)
 add_test(NAME SimulationLogicTests COMMAND test_simulation_logic)
+
+# Simulation common helper tests
+add_executable(test_simulation_common test_simulation_common.c)
+target_link_libraries(test_simulation_common PRIVATE ferox_server_lib)
+target_compile_definitions(test_simulation_common PRIVATE STANDALONE_TEST)
+add_test(NAME SimulationCommonTests COMMAND test_simulation_common)
 
 # Visual stability stress tests
 add_executable(test_visual_stability test_visual_stability.c)
@@ -136,6 +148,17 @@ add_executable(test_renderer_logic_surface test_renderer_logic_surface.c)
 target_link_libraries(test_renderer_logic_surface PRIVATE m)
 target_compile_definitions(test_renderer_logic_surface PRIVATE STANDALONE_TEST)
 add_test(NAME RendererLogicSurfaceTests COMMAND test_renderer_logic_surface)
+
+# Targeted branch coverage tests for world/server paths
+add_executable(test_world_branch_coverage test_world_branch_coverage.c)
+target_link_libraries(test_world_branch_coverage PRIVATE ferox_server_lib)
+target_compile_definitions(test_world_branch_coverage PRIVATE STANDALONE_TEST)
+add_test(NAME WorldBranchCoverageTests COMMAND test_world_branch_coverage)
+
+add_executable(test_server_branch_coverage test_server_branch_coverage.c)
+target_link_libraries(test_server_branch_coverage PRIVATE ferox_server_lib)
+target_compile_definitions(test_server_branch_coverage PRIVATE STANDALONE_TEST)
+add_test(NAME ServerBranchCoverageTests COMMAND test_server_branch_coverage)
 
 # Combined test runner
 add_executable(test_runner test_runner.c
