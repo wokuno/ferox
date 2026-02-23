@@ -82,6 +82,12 @@ target_link_libraries(test_simulation_logic PRIVATE ferox_server_lib)
 target_compile_definitions(test_simulation_logic PRIVATE STANDALONE_TEST)
 add_test(NAME SimulationLogicTests COMMAND test_simulation_logic)
 
+# Simulation common helper tests
+add_executable(test_simulation_common test_simulation_common.c)
+target_link_libraries(test_simulation_common PRIVATE ferox_server_lib)
+target_compile_definitions(test_simulation_common PRIVATE STANDALONE_TEST)
+add_test(NAME SimulationCommonTests COMMAND test_simulation_common)
+
 # Visual stability stress tests
 add_executable(test_visual_stability test_visual_stability.c)
 target_link_libraries(test_visual_stability PRIVATE ferox_server_lib)
