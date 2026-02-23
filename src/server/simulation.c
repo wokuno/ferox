@@ -600,7 +600,14 @@ void simulation_spread(World* world) {
                     if (rand_float() < spread_prob) {
                         if (pending_count >= pending_capacity) {
                             pending_capacity *= 2;
-                            pending = (PendingCell*)realloc(pending, pending_capacity * sizeof(PendingCell));
+                            PendingCell* new_pending = (PendingCell*)realloc(
+                                pending, pending_capacity * sizeof(PendingCell)
+                            );
+                            if (!new_pending) {
+                                free(pending);
+                                return;
+                            }
+                            pending = new_pending;
                         }
                         pending[pending_count++] = (PendingCell){nx, ny, cell->colony_id};
                     }
@@ -963,9 +970,13 @@ void pending_buffer_add(PendingBuffer* buf, int x, int y, uint32_t colony_id) {
     if (!buf) return;
     
     if (buf->count >= buf->capacity) {
-        buf->capacity *= 2;
-        buf->cells = (PendingCell*)realloc(buf->cells, buf->capacity * sizeof(PendingCell));
-        if (!buf->cells) return;
+        int new_capacity = buf->capacity * 2;
+        PendingCell* new_cells = (PendingCell*)realloc(
+            buf->cells, (size_t)new_capacity * sizeof(PendingCell)
+        );
+        if (!new_cells) return;
+        buf->cells = new_cells;
+        buf->capacity = new_capacity;
     }
     buf->cells[buf->count].x = x;
     buf->cells[buf->count].y = y;
@@ -1314,8 +1325,12 @@ void simulation_apply_toxin_damage(World* world) {
             if (rand_float() < damage * 0.15f) {
                 if (dead_count >= dead_capacity) {
                     dead_capacity *= 2;
-                    dead = (DeadCell*)realloc(dead, dead_capacity * sizeof(DeadCell));
-                    if (!dead) return;
+                    DeadCell* new_dead = (DeadCell*)realloc(dead, dead_capacity * sizeof(DeadCell));
+                    if (!new_dead) {
+                        free(dead);
+                        return;
+                    }
+                    dead = new_dead;
                 }
                 dead[dead_count++] = (DeadCell){x, y};
             }
