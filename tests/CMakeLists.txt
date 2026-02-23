@@ -129,6 +129,17 @@ target_link_libraries(test_gui PRIVATE m)
 target_compile_definitions(test_gui PRIVATE STANDALONE_TEST)
 add_test(NAME GuiTests COMMAND test_gui)
 
+# Targeted branch coverage tests for world/server paths
+add_executable(test_world_branch_coverage test_world_branch_coverage.c)
+target_link_libraries(test_world_branch_coverage PRIVATE ferox_server_lib)
+target_compile_definitions(test_world_branch_coverage PRIVATE STANDALONE_TEST)
+add_test(NAME WorldBranchCoverageTests COMMAND test_world_branch_coverage)
+
+add_executable(test_server_branch_coverage test_server_branch_coverage.c)
+target_link_libraries(test_server_branch_coverage PRIVATE ferox_server_lib)
+target_compile_definitions(test_server_branch_coverage PRIVATE STANDALONE_TEST)
+add_test(NAME ServerBranchCoverageTests COMMAND test_server_branch_coverage)
+
 # Combined test runner
 add_executable(test_runner test_runner.c
     test_genetics_advanced.c
