@@ -215,8 +215,8 @@ jobs:
       - name: Generate coverage summary
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --print-summary --txt > coverage-summary.txt
-          uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --xml-pretty --output coverage.xml
+          uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --print-summary --txt > coverage-summary.txt
+          uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --xml-pretty --output coverage.xml
           cat coverage-summary.txt
 
       - name: Add coverage to job summary
@@ -266,8 +266,8 @@ jobs:
       - name: Generate coverage summary
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --print-summary --txt > coverage-summary.txt
-          uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --xml-pretty --output coverage.xml
+          uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --print-summary --txt > coverage-summary.txt
+          uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --xml-pretty --output coverage.xml
           cat coverage-summary.txt
 
       - name: Add coverage to job summary
