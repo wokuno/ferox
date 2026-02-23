@@ -270,8 +270,7 @@ void server_stop(Server* server) {
     
     // Close listener to unblock accept
     if (server->listener) {
-        net_server_destroy(server->listener);
-        server->listener = NULL;
+        net_server_stop(server->listener);
     }
 }
 

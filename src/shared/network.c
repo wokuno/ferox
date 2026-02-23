@@ -58,13 +58,21 @@ net_server* net_server_create(uint16_t port) {
     return server;
 }
 
+void net_server_stop(net_server* server) {
+    if (!server) return;
+
+    server->listening = false;
+    if (server->fd >= 0) {
+        shutdown(server->fd, SHUT_RDWR);
+        close(server->fd);
+        server->fd = -1;
+    }
+}
+
 void net_server_destroy(net_server* server) {
     if (!server) return;
-    
-    if (server->fd >= 0) {
-        close(server->fd);
-    }
-    server->listening = false;
+
+    net_server_stop(server);
     free(server);
 }
 

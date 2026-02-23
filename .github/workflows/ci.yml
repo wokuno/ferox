@@ -20,6 +20,7 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout code
@@ -40,9 +41,134 @@ jobs:
           cmake --build build --config ${{ matrix.build_type }} -j$(sysctl -n hw.ncpu)
 
       - name: Run tests
+        id: run_tests
+        shell: bash
         run: |
+          set +e
           cd build
-          ctest --output-on-failure -C ${{ matrix.build_type }}
+          ctest --output-on-failure --timeout 600 -C "${{ matrix.build_type }}" | tee ctest.log
+          test_exit_code=${PIPESTATUS[0]}
+          python3 - <<'PY'
+          import os
+          import re
+
+          log_path = "ctest.log"
+          with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+              log = f.read()
+
+          passed = 0
+          failed = 0
+          total = 0
+
+          m = re.search(r"(\d+)% tests passed, (\d+) tests failed out of (\d+)", log)
+          if m:
+              failed = int(m.group(2))
+              total = int(m.group(3))
+              passed = total - failed
+          else:
+              all_pass = re.findall(r"(\d+)/(\d+) Test\s+#\d+:.*?\s+Passed\s+", log)
+              if all_pass:
+                  passed = len(all_pass)
+                  total = int(all_pass[-1][1])
+                  failed = total - passed
+
+          status = "passed" if failed == 0 else "failed"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"passed={passed}\n")
+              out.write(f"failed={failed}\n")
+              out.write(f"total={total}\n")
+              out.write(f"status={status}\n")
+          PY
+          echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+          exit "$test_exit_code"
+
+      - name: Summarize test results
+        if: always()
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ### Test Summary (macOS ${{ matrix.build_type }})
+          - Status: **${{ steps.run_tests.outputs.status || 'failed' }}**
+          - Passed: ${{ steps.run_tests.outputs.passed || '0' }}
+          - Failed: ${{ steps.run_tests.outputs.failed || '0' }}
+          - Total: ${{ steps.run_tests.outputs.total || '0' }}
+          - Details: ${{ steps.run_tests.outputs.run_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+          EOF
+
+      - name: Comment test results on PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BUILD_TYPE: ${{ matrix.build_type }}
+          JOB_STATUS: ${{ steps.run_tests.outputs.status || 'failed' }}
+          JOB_PASSED: ${{ steps.run_tests.outputs.passed || '0' }}
+          JOB_FAILED: ${{ steps.run_tests.outputs.failed || '0' }}
+          JOB_TOTAL: ${{ steps.run_tests.outputs.total || '0' }}
+          RUN_URL: ${{ steps.run_tests.outputs.run_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          token = os.environ["GITHUB_TOKEN"]
+          repo = os.environ["REPO"]
+          pr_number = os.environ["PR_NUMBER"]
+          build_type = os.environ["BUILD_TYPE"]
+          status = os.environ["JOB_STATUS"]
+          passed = os.environ["JOB_PASSED"]
+          failed = os.environ["JOB_FAILED"]
+          total = os.environ["JOB_TOTAL"]
+          run_url = os.environ["RUN_URL"]
+
+          marker = f"<!-- ci-test-summary:macos-{build_type.lower()} -->"
+          body = "\n".join([
+              marker,
+              f"### CI Test Summary (macOS {build_type})",
+              f"- Status: **{status}**",
+              f"- Passed: {passed}",
+              f"- Failed: {failed}",
+              f"- Total: {total}",
+              f"- Detailed logs: {run_url}",
+          ])
+
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+
+          comments_url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments?per_page=100"
+          req = urllib.request.Request(comments_url, headers=headers)
+          with urllib.request.urlopen(req) as resp:
+              comments = json.load(resp)
+
+          existing = None
+          for c in comments:
+              if marker in c.get("body", ""):
+                  existing = c
+                  break
+
+          if existing:
+              update_url = f"https://api.github.com/repos/{repo}/issues/comments/{existing['id']}"
+              update_req = urllib.request.Request(
+                  update_url,
+                  data=json.dumps({"body": body}).encode("utf-8"),
+                  headers={**headers, "Content-Type": "application/json"},
+                  method="PATCH",
+              )
+              urllib.request.urlopen(update_req).read()
+          else:
+              create_url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
+              create_req = urllib.request.Request(
+                  create_url,
+                  data=json.dumps({"body": body}).encode("utf-8"),
+                  headers={**headers, "Content-Type": "application/json"},
+                  method="POST",
+              )
+              urllib.request.urlopen(create_req).read()
+          PY
 
   build-and-test-ferox:
     if: github.event_name != 'pull_request'
@@ -74,6 +200,55 @@ jobs:
           cmake --build build --config ${{ matrix.build_type }} -j$(nproc)
 
       - name: Run tests
+        id: run_tests
+        shell: bash
         run: |
+          set +e
           cd build
-          ctest --output-on-failure -C ${{ matrix.build_type }}
+          ctest --output-on-failure --timeout 600 -C "${{ matrix.build_type }}" | tee ctest.log
+          test_exit_code=${PIPESTATUS[0]}
+          python3 - <<'PY'
+          import os
+          import re
+
+          log_path = "ctest.log"
+          with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+              log = f.read()
+
+          passed = 0
+          failed = 0
+          total = 0
+
+          m = re.search(r"(\d+)% tests passed, (\d+) tests failed out of (\d+)", log)
+          if m:
+              failed = int(m.group(2))
+              total = int(m.group(3))
+              passed = total - failed
+          else:
+              all_pass = re.findall(r"(\d+)/(\d+) Test\s+#\d+:.*?\s+Passed\s+", log)
+              if all_pass:
+                  passed = len(all_pass)
+                  total = int(all_pass[-1][1])
+                  failed = total - passed
+
+          status = "passed" if failed == 0 else "failed"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"passed={passed}\n")
+              out.write(f"failed={failed}\n")
+              out.write(f"total={total}\n")
+              out.write(f"status={status}\n")
+          PY
+          echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+          exit "$test_exit_code"
+
+      - name: Summarize test results
+        if: always()
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ### Test Summary (ferox Linux ${{ matrix.build_type }})
+          - Status: **${{ steps.run_tests.outputs.status || 'failed' }}**
+          - Passed: ${{ steps.run_tests.outputs.passed || '0' }}
+          - Failed: ${{ steps.run_tests.outputs.failed || '0' }}
+          - Total: ${{ steps.run_tests.outputs.total || '0' }}
+          - Details: ${{ steps.run_tests.outputs.run_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+          EOF
