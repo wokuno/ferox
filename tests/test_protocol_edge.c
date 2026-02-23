@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <math.h>
+#include <arpa/inet.h>
 
 #include "../src/shared/protocol.h"
 
@@ -38,6 +39,12 @@ static int tests_failed = 0;
 #define ASSERT_GE(a, b) ASSERT((a) >= (b), #a " >= " #b)
 #define ASSERT_LE(a, b) ASSERT((a) <= (b), #a " <= " #b)
 #define ASSERT_NOT_NULL(ptr) ASSERT((ptr) != NULL, #ptr " is not NULL")
+#define ASSERT_FALSE(cond) ASSERT(!(cond), "Expected condition to be false: " #cond)
+
+static void write_u32_be(uint8_t* buffer, uint32_t value) {
+    uint32_t net = htonl(value);
+    memcpy(buffer, &net, sizeof(net));
+}
 
 // ============================================================================
 // Empty World Tests
@@ -258,6 +265,86 @@ TEST(partial_message_handling) {
     free(buffer);
 }
 
+TEST(rejects_world_state_with_too_many_colonies) {
+    proto_world world;
+    memset(&world, 0, sizeof(proto_world));
+    world.width = 8;
+    world.height = 8;
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+
+    int result = protocol_serialize_world_state(&world, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_GE(len, 26);
+
+    write_u32_be(buffer + 12, MAX_COLONIES + 1);
+
+    proto_world deserialized;
+    memset(&deserialized, 0, sizeof(proto_world));
+    result = protocol_deserialize_world_state(buffer, len, &deserialized);
+    ASSERT_EQ(result, -1);
+
+    free(buffer);
+}
+
+TEST(grid_metadata_out_of_bounds_disables_grid) {
+    proto_world world;
+    memset(&world, 0, sizeof(proto_world));
+    world.width = 5;
+    world.height = 5;
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+
+    int result = protocol_serialize_world_state(&world, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_GE(len, 26);
+
+    buffer[21] = 1;
+    write_u32_be(buffer + 22, 10);
+
+    proto_world deserialized;
+    memset(&deserialized, 0, sizeof(proto_world));
+    result = protocol_deserialize_world_state(buffer, len, &deserialized);
+    ASSERT_EQ(result, 0);
+    ASSERT_FALSE(deserialized.has_grid);
+    ASSERT_EQ(deserialized.grid, NULL);
+    ASSERT_EQ(deserialized.grid_size, 0);
+
+    free(buffer);
+}
+
+TEST(invalid_rle_payload_disables_grid) {
+    proto_world world;
+    memset(&world, 0, sizeof(proto_world));
+    world.width = 2;
+    world.height = 2;
+    world.has_grid = true;
+    world.grid_size = 4;
+
+    uint16_t grid_data[4] = {1, 1, 1, 1};
+    world.grid = grid_data;
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+
+    int result = protocol_serialize_world_state(&world, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT(buffer[21] == 1, "Serialized world should include grid data");
+
+    write_u32_be(buffer + 26, 9999);
+
+    proto_world deserialized;
+    memset(&deserialized, 0, sizeof(proto_world));
+    result = protocol_deserialize_world_state(buffer, len, &deserialized);
+    ASSERT_EQ(result, 0);
+    ASSERT_FALSE(deserialized.has_grid);
+
+    proto_world_free(&deserialized);
+    free(buffer);
+}
+
 // ============================================================================
 // Colony Name Tests
 // ============================================================================
@@ -413,6 +500,14 @@ TEST(rejects_truncated_command_payload) {
     ASSERT_EQ(protocol_deserialize_command(buffer, 8, &cmd, NULL), -1);
 }
 
+TEST(rejects_unknown_command_type) {
+    uint8_t buffer[4];
+    CommandType cmd;
+
+    write_u32_be(buffer, 999);
+    ASSERT_EQ(protocol_deserialize_command(buffer, sizeof(buffer), &cmd, NULL), -1);
+}
+
 // ============================================================================
 // Null Input Tests
 // ============================================================================
@@ -517,6 +612,9 @@ int run_protocol_edge_tests(void) {
     printf("\nPayload Tests:\n");
     RUN_TEST(zero_length_payload);
     RUN_TEST(partial_message_handling);
+    RUN_TEST(rejects_world_state_with_too_many_colonies);
+    RUN_TEST(grid_metadata_out_of_bounds_disables_grid);
+    RUN_TEST(invalid_rle_payload_disables_grid);
     
     printf("\nColony Name Tests:\n");
     RUN_TEST(maximum_length_colony_name);
@@ -529,6 +627,7 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(select_colony_command);
     RUN_TEST(spawn_colony_command);
     RUN_TEST(rejects_truncated_command_payload);
+    RUN_TEST(rejects_unknown_command_type);
     
     printf("\nNull Input Tests:\n");
     RUN_TEST(null_inputs_handled);
