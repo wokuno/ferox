@@ -278,10 +278,11 @@ void server_stop(Server* server) {
 // Convert internal World/Colony to protocol proto_world for serialization
 static void build_protocol_world(Server* server, proto_world* proto_world) {
     proto_world_init(proto_world);
+    World* world = server->world;
     
-    proto_world->width = (uint32_t)server->world->width;
-    proto_world->height = (uint32_t)server->world->height;
-    proto_world->tick = (uint32_t)server->world->tick;
+    proto_world->width = (uint32_t)world->width;
+    proto_world->height = (uint32_t)world->height;
+    proto_world->tick = (uint32_t)world->tick;
     proto_world->paused = server->paused;
     proto_world->speed_multiplier = server->speed_multiplier;
     
@@ -290,70 +291,106 @@ static void build_protocol_world(Server* server, proto_world* proto_world) {
     if (grid_size > 0 && grid_size <= MAX_GRID_SIZE) {
         proto_world_alloc_grid(proto_world, proto_world->width, proto_world->height);
         if (proto_world->grid) {
-            for (int y = 0; y < server->world->height; y++) {
-                for (int x = 0; x < server->world->width; x++) {
-                    Cell* cell = world_get_cell(server->world, x, y);
-                    int idx = y * server->world->width + x;
-                    proto_world->grid[idx] = cell ? (uint16_t)cell->colony_id : 0;
-                }
+            for (uint32_t i = 0; i < grid_size; i++) {
+                proto_world->grid[i] = (uint16_t)world->cells[i].colony_id;
+            }
+        }
+    }
+
+    int32_t* world_idx_to_proto = NULL;
+    if (world->colony_count > 0) {
+        world_idx_to_proto = (int32_t*)malloc(world->colony_count * sizeof(int32_t));
+        if (world_idx_to_proto) {
+            for (size_t i = 0; i < world->colony_count; i++) {
+                world_idx_to_proto[i] = -1;
             }
         }
     }
     
-    // Count active colonies
+    // Build protocol colony list and world-index mapping.
     uint32_t count = 0;
-    for (size_t i = 0; i < server->world->colony_count && count < MAX_COLONIES; i++) {
-        if (server->world->colonies[i].active) {
+    for (size_t i = 0; i < world->colony_count && count < MAX_COLONIES; i++) {
+        if (world->colonies[i].active) {
             proto_colony* proto_colony = &proto_world->colonies[count];
             
             // Map fields from internal Colony (types.h) to protocol proto_colony
-            proto_colony->id = server->world->colonies[i].id;
-            strncpy(proto_colony->name, server->world->colonies[i].name, MAX_COLONY_NAME - 1);
+            proto_colony->id = world->colonies[i].id;
+            strncpy(proto_colony->name, world->colonies[i].name, MAX_COLONY_NAME - 1);
             proto_colony->name[MAX_COLONY_NAME - 1] = '\0';
-            
-            // Calculate centroid of colony cells for x,y position
-            float sum_x = 0, sum_y = 0;
-            int cell_count = 0;
-            for (int cy = 0; cy < server->world->height; cy++) {
-                for (int cx = 0; cx < server->world->width; cx++) {
-                    Cell* cell = world_get_cell(server->world, cx, cy);
-                    if (cell && cell->colony_id == server->world->colonies[i].id) {
-                        sum_x += (float)cx;
-                        sum_y += (float)cy;
-                        cell_count++;
-                    }
-                }
+
+            if (world_idx_to_proto) {
+                world_idx_to_proto[i] = (int32_t)count;
             }
-            if (cell_count > 0) {
-                proto_colony->x = sum_x / (float)cell_count;
-                proto_colony->y = sum_y / (float)cell_count;
-            }
+
+            proto_colony->x = world->colonies[i].centroid_x;
+            proto_colony->y = world->colonies[i].centroid_y;
             
-            proto_colony->population = (uint32_t)server->world->colonies[i].cell_count;
-            proto_colony->max_population = (uint32_t)server->world->colonies[i].max_cell_count;
-            proto_colony->radius = (float)server->world->colonies[i].cell_count / 3.14159f;
+            proto_colony->population = (uint32_t)world->colonies[i].cell_count;
+            proto_colony->max_population = (uint32_t)world->colonies[i].max_cell_count;
+            proto_colony->radius = (float)world->colonies[i].cell_count / 3.14159f;
             if (proto_colony->radius > 0) proto_colony->radius = sqrtf(proto_colony->radius);
-            proto_colony->growth_rate = server->world->colonies[i].genome.spread_rate;
-            proto_colony->color_r = server->world->colonies[i].color.r;
-            proto_colony->color_g = server->world->colonies[i].color.g;
-            proto_colony->color_b = server->world->colonies[i].color.b;
-            proto_colony->alive = server->world->colonies[i].active;
+            proto_colony->growth_rate = world->colonies[i].genome.spread_rate;
+            proto_colony->color_r = world->colonies[i].color.r;
+            proto_colony->color_g = world->colonies[i].color.g;
+            proto_colony->color_b = world->colonies[i].color.b;
+            proto_colony->alive = world->colonies[i].active;
             
             // Copy shape data (kept for compatibility, may be removed later)
-            proto_colony->shape_seed = server->world->colonies[i].shape_seed;
-            proto_colony->wobble_phase = server->world->colonies[i].wobble_phase;
-            proto_colony->shape_evolution = server->world->colonies[i].shape_evolution;
+            proto_colony->shape_seed = world->colonies[i].shape_seed;
+            proto_colony->wobble_phase = world->colonies[i].wobble_phase;
+            proto_colony->shape_evolution = world->colonies[i].shape_evolution;
             
             // Copy key trait data for info panel display
-            proto_colony->aggression = server->world->colonies[i].genome.aggression;
-            proto_colony->defense = server->world->colonies[i].genome.defense_priority;
-            proto_colony->metabolism = server->world->colonies[i].genome.metabolism;
-            proto_colony->toxin_production = server->world->colonies[i].genome.toxin_production;
-            proto_colony->spread_rate = server->world->colonies[i].genome.spread_rate;
+            proto_colony->aggression = world->colonies[i].genome.aggression;
+            proto_colony->defense = world->colonies[i].genome.defense_priority;
+            proto_colony->metabolism = world->colonies[i].genome.metabolism;
+            proto_colony->toxin_production = world->colonies[i].genome.toxin_production;
+            proto_colony->spread_rate = world->colonies[i].genome.spread_rate;
             
             count++;
         }
     }
+
+    if (count > 0 && world_idx_to_proto) {
+        double* sum_x = (double*)calloc(count, sizeof(double));
+        double* sum_y = (double*)calloc(count, sizeof(double));
+        uint32_t* pop = (uint32_t*)calloc(count, sizeof(uint32_t));
+
+        if (sum_x && sum_y && pop) {
+            for (uint32_t i = 0; i < grid_size; i++) {
+                uint32_t colony_id = world->cells[i].colony_id;
+                if (colony_id == 0) continue;
+
+                Colony* colony = world_get_colony(world, colony_id);
+                if (!colony) continue;
+
+                size_t world_idx = (size_t)(colony - world->colonies);
+                if (world_idx >= world->colony_count) continue;
+
+                int32_t proto_idx = world_idx_to_proto[world_idx];
+                if (proto_idx < 0) continue;
+
+                uint32_t pidx = (uint32_t)proto_idx;
+                pop[pidx]++;
+                sum_x[pidx] += (double)(i % proto_world->width);
+                sum_y[pidx] += (double)(i / proto_world->width);
+            }
+
+            for (uint32_t i = 0; i < count; i++) {
+                if (pop[i] > 0) {
+                    proto_world->colonies[i].x = (float)(sum_x[i] / (double)pop[i]);
+                    proto_world->colonies[i].y = (float)(sum_y[i] / (double)pop[i]);
+                }
+            }
+        }
+
+        free(pop);
+        free(sum_y);
+        free(sum_x);
+    }
+
+    free(world_idx_to_proto);
+
     proto_world->colony_count = count;
 }
 
