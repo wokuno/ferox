@@ -19,6 +19,14 @@
 static const int DX[] = {0, 1, 0, -1};
 static const int DY[] = {-1, 0, 1, 0};
 
+static inline Colony* lookup_active_colony(World* world, uint32_t id) {
+    if (!world || id == 0 || id >= world->colony_by_id_capacity) {
+        return NULL;
+    }
+    Colony* colony = world->colony_by_id[id];
+    return (colony && colony->active) ? colony : NULL;
+}
+
 // Direction offsets for 8-connectivity (N, NE, E, SE, S, SW, W, NW)
 static const int DX8[] = {0, 1, 1, 1, 0, -1, -1, -1};
 static const int DY8[] = {-1, -1, 0, 1, 1, 1, 0, -1};
@@ -177,16 +185,27 @@ static float get_scent_influence(World* world, int x, int y, int dx, int dy,
 
 // Calculate local population density around a cell
 static float calculate_local_density(World* world, int x, int y, uint32_t colony_id) {
+    if (!world || !world->cells) return 0.0f;
+
+    int min_y = y - QUORUM_SENSING_RADIUS;
+    int max_y = y + QUORUM_SENSING_RADIUS;
+    if (min_y < 0) min_y = 0;
+    if (max_y >= world->height) max_y = world->height - 1;
+
+    int min_x = x - QUORUM_SENSING_RADIUS;
+    int max_x = x + QUORUM_SENSING_RADIUS;
+    if (min_x < 0) min_x = 0;
+    if (max_x >= world->width) max_x = world->width - 1;
+
     int count = 0;
     int total = 0;
-    for (int dy = -QUORUM_SENSING_RADIUS; dy <= QUORUM_SENSING_RADIUS; dy++) {
-        for (int dx = -QUORUM_SENSING_RADIUS; dx <= QUORUM_SENSING_RADIUS; dx++) {
-            Cell* neighbor = world_get_cell(world, x + dx, y + dy);
-            if (neighbor) {
-                total++;
-                if (neighbor->colony_id == colony_id) {
-                    count++;
-                }
+    for (int ny = min_y; ny <= max_y; ny++) {
+        int row = ny * world->width;
+        for (int nx = min_x; nx <= max_x; nx++) {
+            const Cell* neighbor = &world->cells[row + nx];
+            total++;
+            if (neighbor->colony_id == colony_id) {
+                count++;
             }
         }
     }
@@ -369,21 +388,60 @@ int* find_connected_components(World* world, uint32_t colony_id, int* num_compon
 
 // Count friendly neighbors around a cell (for flanking calculation)
 static int count_friendly_neighbors(World* world, int x, int y, uint32_t colony_id) {
+    if (!world || !world->cells) return 0;
+
     int count = 0;
-    for (int d = 0; d < 8; d++) {
-        Cell* n = world_get_cell(world, x + DX8[d], y + DY8[d]);
-        if (n && n->colony_id == colony_id) count++;
+
+    int min_y = y - 1;
+    int max_y = y + 1;
+    if (min_y < 0) min_y = 0;
+    if (max_y >= world->height) max_y = world->height - 1;
+
+    int min_x = x - 1;
+    int max_x = x + 1;
+    if (min_x < 0) min_x = 0;
+    if (max_x >= world->width) max_x = world->width - 1;
+
+    for (int ny = min_y; ny <= max_y; ny++) {
+        int row = ny * world->width;
+        for (int nx = min_x; nx <= max_x; nx++) {
+            if (nx == x && ny == y) continue;
+            if (world->cells[row + nx].colony_id == colony_id) {
+                count++;
+            }
+        }
     }
+
     return count;
 }
 
 // Count enemy neighbors around a cell (for pressure calculation)
 static int count_enemy_neighbors(World* world, int x, int y, uint32_t colony_id) {
+    if (!world || !world->cells) return 0;
+
     int count = 0;
-    for (int d = 0; d < 8; d++) {
-        Cell* n = world_get_cell(world, x + DX8[d], y + DY8[d]);
-        if (n && n->colony_id != 0 && n->colony_id != colony_id) count++;
+
+    int min_y = y - 1;
+    int max_y = y + 1;
+    if (min_y < 0) min_y = 0;
+    if (max_y >= world->height) max_y = world->height - 1;
+
+    int min_x = x - 1;
+    int max_x = x + 1;
+    if (min_x < 0) min_x = 0;
+    if (max_x >= world->width) max_x = world->width - 1;
+
+    for (int ny = min_y; ny <= max_y; ny++) {
+        int row = ny * world->width;
+        for (int nx = min_x; nx <= max_x; nx++) {
+            if (nx == x && ny == y) continue;
+            uint32_t id = world->cells[row + nx].colony_id;
+            if (id != 0 && id != colony_id) {
+                count++;
+            }
+        }
     }
+
     return count;
 }
 
@@ -391,17 +449,28 @@ static int count_enemy_neighbors(World* world, int x, int y, uint32_t colony_id)
 // Based on Ben-Jacob model: Db = D0 * b^k where k=1 (linear cooperative)
 // Higher local density = more mechanical pushing = faster spread
 static float calculate_biomass_pressure(World* world, int x, int y, uint32_t colony_id) {
+    if (!world || !world->cells) return 1.0f;
+
     int same_count = 0;
     int total = 0;
-    
-    // Check 8-neighborhood for density
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            if (dx == 0 && dy == 0) continue;
-            Cell* n = world_get_cell(world, x + dx, y + dy);
-            if (n) {
-                total++;
-                if (n->colony_id == colony_id) same_count++;
+
+    int min_y = y - 1;
+    int max_y = y + 1;
+    if (min_y < 0) min_y = 0;
+    if (max_y >= world->height) max_y = world->height - 1;
+
+    int min_x = x - 1;
+    int max_x = x + 1;
+    if (min_x < 0) min_x = 0;
+    if (max_x >= world->width) max_x = world->width - 1;
+
+    for (int ny = min_y; ny <= max_y; ny++) {
+        int row = ny * world->width;
+        for (int nx = min_x; nx <= max_x; nx++) {
+            if (nx == x && ny == y) continue;
+            total++;
+            if (world->cells[row + nx].colony_id == colony_id) {
+                same_count++;
             }
         }
     }
@@ -1225,21 +1294,30 @@ void simulation_update_nutrients(World* world) {
     if (!world || !world->nutrients) return;
     
     int total_cells = world->width * world->height;
+    Cell* cells = world->cells;
+    float* nutrients = world->nutrients;
     
     for (int i = 0; i < total_cells; i++) {
-        if (world->cells[i].colony_id != 0) {
+        uint32_t colony_id = cells[i].colony_id;
+        if (colony_id != 0) {
             // Cells consume nutrients based on metabolism
-            Colony* colony = world_get_colony(world, world->cells[i].colony_id);
+            Colony* colony = lookup_active_colony(world, colony_id);
             float consumption = NUTRIENT_DEPLETION_RATE;
             if (colony) {
                 consumption *= colony->genome.metabolism;
                 // High efficiency reduces consumption
                 consumption *= (1.0f - colony->genome.efficiency * 0.5f);
             }
-            world->nutrients[i] = utils_clamp_f(world->nutrients[i] - consumption, 0.0f, 1.0f);
+            float value = nutrients[i] - consumption;
+            if (value < 0.0f) value = 0.0f;
+            else if (value > 1.0f) value = 1.0f;
+            nutrients[i] = value;
         } else {
             // Empty cells slowly regenerate nutrients
-            world->nutrients[i] = utils_clamp_f(world->nutrients[i] + NUTRIENT_REGEN_RATE, 0.0f, 1.0f);
+            float value = nutrients[i] + NUTRIENT_REGEN_RATE;
+            if (value < 0.0f) value = 0.0f;
+            else if (value > 1.0f) value = 1.0f;
+            nutrients[i] = value;
         }
     }
 }
@@ -1397,7 +1475,12 @@ void simulation_consume_resources(World* world) {
 void simulation_update_scents(World* world) {
     if (!world || !world->signals || !world->signal_source) return;
     
+    const int width = world->width;
+    const int height = world->height;
     int total = world->width * world->height;
+    Cell* cells = world->cells;
+    float* signals = world->signals;
+    uint32_t* signal_source = world->signal_source;
     
     // Use pre-allocated scratch buffers instead of per-tick calloc
     float* new_signals = world->scratch_signals;
@@ -1408,13 +1491,11 @@ void simulation_update_scents(World* world) {
     memset(new_sources, 0, total * sizeof(uint32_t));
     
     // Step 1: Emit scent from colony cells (stronger at borders)
-    for (int y = 0; y < world->height; y++) {
-        for (int x = 0; x < world->width; x++) {
-            int idx = y * world->width + x;
-            Cell* cell = &world->cells[idx];
+    for (int idx = 0; idx < total; idx++) {
+            Cell* cell = &cells[idx];
             if (cell->colony_id == 0) continue;
             
-            Colony* colony = world_get_colony(world, cell->colony_id);
+            Colony* colony = lookup_active_colony(world, cell->colony_id);
             if (!colony || !colony->active) continue;
             
             // Emit scent based on signal_emission trait
@@ -1426,17 +1507,17 @@ void simulation_update_scents(World* world) {
             
             new_signals[idx] += emission;
             new_sources[idx] = cell->colony_id;
-        }
     }
     
     // Step 2: Diffuse existing scent to neighbors (blur effect)
-    for (int y = 0; y < world->height; y++) {
-        for (int x = 0; x < world->width; x++) {
-            int idx = y * world->width + x;
-            float current = world->signals[idx];
+    for (int y = 0; y < height; y++) {
+        int row = y * width;
+        for (int x = 0; x < width; x++) {
+            int idx = row + x;
+            float current = signals[idx];
             if (current < 0.001f) continue;
             
-            uint32_t source = world->signal_source[idx];
+            uint32_t source = signal_source[idx];
             
             // Diffuse 30% to neighbors, keep 60%, lose 10%
             float keep = current * 0.6f;
@@ -1448,16 +1529,39 @@ void simulation_update_scents(World* world) {
             }
             
             // Spread to 4 neighbors
-            for (int d = 0; d < 4; d++) {
-                int nx = x + DX[d], ny = y + DY[d];
-                if (nx >= 0 && nx < world->width && ny >= 0 && ny < world->height) {
-                    int ni = ny * world->width + nx;
-                    new_signals[ni] += spread;
-                    // Source tracking: keep strongest source
-                    if (spread > 0.01f && source > 0) {
-                        if (new_sources[ni] == 0 || new_signals[ni] < spread) {
-                            new_sources[ni] = source;
-                        }
+            if (y > 0) {
+                int ni = idx - width;
+                new_signals[ni] += spread;
+                if (spread > 0.01f && source > 0) {
+                    if (new_sources[ni] == 0 || new_signals[ni] < spread) {
+                        new_sources[ni] = source;
+                    }
+                }
+            }
+            if (x + 1 < width) {
+                int ni = idx + 1;
+                new_signals[ni] += spread;
+                if (spread > 0.01f && source > 0) {
+                    if (new_sources[ni] == 0 || new_signals[ni] < spread) {
+                        new_sources[ni] = source;
+                    }
+                }
+            }
+            if (y + 1 < height) {
+                int ni = idx + width;
+                new_signals[ni] += spread;
+                if (spread > 0.01f && source > 0) {
+                    if (new_sources[ni] == 0 || new_signals[ni] < spread) {
+                        new_sources[ni] = source;
+                    }
+                }
+            }
+            if (x > 0) {
+                int ni = idx - 1;
+                new_signals[ni] += spread;
+                if (spread > 0.01f && source > 0) {
+                    if (new_sources[ni] == 0 || new_signals[ni] < spread) {
+                        new_sources[ni] = source;
                     }
                 }
             }
@@ -1505,10 +1609,14 @@ static float get_scent_influence(World* world, int x, int y, int dx, int dy,
 // Combat resolution when colonies meet at borders
 void simulation_resolve_combat(World* world) {
     if (!world) return;
+
+    const int width = world->width;
+    const int height = world->height;
+    Cell* cells = world->cells;
     
     // Decay existing toxins
     if (world->toxins) {
-        int total = world->width * world->height;
+        int total = width * height;
         simd_mul_inplace(world->toxins, total, 0.95f);  // 5% decay per tick
     }
     
@@ -1520,12 +1628,14 @@ void simulation_resolve_combat(World* world) {
     if (!results) return;
     
     // First pass: emit toxins from aggressive colonies to create hostile zones
-    for (int y = 0; y < world->height; y++) {
-        for (int x = 0; x < world->width; x++) {
-            Cell* cell = world_get_cell(world, x, y);
-            if (!cell || cell->colony_id == 0 || !cell->is_border) continue;
+    for (int y = 0; y < height; y++) {
+        int row = y * width;
+        for (int x = 0; x < width; x++) {
+            int idx = row + x;
+            Cell* cell = &cells[idx];
+            if (cell->colony_id == 0 || !cell->is_border) continue;
             
-            Colony* colony = world_get_colony(world, cell->colony_id);
+            Colony* colony = lookup_active_colony(world, cell->colony_id);
             if (!colony || !colony->active) continue;
             
             // Border cells emit toxins based on toxin_production and quorum activation
@@ -1535,26 +1645,36 @@ void simulation_resolve_combat(World* world) {
             if (colony->is_dormant) toxin_emit *= 0.5f;
             if (toxin_emit > 0.01f) {
                 // Emit to self and neighbors
-                int idx = y * world->width + x;
                 world->toxins[idx] = utils_clamp_f(world->toxins[idx] + toxin_emit, 0.0f, 1.0f);
-                for (int d = 0; d < 4; d++) {
-                    int nx = x + DX[d], ny = y + DY[d];
-                    if (nx >= 0 && nx < world->width && ny >= 0 && ny < world->height) {
-                        int ni = ny * world->width + nx;
-                        world->toxins[ni] = utils_clamp_f(world->toxins[ni] + toxin_emit * 0.5f, 0.0f, 1.0f);
-                    }
+                if (y > 0) {
+                    int ni = idx - width;
+                    world->toxins[ni] = utils_clamp_f(world->toxins[ni] + toxin_emit * 0.5f, 0.0f, 1.0f);
+                }
+                if (x + 1 < width) {
+                    int ni = idx + 1;
+                    world->toxins[ni] = utils_clamp_f(world->toxins[ni] + toxin_emit * 0.5f, 0.0f, 1.0f);
+                }
+                if (y + 1 < height) {
+                    int ni = idx + width;
+                    world->toxins[ni] = utils_clamp_f(world->toxins[ni] + toxin_emit * 0.5f, 0.0f, 1.0f);
+                }
+                if (x > 0) {
+                    int ni = idx - 1;
+                    world->toxins[ni] = utils_clamp_f(world->toxins[ni] + toxin_emit * 0.5f, 0.0f, 1.0f);
                 }
             }
         }
     }
     
     // Second pass: resolve combat at borders with strategic modifiers
-    for (int y = 0; y < world->height; y++) {
-        for (int x = 0; x < world->width; x++) {
-            Cell* cell = world_get_cell(world, x, y);
-            if (!cell || cell->colony_id == 0 || !cell->is_border) continue;
+    for (int y = 0; y < height; y++) {
+        int row = y * width;
+        for (int x = 0; x < width; x++) {
+            int idx = row + x;
+            Cell* cell = &cells[idx];
+            if (cell->colony_id == 0 || !cell->is_border) continue;
             
-            Colony* attacker = world_get_colony(world, cell->colony_id);
+            Colony* attacker = lookup_active_colony(world, cell->colony_id);
             if (!attacker || !attacker->active) continue;
             
             // Skip if colony is in retreat mode (stressed and defensive)
@@ -1568,12 +1688,14 @@ void simulation_resolve_combat(World* world) {
             for (int d = 0; d < 4; d++) {
                 int nx = x + DX[d];
                 int ny = y + DY[d];
+                if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                int nidx = ny * width + nx;
                 
-                Cell* neighbor = world_get_cell(world, nx, ny);
-                if (!neighbor || neighbor->colony_id == 0 || 
+                Cell* neighbor = &cells[nidx];
+                if (neighbor->colony_id == 0 || 
                     neighbor->colony_id == cell->colony_id) continue;
                 
-                Colony* defender = world_get_colony(world, neighbor->colony_id);
+                Colony* defender = lookup_active_colony(world, neighbor->colony_id);
                 if (!defender || !defender->active) continue;
                 
                 // === STRATEGIC COMBAT CALCULATION ===
@@ -1604,14 +1726,12 @@ void simulation_resolve_combat(World* world) {
                 
                 // 6. NUTRIENT ADVANTAGE: Well-fed cells fight better
                 if (world->nutrients) {
-                    int attacker_idx = y * world->width + x;
-                    int defender_idx = ny * world->width + nx;
-                    attack_str *= (0.6f + world->nutrients[attacker_idx] * 0.5f);
-                    defend_str *= (0.6f + world->nutrients[defender_idx] * 0.5f);
+                    attack_str *= (0.6f + world->nutrients[idx] * 0.5f);
+                    defend_str *= (0.6f + world->nutrients[nidx] * 0.5f);
                     
                     // Toxin damage reduces effectiveness
-                    attack_str *= (1.0f - world->toxins[attacker_idx] * (1.0f - attacker->genome.toxin_resistance));
-                    defend_str *= (1.0f - world->toxins[defender_idx] * (1.0f - defender->genome.toxin_resistance));
+                    attack_str *= (1.0f - world->toxins[idx] * (1.0f - attacker->genome.toxin_resistance));
+                    defend_str *= (1.0f - world->toxins[nidx] * (1.0f - defender->genome.toxin_resistance));
                 }
                 
                 // 7. MOMENTUM: Colonies that have been winning keep winning (success_history)
@@ -1666,10 +1786,11 @@ void simulation_resolve_combat(World* world) {
     
     // Apply combat results
     for (int i = 0; i < result_count; i++) {
-        Cell* cell = world_get_cell(world, results[i].x, results[i].y);
+        int idx = results[i].y * width + results[i].x;
+        Cell* cell = &cells[idx];
         if (cell && cell->colony_id == results[i].loser) {
-            Colony* loser = world_get_colony(world, results[i].loser);
-            Colony* winner = world_get_colony(world, results[i].winner);
+            Colony* loser = lookup_active_colony(world, results[i].loser);
+            Colony* winner = lookup_active_colony(world, results[i].winner);
             
             if (loser && loser->cell_count > 0) {
                 loser->cell_count--;
