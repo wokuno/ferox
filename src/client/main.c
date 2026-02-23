@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <math.h>
+#include <errno.h>
 
 #include "client.h"
 #include "input.h"
@@ -239,6 +240,19 @@ static void run_demo_mode(void) {
     }
 }
 
+static bool parse_port_arg(const char* arg, uint16_t* out_port) {
+    if (!arg || !out_port) return false;
+
+    errno = 0;
+    char* end = NULL;
+    long parsed = strtol(arg, &end, 10);
+    if (errno != 0 || end == arg || *end != '\0') return false;
+    if (parsed < 0 || parsed > 65535) return false;
+
+    *out_port = (uint16_t)parsed;
+    return true;
+}
+
 int main(int argc, char* argv[]) {
     const char* host = DEFAULT_HOST;
     uint16_t port = DEFAULT_PORT;
@@ -260,7 +274,11 @@ int main(int argc, char* argv[]) {
                 fprintf(stderr, "Error: %s requires an argument\n", argv[i]);
                 return 1;
             }
-            port = (uint16_t)atoi(argv[++i]);
+            const char* port_arg = argv[++i];
+            if (!parse_port_arg(port_arg, &port)) {
+                fprintf(stderr, "Error: invalid port '%s'\n", port_arg);
+                return 1;
+            }
         } else if (strcmp(argv[i], "--demo") == 0) {
             demo_mode = true;
         } else {
