@@ -41,10 +41,17 @@ static void* worker_thread(void* arg) {
         // Execute the task outside the lock
         if (task != NULL) {
             task->function(task->arg);
-            free(task);
             
             pthread_mutex_lock(&pool->queue_mutex);
             pool->active_tasks--;
+
+            if (pool->cached_tasks < pool->max_cached_tasks) {
+                task->next = pool->task_cache_head;
+                pool->task_cache_head = task;
+                pool->cached_tasks++;
+            } else {
+                free(task);
+            }
             
             // Signal if all tasks are done
             if (pool->active_tasks == 0 && pool->pending_tasks == 0) {
@@ -70,8 +77,14 @@ ThreadPool* threadpool_create(int num_threads) {
     pool->thread_count = num_threads;
     pool->task_queue_head = NULL;
     pool->task_queue_tail = NULL;
+    pool->task_cache_head = NULL;
     pool->active_tasks = 0;
     pool->pending_tasks = 0;
+    pool->cached_tasks = 0;
+    pool->max_cached_tasks = num_threads * 64;
+    if (pool->max_cached_tasks < 64) {
+        pool->max_cached_tasks = 64;
+    }
     pool->shutdown = false;
     
     // Initialize synchronization primitives
@@ -151,6 +164,13 @@ void threadpool_destroy(ThreadPool* pool) {
         free(task);
         task = next;
     }
+
+    task = pool->task_cache_head;
+    while (task != NULL) {
+        Task* next = task->next;
+        free(task);
+        task = next;
+    }
     
     // Clean up resources
     free(pool->threads);
@@ -165,23 +185,29 @@ void threadpool_submit(ThreadPool* pool, task_func func, void* arg) {
         return;
     }
     
-    Task* task = (Task*)malloc(sizeof(Task));
-    if (task == NULL) {
-        return;
-    }
-    
-    task->function = func;
-    task->arg = arg;
-    task->next = NULL;
-    
     pthread_mutex_lock(&pool->queue_mutex);
     
     // Don't accept new tasks if shutting down
     if (pool->shutdown) {
         pthread_mutex_unlock(&pool->queue_mutex);
-        free(task);
         return;
     }
+
+    Task* task = pool->task_cache_head;
+    if (task != NULL) {
+        pool->task_cache_head = task->next;
+        pool->cached_tasks--;
+    } else {
+        task = (Task*)malloc(sizeof(Task));
+        if (task == NULL) {
+            pthread_mutex_unlock(&pool->queue_mutex);
+            return;
+        }
+    }
+
+    task->function = func;
+    task->arg = arg;
+    task->next = NULL;
     
     // Enqueue the task
     if (pool->task_queue_tail == NULL) {
@@ -194,8 +220,10 @@ void threadpool_submit(ThreadPool* pool, task_func func, void* arg) {
     
     pool->pending_tasks++;
     
-    // Wake up a worker thread
-    pthread_cond_signal(&pool->queue_cond);
+    // Wake workers until all worker threads have a chance to run.
+    if (pool->pending_tasks <= pool->thread_count) {
+        pthread_cond_signal(&pool->queue_cond);
+    }
     
     pthread_mutex_unlock(&pool->queue_mutex);
 }

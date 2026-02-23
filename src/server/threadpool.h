@@ -25,11 +25,14 @@ typedef struct ThreadPool {
     int thread_count;
     Task* task_queue_head;
     Task* task_queue_tail;
+    Task* task_cache_head;
     pthread_mutex_t queue_mutex;
     pthread_cond_t queue_cond;
     pthread_cond_t done_cond;
     int active_tasks;
     int pending_tasks;
+    int cached_tasks;
+    int max_cached_tasks;
     bool shutdown;
 } ThreadPool;
 
