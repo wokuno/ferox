@@ -135,6 +135,20 @@ target_link_libraries(test_gui PRIVATE m)
 target_compile_definitions(test_gui PRIVATE STANDALONE_TEST)
 add_test(NAME GuiTests COMMAND test_gui)
 
+# Focused client-surface branch coverage tests
+add_executable(test_client_input_surface test_client_input_surface.c)
+target_compile_definitions(test_client_input_surface PRIVATE STANDALONE_TEST)
+add_test(NAME ClientInputSurfaceTests COMMAND test_client_input_surface)
+
+add_executable(test_client_logic_surface test_client_logic_surface.c)
+target_compile_definitions(test_client_logic_surface PRIVATE STANDALONE_TEST)
+add_test(NAME ClientLogicSurfaceTests COMMAND test_client_logic_surface)
+
+add_executable(test_renderer_logic_surface test_renderer_logic_surface.c)
+target_link_libraries(test_renderer_logic_surface PRIVATE m)
+target_compile_definitions(test_renderer_logic_surface PRIVATE STANDALONE_TEST)
+add_test(NAME RendererLogicSurfaceTests COMMAND test_renderer_logic_surface)
+
 # Targeted branch coverage tests for world/server paths
 add_executable(test_world_branch_coverage test_world_branch_coverage.c)
 target_link_libraries(test_world_branch_coverage PRIVATE ferox_server_lib)
