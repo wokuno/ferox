@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <limits.h>
 
 #define INITIAL_COLONY_CAPACITY 16
 #define INITIAL_LOOKUP_CAPACITY 32
@@ -14,9 +15,22 @@ World* world_create(int width, int height) {
     if (width <= 0 || height <= 0) {
         return NULL;
     }
+
+    if (height > INT_MAX / width) {
+        return NULL;
+    }
+
+    size_t grid_size = (size_t)width * (size_t)height;
+    if (grid_size > SIZE_MAX / sizeof(Cell) ||
+        grid_size > SIZE_MAX / sizeof(float) ||
+        grid_size > SIZE_MAX / sizeof(uint32_t)) {
+        return NULL;
+    }
     
     World* world = (World*)malloc(sizeof(World));
     if (!world) return NULL;
+
+    memset(world, 0, sizeof(World));
     
     world->width = width;
     world->height = height;
@@ -25,13 +39,10 @@ World* world_create(int width, int height) {
     world->colony_capacity = INITIAL_COLONY_CAPACITY;
     atomic_init(&world->next_colony_id, 1);
     
-    size_t grid_size = (size_t)(width * height);
-    
     // Allocate cells as flat array
     world->cells = (Cell*)calloc(grid_size, sizeof(Cell));
     if (!world->cells) {
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     // Initialize all cells
@@ -42,86 +53,42 @@ World* world_create(int width, int height) {
     // Allocate environmental layers
     world->nutrients = (float*)malloc(grid_size * sizeof(float));
     if (!world->nutrients) {
-        free(world->cells);
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     world->toxins = (float*)calloc(grid_size, sizeof(float));
     if (!world->toxins) {
-        free(world->nutrients);
-        free(world->cells);
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     world->signals = (float*)calloc(grid_size, sizeof(float));
     if (!world->signals) {
-        free(world->nutrients);
-        free(world->toxins);
-        free(world->cells);
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     world->alarm_signals = (float*)calloc(grid_size, sizeof(float));
     if (!world->alarm_signals) {
-        free(world->nutrients);
-        free(world->toxins);
-        free(world->signals);
-        free(world->cells);
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     world->signal_source = (uint32_t*)calloc(grid_size, sizeof(uint32_t));
     if (!world->signal_source) {
-        free(world->nutrients);
-        free(world->toxins);
-        free(world->signals);
-        free(world->alarm_signals);
-        free(world->cells);
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     world->alarm_source = (uint32_t*)calloc(grid_size, sizeof(uint32_t));
     if (!world->alarm_source) {
-        free(world->nutrients);
-        free(world->toxins);
-        free(world->signals);
-        free(world->alarm_signals);
-        free(world->signal_source);
-        free(world->cells);
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     world->scratch_signals = (float*)calloc(grid_size, sizeof(float));
     if (!world->scratch_signals) {
-        free(world->nutrients);
-        free(world->toxins);
-        free(world->signals);
-        free(world->alarm_signals);
-        free(world->signal_source);
-        free(world->alarm_source);
-        free(world->cells);
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     world->scratch_sources = (uint32_t*)calloc(grid_size, sizeof(uint32_t));
     if (!world->scratch_sources) {
-        free(world->nutrients);
-        free(world->toxins);
-        free(world->signals);
-        free(world->alarm_signals);
-        free(world->signal_source);
-        free(world->alarm_source);
-        free(world->scratch_signals);
-        free(world->cells);
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     // Initialize nutrients with full resources
@@ -132,30 +99,32 @@ World* world_create(int width, int height) {
     // Allocate colony array
     world->colonies = (Colony*)malloc(world->colony_capacity * sizeof(Colony));
     if (!world->colonies) {
-        free(world->nutrients);
-        free(world->toxins);
-        free(world->signals);
-        free(world->signal_source);
-        free(world->cells);
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     // Allocate colony lookup table
     world->colony_by_id_capacity = INITIAL_LOOKUP_CAPACITY;
     world->colony_by_id = (Colony**)calloc(world->colony_by_id_capacity, sizeof(Colony*));
     if (!world->colony_by_id) {
-        free(world->colonies);
-        free(world->nutrients);
-        free(world->toxins);
-        free(world->signals);
-        free(world->signal_source);
-        free(world->cells);
-        free(world);
-        return NULL;
+        goto fail;
     }
     
     return world;
+
+fail:
+    free(world->colony_by_id);
+    free(world->colonies);
+    free(world->scratch_sources);
+    free(world->scratch_signals);
+    free(world->alarm_source);
+    free(world->signal_source);
+    free(world->alarm_signals);
+    free(world->signals);
+    free(world->toxins);
+    free(world->nutrients);
+    free(world->cells);
+    free(world);
+    return NULL;
 }
 
 void world_destroy(World* world) {

@@ -9,6 +9,8 @@
 #include <signal.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <errno.h>
+#include <limits.h>
 
 #include "server.h"
 #include "world.h"
@@ -39,6 +41,32 @@ static void print_usage(const char* program) {
     printf("  -h, --help               Show this help message\n");
 }
 
+static bool parse_int_arg(const char* arg, int min_value, int max_value, int* out_value) {
+    if (!arg || !out_value) return false;
+
+    errno = 0;
+    char* end = NULL;
+    long parsed = strtol(arg, &end, 10);
+    if (errno != 0 || end == arg || *end != '\0') {
+        return false;
+    }
+    if (parsed < min_value || parsed > max_value) {
+        return false;
+    }
+
+    *out_value = (int)parsed;
+    return true;
+}
+
+static bool parse_port_arg(const char* arg, uint16_t* out_port) {
+    int parsed = 0;
+    if (!parse_int_arg(arg, 0, 65535, &parsed)) {
+        return false;
+    }
+    *out_port = (uint16_t)parsed;
+    return true;
+}
+
 int main(int argc, char* argv[]) {
     // Default configuration
     uint16_t port = 8080;
@@ -66,40 +94,38 @@ int main(int argc, char* argv[]) {
     while ((opt = getopt_long(argc, argv, "p:w:H:t:c:r:h", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'p':
-                port = (uint16_t)atoi(optarg);
+                if (!parse_port_arg(optarg, &port)) {
+                    fprintf(stderr, "Error: Invalid port '%s'\n", optarg);
+                    return 1;
+                }
                 break;
             case 'w':
-                world_width = atoi(optarg);
-                if (world_width <= 0) {
-                    fprintf(stderr, "Error: Invalid world width\n");
+                if (!parse_int_arg(optarg, 1, INT_MAX, &world_width)) {
+                    fprintf(stderr, "Error: Invalid world width '%s'\n", optarg);
                     return 1;
                 }
                 break;
             case 'H':
-                world_height = atoi(optarg);
-                if (world_height <= 0) {
-                    fprintf(stderr, "Error: Invalid world height\n");
+                if (!parse_int_arg(optarg, 1, INT_MAX, &world_height)) {
+                    fprintf(stderr, "Error: Invalid world height '%s'\n", optarg);
                     return 1;
                 }
                 break;
             case 't':
-                thread_count = atoi(optarg);
-                if (thread_count <= 0) {
-                    fprintf(stderr, "Error: Invalid thread count\n");
+                if (!parse_int_arg(optarg, 1, INT_MAX, &thread_count)) {
+                    fprintf(stderr, "Error: Invalid thread count '%s'\n", optarg);
                     return 1;
                 }
                 break;
             case 'c':
-                initial_colonies = atoi(optarg);
-                if (initial_colonies < 0) {
-                    fprintf(stderr, "Error: Invalid colony count\n");
+                if (!parse_int_arg(optarg, 0, INT_MAX, &initial_colonies)) {
+                    fprintf(stderr, "Error: Invalid colony count '%s'\n", optarg);
                     return 1;
                 }
                 break;
             case 'r':
-                tick_rate_ms = atoi(optarg);
-                if (tick_rate_ms <= 0) {
-                    fprintf(stderr, "Error: Invalid tick rate\n");
+                if (!parse_int_arg(optarg, 1, INT_MAX, &tick_rate_ms)) {
+                    fprintf(stderr, "Error: Invalid tick rate '%s'\n", optarg);
                     return 1;
                 }
                 break;
