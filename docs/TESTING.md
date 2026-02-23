@@ -40,6 +40,32 @@ tests/
 
 ## Running Tests
 
+### Coverage (local + CI parity)
+
+Use CMake coverage instrumentation and `gcovr` to measure line/branch coverage:
+
+```bash
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
+cmake -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+cmake --build build-coverage --parallel
+cd build-coverage
+ctest --output-on-failure --timeout 600 -C Debug -E "(PerformanceEvalTests|AllTests)"
+cd ..
+uvx gcovr --root . --print-summary --txt
+uvx gcovr --root . --xml-pretty --output coverage.xml
+```
+
+Notes:
+- Coverage mode is enabled via `-DENABLE_COVERAGE=ON`.
+- CI runs macOS coverage on all events (`coverage-macos`).
+- CI runs self-hosted Linux coverage only on non-PR events (`coverage-ferox`).
+- CI excludes `PerformanceEvalTests` and `AllTests` during coverage runs.
+- CI writes `coverage-summary.txt` and `coverage.xml`, then appends a short summary to the job summary.
+
 ### Compile and Run Individual Tests
 
 ```bash
@@ -377,31 +403,15 @@ Failed: 0
 
 ## Continuous Integration
 
-### GitHub Actions Example
+### Current CI Workflow
 
-```yaml
-# .github/workflows/test.yml
-name: Tests
+CI is defined in `.github/workflows/ci.yml`:
 
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      
-      - name: Compile tests
-        run: |
-          gcc -o tests/test_phase1 tests/test_phase1.c src/shared/*.c
-          gcc -pthread -o tests/test_phase3 tests/test_phase3.c \
-              src/server/threadpool.c src/server/parallel.c src/shared/*.c
-          
-      - name: Run tests
-        run: |
-          ./tests/test_phase1
-          ./tests/test_phase3
-```
+- `build-and-test-macos`: runs on `macos-latest` for `Release` and `Debug`.
+- `build-and-test-ferox`: runs on self-hosted labels `self-hosted`, `Linux`, `X64`, `ferox`, `rocky10` for `Release` and `Debug`.
+- `coverage-macos`: runs on `macos-latest` with `-DENABLE_COVERAGE=ON`, excludes `PerformanceEvalTests|AllTests`, and generates `coverage-summary.txt` + `coverage.xml` with `uvx gcovr`.
+- `coverage-ferox`: runs on self-hosted Linux for non-PR events with the same coverage configuration.
+- `pr-test-summary`: runs only on pull requests and posts a consolidated comment with build and coverage job status.
 
 ## Debugging Failed Tests
 
