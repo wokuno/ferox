@@ -188,7 +188,7 @@ int test_protocol_command_serialization_roundtrip(void) {
     TEST_ASSERT(size > 0, "Serialize pause command should succeed");
     
     CommandType cmd;
-    int result = protocol_deserialize_command(buffer, &cmd, NULL);
+    int result = protocol_deserialize_command(buffer, (size_t)size, &cmd, NULL);
     TEST_ASSERT(result > 0, "Deserialize pause command should succeed");
     TEST_ASSERT_EQ(cmd, CMD_PAUSE, "Command type should be PAUSE");
     
@@ -198,7 +198,7 @@ int test_protocol_command_serialization_roundtrip(void) {
     TEST_ASSERT(size > 0, "Serialize select command should succeed");
     
     CommandSelectColony decoded_select;
-    result = protocol_deserialize_command(buffer, &cmd, &decoded_select);
+    result = protocol_deserialize_command(buffer, (size_t)size, &cmd, &decoded_select);
     TEST_ASSERT(result > 0, "Deserialize select command should succeed");
     TEST_ASSERT_EQ(cmd, CMD_SELECT_COLONY, "Command type should be SELECT_COLONY");
     TEST_ASSERT_EQ(decoded_select.colony_id, 42, "Colony ID should match");
@@ -210,7 +210,7 @@ int test_protocol_command_serialization_roundtrip(void) {
     TEST_ASSERT(size > 0, "Serialize spawn command should succeed");
     
     CommandSpawnColony decoded_spawn;
-    result = protocol_deserialize_command(buffer, &cmd, &decoded_spawn);
+    result = protocol_deserialize_command(buffer, (size_t)size, &cmd, &decoded_spawn);
     TEST_ASSERT(result > 0, "Deserialize spawn command should succeed");
     TEST_ASSERT_EQ(cmd, CMD_SPAWN_COLONY, "Command type should be SPAWN_COLONY");
     TEST_ASSERT_FLOAT_EQ(decoded_spawn.x, 123.5f, "Spawn X should match");
@@ -466,7 +466,7 @@ int test_protocol_and_network_handle_null_safely(void) {
     TEST_ASSERT(protocol_serialize_colony(NULL, NULL) < 0, "Should fail with NULL");
     TEST_ASSERT(protocol_deserialize_colony(NULL, NULL) < 0, "Should fail with NULL");
     TEST_ASSERT(protocol_serialize_command(CMD_PAUSE, NULL, NULL) < 0, "Should fail with NULL buffer");
-    TEST_ASSERT(protocol_deserialize_command(NULL, NULL, NULL) < 0, "Should fail with NULL");
+    TEST_ASSERT(protocol_deserialize_command(NULL, 0, NULL, NULL) < 0, "Should fail with NULL");
     TEST_ASSERT(protocol_serialize_world_state(NULL, NULL, NULL) < 0, "Should fail with NULL");
     TEST_ASSERT(protocol_deserialize_world_state(NULL, 0, NULL) < 0, "Should fail with NULL");
     
