@@ -64,6 +64,12 @@ target_link_libraries(test_protocol_edge PRIVATE ferox_server_lib)
 target_compile_definitions(test_protocol_edge PRIVATE STANDALONE_TEST)
 add_test(NAME ProtocolEdgeTests COMMAND test_protocol_edge)
 
+# Parallel orchestration edge branch tests
+add_executable(test_parallel_edge test_parallel_edge.c)
+target_link_libraries(test_parallel_edge PRIVATE ferox_server_lib)
+target_compile_definitions(test_parallel_edge PRIVATE STANDALONE_TEST)
+add_test(NAME ParallelEdgeTests COMMAND test_parallel_edge)
+
 # Exhaustive name tests
 add_executable(test_names_exhaustive test_names_exhaustive.c)
 target_link_libraries(test_names_exhaustive PRIVATE ferox_shared)
