@@ -900,6 +900,7 @@ float* nutrients;  // Per-cell nutrient concentration (0-1)
 - Nutrients regenerate slowly over time
 - Consumed by colony growth
 - Colonies with high `nutrient_sensitivity` spread toward nutrient-rich areas
+- Optional reaction-diffusion controls: `--nutrient-diffusion`, `--nutrient-decay`
 
 #### Optional Monod Growth/Uptake Coupling
 
@@ -947,6 +948,7 @@ float* toxins;  // Per-cell toxin concentration (0-1)
 - Diffuses to neighboring cells
 - Decays over time
 - Damages colonies based on (1 - toxin_resistance)
+- Configurable controls: `--toxin-diffusion`, `--toxin-decay`
 
 ### Signal Layer
 
@@ -960,11 +962,22 @@ uint32_t* signal_source;  // Colony ID that emitted signal
 - Diffuses rapidly
 - Decays quickly
 - Colonies respond based on `signal_sensitivity`
+- Configurable controls: `--signal-diffusion`, `--signal-decay`
 
 **Signal Uses:**
 - Coordinate movement toward kin
 - Mark territory
 - Warn of dangers
+
+### Reaction-Diffusion Guardrails
+
+Each environmental field (`nutrients`, `toxins`, `signals`) uses an explicit 4-neighbor update with independent diffusion/decay coefficients. To avoid unstable updates, Ferox rejects parameters unless:
+
+`4 * diffusion + decay <= 1.0`
+
+Additional bounds:
+- `diffusion` in `[0.0, 0.25]`
+- `decay` in `[0.0, 1.0]`
 
 ## Border Detection
 

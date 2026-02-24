@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdatomic.h>
 #include <limits.h>
+#include <stdio.h>
 
 #define INITIAL_COLONY_CAPACITY 16
 #define INITIAL_LOOKUP_CAPACITY 32
@@ -16,6 +17,60 @@
 #define MONOD_DEFAULT_UPTAKE_MIN 0.25f
 #define MONOD_DEFAULT_UPTAKE_MAX 1.0f
 #define MONOD_DEFAULT_GROWTH_COUPLING 0.0f
+
+static RDSolverControls world_default_rd_controls(void) {
+    RDSolverControls controls;
+    controls.nutrients.diffusion = RD_DEFAULT_NUTRIENT_DIFFUSION;
+    controls.nutrients.decay = RD_DEFAULT_NUTRIENT_DECAY;
+    controls.toxins.diffusion = RD_DEFAULT_TOXIN_DIFFUSION;
+    controls.toxins.decay = RD_DEFAULT_TOXIN_DECAY;
+    controls.signals.diffusion = RD_DEFAULT_SIGNAL_DIFFUSION;
+    controls.signals.decay = RD_DEFAULT_SIGNAL_DECAY;
+    return controls;
+}
+
+static bool world_validate_rd_field(const RDFieldControl* field,
+                                    const char* field_name,
+                                    char* err_buf,
+                                    size_t err_buf_size) {
+    if (!field || !field_name) {
+        return false;
+    }
+
+    const float diffusion = field->diffusion;
+    const float decay = field->decay;
+
+    if (diffusion < 0.0f || diffusion > RD_FIELD_MAX_DIFFUSION) {
+        if (err_buf && err_buf_size > 0) {
+            snprintf(err_buf, err_buf_size,
+                     "%s diffusion %.4f must be in [0.0, %.2f]",
+                     field_name, diffusion, RD_FIELD_MAX_DIFFUSION);
+        }
+        return false;
+    }
+
+    if (decay < 0.0f || decay > 1.0f) {
+        if (err_buf && err_buf_size > 0) {
+            snprintf(err_buf, err_buf_size,
+                     "%s decay %.4f must be in [0.0, 1.0]",
+                     field_name, decay);
+        }
+        return false;
+    }
+
+    // Explicit 2D/4-neighbor solver guardrail (dt = 1):
+    // center weight = 1 - decay - 4*diffusion must remain non-negative.
+    if ((4.0f * diffusion + decay) > 1.0f) {
+        if (err_buf && err_buf_size > 0) {
+            snprintf(err_buf, err_buf_size,
+                     "%s unstable: 4*diffusion + decay = %.4f exceeds 1.0",
+                     field_name, 4.0f * diffusion + decay);
+        }
+        return false;
+    }
+
+    return true;
+}
 
 World* world_create(int width, int height) {
     if (width <= 0 || height <= 0) {
@@ -44,12 +99,12 @@ World* world_create(int width, int height) {
     world->colony_count = 0;
     world->colony_capacity = INITIAL_COLONY_CAPACITY;
     atomic_init(&world->next_colony_id, 1);
-
     world->monod.enabled = MONOD_DEFAULT_ENABLED;
     world->monod.half_saturation = MONOD_DEFAULT_HALF_SATURATION;
     world->monod.uptake_min = MONOD_DEFAULT_UPTAKE_MIN;
     world->monod.uptake_max = MONOD_DEFAULT_UPTAKE_MAX;
     world->monod.growth_coupling = MONOD_DEFAULT_GROWTH_COUPLING;
+    world->rd_controls = world_default_rd_controls();
     
     // Allocate cells as flat array
     world->cells = (Cell*)calloc(grid_size, sizeof(Cell));
@@ -431,4 +486,27 @@ void world_remove_colony(World* world, uint32_t id) {
             }
         }
     }
+}
+
+bool world_set_rd_controls(World* world, const RDSolverControls* controls,
+                           char* err_buf, size_t err_buf_size) {
+    if (!world || !controls) {
+        return false;
+    }
+
+    if (!world_validate_rd_field(&controls->nutrients, "nutrients", err_buf, err_buf_size) ||
+        !world_validate_rd_field(&controls->toxins, "toxins", err_buf, err_buf_size) ||
+        !world_validate_rd_field(&controls->signals, "signals", err_buf, err_buf_size)) {
+        return false;
+    }
+
+    world->rd_controls = *controls;
+    return true;
+}
+
+RDSolverControls world_get_rd_controls(const World* world) {
+    if (!world) {
+        return world_default_rd_controls();
+    }
+    return world->rd_controls;
 }

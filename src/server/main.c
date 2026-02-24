@@ -40,6 +40,12 @@ static void print_usage(const char* program) {
     printf("  -t, --threads <count>    Thread pool size (default: 4)\n");
     printf("  -c, --colonies <count>   Initial colony count (default: 5)\n");
     printf("  -r, --rate <ms>          Tick rate in milliseconds (default: 100)\n");
+    printf("      --nutrient-diffusion <v>  Nutrient diffusion [0.0, 0.25] (default: %.3f)\n", RD_DEFAULT_NUTRIENT_DIFFUSION);
+    printf("      --nutrient-decay <v>      Nutrient decay [0.0, 1.0] (default: %.3f)\n", RD_DEFAULT_NUTRIENT_DECAY);
+    printf("      --toxin-diffusion <v>     Toxin diffusion [0.0, 0.25] (default: %.3f)\n", RD_DEFAULT_TOXIN_DIFFUSION);
+    printf("      --toxin-decay <v>         Toxin decay [0.0, 1.0] (default: %.3f)\n", RD_DEFAULT_TOXIN_DECAY);
+    printf("      --signal-diffusion <v>    Signal diffusion [0.0, 0.25] (default: %.3f)\n", RD_DEFAULT_SIGNAL_DIFFUSION);
+    printf("      --signal-decay <v>        Signal decay [0.0, 1.0] (default: %.3f)\n", RD_DEFAULT_SIGNAL_DECAY);
     printf("  -h, --help               Show this help message\n");
 }
 
@@ -69,6 +75,23 @@ static bool parse_port_arg(const char* arg, uint16_t* out_port) {
     return true;
 }
 
+static bool parse_float_arg(const char* arg, float min_value, float max_value, float* out_value) {
+    if (!arg || !out_value) return false;
+
+    errno = 0;
+    char* end = NULL;
+    float parsed = strtof(arg, &end);
+    if (errno != 0 || end == arg || *end != '\0') {
+        return false;
+    }
+    if (parsed < min_value || parsed > max_value) {
+        return false;
+    }
+
+    *out_value = parsed;
+    return true;
+}
+
 int main(int argc, char* argv[]) {
     // Default configuration
     uint16_t port = 8080;
@@ -77,6 +100,12 @@ int main(int argc, char* argv[]) {
     int thread_count = 4;
     int initial_colonies = 20;
     int tick_rate_ms = 50;  // Faster default (was 100ms)
+
+    RDSolverControls rd_controls = {
+        .nutrients = {RD_DEFAULT_NUTRIENT_DIFFUSION, RD_DEFAULT_NUTRIENT_DECAY},
+        .toxins = {RD_DEFAULT_TOXIN_DIFFUSION, RD_DEFAULT_TOXIN_DECAY},
+        .signals = {RD_DEFAULT_SIGNAL_DIFFUSION, RD_DEFAULT_SIGNAL_DECAY},
+    };
     
     // Long options
     static struct option long_options[] = {
@@ -86,6 +115,12 @@ int main(int argc, char* argv[]) {
         {"threads",  required_argument, 0, 't'},
         {"colonies", required_argument, 0, 'c'},
         {"rate",     required_argument, 0, 'r'},
+        {"nutrient-diffusion", required_argument, 0, 1000},
+        {"nutrient-decay", required_argument, 0, 1001},
+        {"toxin-diffusion", required_argument, 0, 1002},
+        {"toxin-decay", required_argument, 0, 1003},
+        {"signal-diffusion", required_argument, 0, 1004},
+        {"signal-decay", required_argument, 0, 1005},
         {"help",     no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
@@ -131,6 +166,42 @@ int main(int argc, char* argv[]) {
                     return 1;
                 }
                 break;
+            case 1000:
+                if (!parse_float_arg(optarg, 0.0f, RD_FIELD_MAX_DIFFUSION, &rd_controls.nutrients.diffusion)) {
+                    fprintf(stderr, "Error: Invalid nutrient diffusion '%s'\n", optarg);
+                    return 1;
+                }
+                break;
+            case 1001:
+                if (!parse_float_arg(optarg, 0.0f, 1.0f, &rd_controls.nutrients.decay)) {
+                    fprintf(stderr, "Error: Invalid nutrient decay '%s'\n", optarg);
+                    return 1;
+                }
+                break;
+            case 1002:
+                if (!parse_float_arg(optarg, 0.0f, RD_FIELD_MAX_DIFFUSION, &rd_controls.toxins.diffusion)) {
+                    fprintf(stderr, "Error: Invalid toxin diffusion '%s'\n", optarg);
+                    return 1;
+                }
+                break;
+            case 1003:
+                if (!parse_float_arg(optarg, 0.0f, 1.0f, &rd_controls.toxins.decay)) {
+                    fprintf(stderr, "Error: Invalid toxin decay '%s'\n", optarg);
+                    return 1;
+                }
+                break;
+            case 1004:
+                if (!parse_float_arg(optarg, 0.0f, RD_FIELD_MAX_DIFFUSION, &rd_controls.signals.diffusion)) {
+                    fprintf(stderr, "Error: Invalid signal diffusion '%s'\n", optarg);
+                    return 1;
+                }
+                break;
+            case 1005:
+                if (!parse_float_arg(optarg, 0.0f, 1.0f, &rd_controls.signals.decay)) {
+                    fprintf(stderr, "Error: Invalid signal decay '%s'\n", optarg);
+                    return 1;
+                }
+                break;
             case 'h':
                 print_usage(argv[0]);
                 return 0;
@@ -148,6 +219,9 @@ int main(int argc, char* argv[]) {
     printf("Thread count:    %d\n", thread_count);
     printf("Initial colonies: %d\n", initial_colonies);
     printf("Tick rate:       %d ms\n", tick_rate_ms);
+    printf("RD nutrients:    diffusion=%.3f decay=%.3f\n", rd_controls.nutrients.diffusion, rd_controls.nutrients.decay);
+    printf("RD toxins:       diffusion=%.3f decay=%.3f\n", rd_controls.toxins.diffusion, rd_controls.toxins.decay);
+    printf("RD signals:      diffusion=%.3f decay=%.3f\n", rd_controls.signals.diffusion, rd_controls.signals.decay);
     printf("\n");
     
     // Create server
@@ -155,6 +229,13 @@ int main(int argc, char* argv[]) {
     Server* server = server_create(port, world_width, world_height, thread_count);
     if (!server) {
         fprintf(stderr, "Error: Failed to create server\n");
+        return 1;
+    }
+
+    char rd_error[256];
+    if (!world_set_rd_controls(server->world, &rd_controls, rd_error, sizeof(rd_error))) {
+        fprintf(stderr, "Error: Invalid reaction-diffusion controls: %s\n", rd_error[0] ? rd_error : "validation failed");
+        server_destroy(server);
         return 1;
     }
     

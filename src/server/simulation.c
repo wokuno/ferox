@@ -40,7 +40,6 @@ static const float DIR8_WEIGHT[] = {1.0f, 0.7071f, 1.0f, 0.7071f, 1.0f, 0.7071f,
 // Environmental constants
 #define NUTRIENT_DEPLETION_RATE 0.05f   // Nutrients consumed per cell per tick
 #define NUTRIENT_REGEN_RATE 0.002f      // Natural nutrient regeneration
-#define TOXIN_DECAY_RATE 0.01f          // Toxin decay per tick
 #define QUORUM_SENSING_RADIUS 3         // Radius for local density calculation
 
 static inline float monod_saturation(float substrate, float half_saturation) {
@@ -91,24 +90,6 @@ static void simd_mul_inplace_avx2(float* values, int count, float factor) {
 }
 
 __attribute__((target("avx2")))
-static void simd_sub_clamp01_inplace_avx2(float* values, int count, float sub) {
-    const __m256 vsub = _mm256_set1_ps(sub);
-    const __m256 vzero = _mm256_set1_ps(0.0f);
-    const __m256 vone = _mm256_set1_ps(1.0f);
-    int i = 0;
-    for (; i + 8 <= count; i += 8) {
-        __m256 v = _mm256_loadu_ps(values + i);
-        v = _mm256_sub_ps(v, vsub);
-        v = _mm256_max_ps(v, vzero);
-        v = _mm256_min_ps(v, vone);
-        _mm256_storeu_ps(values + i, v);
-    }
-    for (; i < count; i++) {
-        values[i] = utils_clamp_f(values[i] - sub, 0.0f, 1.0f);
-    }
-}
-
-__attribute__((target("avx2")))
 static void simd_clamp01_copy_avx2(float* dst, const float* src, int count) {
     const __m256 vzero = _mm256_set1_ps(0.0f);
     const __m256 vone = _mm256_set1_ps(1.0f);
@@ -150,35 +131,6 @@ static void simd_mul_inplace(float* values, int count, float factor) {
     }
 }
 
-static void simd_sub_clamp01_inplace(float* values, int count, float sub) {
-#if defined(FEROX_SIMD_AVX2) && (defined(__x86_64__) || defined(__i386__))
-    if (simd_avx2_runtime_available()) {
-        simd_sub_clamp01_inplace_avx2(values, count, sub);
-        return;
-    }
-#elif defined(FEROX_SIMD_NEON)
-    const float32x4_t vsub = vdupq_n_f32(sub);
-    const float32x4_t vzero = vdupq_n_f32(0.0f);
-    const float32x4_t vone = vdupq_n_f32(1.0f);
-    int i = 0;
-    for (; i + 4 <= count; i += 4) {
-        float32x4_t v = vld1q_f32(values + i);
-        v = vsubq_f32(v, vsub);
-        v = vmaxq_f32(v, vzero);
-        v = vminq_f32(v, vone);
-        vst1q_f32(values + i, v);
-    }
-    for (; i < count; i++) {
-        values[i] = utils_clamp_f(values[i] - sub, 0.0f, 1.0f);
-    }
-    return;
-#endif
-
-    for (int i = 0; i < count; i++) {
-        values[i] = utils_clamp_f(values[i] - sub, 0.0f, 1.0f);
-    }
-}
-
 static void simd_clamp01_copy(float* dst, const float* src, int count) {
 #if defined(FEROX_SIMD_AVX2) && (defined(__x86_64__) || defined(__i386__))
     if (simd_avx2_runtime_available()) {
@@ -203,6 +155,58 @@ static void simd_clamp01_copy(float* dst, const float* src, int count) {
 
     for (int i = 0; i < count; i++) {
         dst[i] = utils_clamp_f(src[i], 0.0f, 1.0f);
+    }
+}
+
+static void apply_diffusion_decay(World* world, float* layer, const RDFieldControl* control, bool clamp01) {
+    if (!world || !layer || !control || !world->scratch_signals) {
+        return;
+    }
+
+    const int width = world->width;
+    const int height = world->height;
+    const int total = width * height;
+    const float diffusion = control->diffusion;
+    const float decay = control->decay;
+
+    if (decay > 0.0f && diffusion == 0.0f) {
+        simd_mul_inplace(layer, total, 1.0f - decay);
+        if (clamp01) {
+            simd_clamp01_copy(layer, layer, total);
+        }
+        return;
+    }
+
+    if (decay == 0.0f && diffusion == 0.0f) {
+        if (clamp01) {
+            simd_clamp01_copy(layer, layer, total);
+        }
+        return;
+    }
+
+    float* scratch = world->scratch_signals;
+    memset(scratch, 0, (size_t)total * sizeof(float));
+
+    const float center = 1.0f - decay - 4.0f * diffusion;
+    for (int y = 0; y < height; y++) {
+        int row = y * width;
+        for (int x = 0; x < width; x++) {
+            int idx = row + x;
+            float next = layer[idx] * center;
+
+            if (y > 0) next += layer[idx - width] * diffusion;
+            if (x + 1 < width) next += layer[idx + 1] * diffusion;
+            if (y + 1 < height) next += layer[idx + width] * diffusion;
+            if (x > 0) next += layer[idx - 1] * diffusion;
+
+            scratch[idx] = next;
+        }
+    }
+
+    if (clamp01) {
+        simd_clamp01_copy(layer, scratch, total);
+    } else {
+        memcpy(layer, scratch, (size_t)total * sizeof(float));
     }
 }
 
@@ -1355,14 +1359,15 @@ void simulation_update_nutrients(World* world) {
             nutrients[i] = value;
         }
     }
+
+    apply_diffusion_decay(world, world->nutrients, &world->rd_controls.nutrients, true);
 }
 
 // Decay toxins over time
 void simulation_decay_toxins(World* world) {
     if (!world || !world->toxins) return;
-    
-    int total_cells = world->width * world->height;
-    simd_sub_clamp01_inplace(world->toxins, total_cells, TOXIN_DECAY_RATE);
+
+    apply_diffusion_decay(world, world->toxins, &world->rd_controls.toxins, true);
 }
 
 // ============================================================================
@@ -1372,10 +1377,9 @@ void simulation_decay_toxins(World* world) {
 // Produce toxins around colony borders
 void simulation_produce_toxins(World* world) {
     if (!world || !world->toxins) return;
-    
-    // Decay existing toxins
-    int total_cells = world->width * world->height;
-    simd_mul_inplace(world->toxins, total_cells, 0.95f);  // 5% decay per tick
+
+    // Decay/diffuse existing toxins before new emissions.
+    simulation_decay_toxins(world);
     
     // Each border cell produces toxins
     for (int y = 0; y < world->height; y++) {
@@ -1500,8 +1504,7 @@ void simulation_consume_resources(World* world) {
         world->nutrients[i] = n;
     }
     
-    // Toxin decay (already SIMD-optimized via sub_clamp01)
-    simd_sub_clamp01_inplace(world->toxins, total, 0.01f);
+    simulation_decay_toxins(world);
 }
 
 // ============================================================================
@@ -1546,7 +1549,11 @@ void simulation_update_scents(World* world) {
             new_sources[idx] = cell->colony_id;
     }
     
-    // Step 2: Diffuse existing scent to neighbors (blur effect)
+    const float signal_diffusion = world->rd_controls.signals.diffusion;
+    const float signal_decay = world->rd_controls.signals.decay;
+    const float signal_center = 1.0f - signal_decay - 4.0f * signal_diffusion;
+
+    // Step 2: Diffuse and decay existing scent
     for (int y = 0; y < height; y++) {
         int row = y * width;
         for (int x = 0; x < width; x++) {
@@ -1556,9 +1563,8 @@ void simulation_update_scents(World* world) {
             
             uint32_t source = signal_source[idx];
             
-            // Diffuse 30% to neighbors, keep 60%, lose 10%
-            float keep = current * 0.6f;
-            float spread = current * 0.075f;  // 30% / 4 directions
+            float keep = current * signal_center;
+            float spread = current * signal_diffusion;
             
             new_signals[idx] += keep;
             if (new_signals[idx] > 0 && source > 0) {
@@ -1651,10 +1657,9 @@ void simulation_resolve_combat(World* world) {
     const int height = world->height;
     Cell* cells = world->cells;
     
-    // Decay existing toxins
+    // Decay/diffuse existing toxins.
     if (world->toxins) {
-        int total = width * height;
-        simd_mul_inplace(world->toxins, total, 0.95f);  // 5% decay per tick
+        simulation_decay_toxins(world);
     }
     
     typedef struct { int x, y; uint32_t winner; uint32_t loser; float strength; } CombatResult;
