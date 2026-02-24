@@ -133,6 +133,112 @@ static inline float monod_uptake_multiplier(const World* world, float substrate)
     return uptake_min + (uptake_max - uptake_min) * saturation;
 }
 
+static const TransportModelParams DEFAULT_TRANSPORT_PARAMS = {
+    .nutrient_diffusivity = 0.06f,
+    .toxin_diffusivity = 0.08f,
+    .signal_neighbor_transfer = 0.075f,
+    .signal_decay = 0.10f,
+    .eps_attenuation = 0.85f,
+    .eps_exponent = 1.5f,
+    .min_relative_diffusivity = 0.15f,
+};
+
+static TransportModelParams g_transport_params = {
+    .nutrient_diffusivity = 0.06f,
+    .toxin_diffusivity = 0.08f,
+    .signal_neighbor_transfer = 0.075f,
+    .signal_decay = 0.10f,
+    .eps_attenuation = 0.85f,
+    .eps_exponent = 1.5f,
+    .min_relative_diffusivity = 0.15f,
+};
+static bool g_transport_params_overridden = false;
+
+void simulation_set_transport_params(const TransportModelParams* params) {
+    if (!params) return;
+
+    g_transport_params.nutrient_diffusivity = utils_clamp_f(params->nutrient_diffusivity, 0.0f, 0.24f);
+    g_transport_params.toxin_diffusivity = utils_clamp_f(params->toxin_diffusivity, 0.0f, 0.24f);
+    g_transport_params.signal_neighbor_transfer = utils_clamp_f(params->signal_neighbor_transfer, 0.0f, 0.24f);
+    g_transport_params.signal_decay = utils_clamp_f(params->signal_decay, 0.0f, 0.5f);
+    g_transport_params.eps_attenuation = utils_clamp_f(params->eps_attenuation, 0.0f, 1.0f);
+    g_transport_params.eps_exponent = utils_clamp_f(params->eps_exponent, 0.5f, 4.0f);
+    g_transport_params.min_relative_diffusivity = utils_clamp_f(params->min_relative_diffusivity, 0.01f, 1.0f);
+    g_transport_params_overridden = true;
+}
+
+void simulation_get_transport_params(TransportModelParams* out_params) {
+    if (!out_params) return;
+    *out_params = g_transport_params;
+}
+
+void simulation_reset_transport_params(void) {
+    g_transport_params = DEFAULT_TRANSPORT_PARAMS;
+    g_transport_params_overridden = false;
+}
+
+static inline float get_cell_eps_density(World* world, int idx) {
+    uint32_t colony_id = world->cells[idx].colony_id;
+    if (colony_id == 0) return 0.0f;
+
+    Colony* colony = lookup_active_colony(world, colony_id);
+    if (!colony) return 0.0f;
+
+    float eps = colony->biofilm_strength * (0.35f + colony->genome.biofilm_investment * 0.65f);
+    return utils_clamp_f(eps, 0.0f, 1.0f);
+}
+
+static inline float effective_diffusivity_scale(float eps_a, float eps_b) {
+    float avg_eps = 0.5f * (eps_a + eps_b);
+    float attenuation = 1.0f - g_transport_params.eps_attenuation * powf(avg_eps, g_transport_params.eps_exponent);
+    attenuation = utils_clamp_f(attenuation,
+                                g_transport_params.min_relative_diffusivity,
+                                1.0f);
+    return attenuation;
+}
+
+static void diffuse_scalar_field(World* world, float* field, float* scratch, float base_diffusivity) {
+    if (!world || !field || !scratch || base_diffusivity <= 0.0f) return;
+
+    const int width = world->width;
+    const int height = world->height;
+
+    for (int y = 0; y < height; y++) {
+        int row = y * width;
+        for (int x = 0; x < width; x++) {
+            int idx = row + x;
+            float center = field[idx];
+            float center_eps = get_cell_eps_density(world, idx);
+            float flux_sum = 0.0f;
+
+            if (y > 0) {
+                int ni = idx - width;
+                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
+                flux_sum += (field[ni] - center) * scale;
+            }
+            if (x + 1 < width) {
+                int ni = idx + 1;
+                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
+                flux_sum += (field[ni] - center) * scale;
+            }
+            if (y + 1 < height) {
+                int ni = idx + width;
+                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
+                flux_sum += (field[ni] - center) * scale;
+            }
+            if (x > 0) {
+                int ni = idx - 1;
+                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
+                flux_sum += (field[ni] - center) * scale;
+            }
+
+            scratch[idx] = utils_clamp_f(center + base_diffusivity * flux_sum, 0.0f, 1.0f);
+        }
+    }
+
+    memcpy(field, scratch, (size_t)(width * height) * sizeof(float));
+}
+
 // SIMD helpers for dense float-array updates in per-tick environment passes.
 #if defined(FEROX_SIMD_AVX2) && (defined(__x86_64__) || defined(__i386__))
 static inline bool simd_avx2_runtime_available(void) {
@@ -1438,7 +1544,10 @@ void simulation_update_nutrients(World* world) {
         }
     }
 
-    apply_diffusion_decay(world, world->nutrients, &world->rd_controls.nutrients, true);
+    diffuse_scalar_field(world,
+                         world->nutrients,
+                         world->scratch_nutrients,
+                         g_transport_params.nutrient_diffusivity);
 }
 
 // Decay toxins over time
@@ -1627,11 +1736,14 @@ void simulation_update_scents(World* world) {
             new_sources[idx] = cell->colony_id;
     }
     
-    const float signal_diffusion = world->rd_controls.signals.diffusion;
-    const float signal_decay = world->rd_controls.signals.decay;
-    const float signal_center = 1.0f - signal_decay - 4.0f * signal_diffusion;
+    float signal_decay = world->rd_controls.signals.decay;
+    float signal_diffusion = world->rd_controls.signals.diffusion;
+    if (g_transport_params_overridden) {
+        signal_decay = g_transport_params.signal_decay;
+        signal_diffusion = g_transport_params.signal_neighbor_transfer;
+    }
 
-    // Step 2: Diffuse and decay existing scent
+    // Step 2: Diffuse existing scent with EPS-dependent effective diffusivity
     for (int y = 0; y < height; y++) {
         int row = y * width;
         for (int x = 0; x < width; x++) {
@@ -1640,50 +1752,79 @@ void simulation_update_scents(World* world) {
             if (current < 0.001f) continue;
             
             uint32_t source = signal_source[idx];
-            
-            float keep = current * signal_center;
-            float spread = current * signal_diffusion;
-            
-            new_signals[idx] += keep;
-            if (new_signals[idx] > 0 && source > 0) {
-                new_sources[idx] = source;
-            }
-            
-            // Spread to 4 neighbors
+            float center_eps = get_cell_eps_density(world, idx);
+            float retained = current * (1.0f - signal_decay);
+            float remaining = retained;
+
+            int neighbor_idx[4];
+            float neighbor_weight[4];
+            int neighbor_count = 0;
             if (y > 0) {
                 int ni = idx - width;
-                new_signals[ni] += spread;
-                if (spread > 0.01f && source > 0) {
-                    if (new_sources[ni] == 0 || new_signals[ni] < spread) {
-                        new_sources[ni] = source;
-                    }
-                }
+                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
+                neighbor_idx[neighbor_count] = ni;
+                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
             }
             if (x + 1 < width) {
                 int ni = idx + 1;
-                new_signals[ni] += spread;
-                if (spread > 0.01f && source > 0) {
-                    if (new_sources[ni] == 0 || new_signals[ni] < spread) {
-                        new_sources[ni] = source;
-                    }
-                }
+                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
+                neighbor_idx[neighbor_count] = ni;
+                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
             }
             if (y + 1 < height) {
                 int ni = idx + width;
-                new_signals[ni] += spread;
-                if (spread > 0.01f && source > 0) {
-                    if (new_sources[ni] == 0 || new_signals[ni] < spread) {
-                        new_sources[ni] = source;
-                    }
-                }
+                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
+                neighbor_idx[neighbor_count] = ni;
+                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
             }
             if (x > 0) {
                 int ni = idx - 1;
-                new_signals[ni] += spread;
-                if (spread > 0.01f && source > 0) {
-                    if (new_sources[ni] == 0 || new_signals[ni] < spread) {
-                        new_sources[ni] = source;
+                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
+                neighbor_idx[neighbor_count] = ni;
+                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
+            }
+
+            if (neighbor_count > 0) {
+                float weight_sum = 0.0f;
+                for (int n = 0; n < neighbor_count; n++) {
+                    if (neighbor_weight[n] > 0.0f) {
+                        weight_sum += neighbor_weight[n];
                     }
+                }
+
+                if (weight_sum > 0.0f) {
+                    float max_neighbor_fraction = (1.0f - signal_decay);
+                    float transfer_scale = 1.0f;
+                    if (weight_sum > max_neighbor_fraction) {
+                        transfer_scale = max_neighbor_fraction / weight_sum;
+                    }
+
+                    float spent = 0.0f;
+                    for (int n = 0; n < neighbor_count; n++) {
+                        float weight = neighbor_weight[n];
+                        if (weight <= 0.0f) continue;
+
+                        float transfer = current * weight * transfer_scale;
+                        if (transfer <= 0.0f) continue;
+
+                        int ni = neighbor_idx[n];
+                        float prev = new_signals[ni];
+                        new_signals[ni] = prev + transfer;
+                        spent += transfer;
+                        if (source > 0 && transfer > prev) {
+                            new_sources[ni] = source;
+                        }
+                    }
+                    remaining = retained - spent;
+                    if (remaining < 0.0f) remaining = 0.0f;
+                }
+            }
+
+            if (remaining > 0.0f) {
+                float prev = new_signals[idx];
+                new_signals[idx] = prev + remaining;
+                if (source > 0 && (new_sources[idx] == 0 || remaining > prev)) {
+                    new_sources[idx] = source;
                 }
             }
         }
@@ -1785,6 +1926,11 @@ void simulation_resolve_combat(World* world) {
             }
         }
     }
+
+    diffuse_scalar_field(world,
+                         world->toxins,
+                         world->scratch_toxins,
+                         g_transport_params.toxin_diffusivity);
     
     // Second pass: resolve combat at borders with strategic modifiers
     for (int y = 0; y < height; y++) {

@@ -179,10 +179,10 @@ static int run_statistical_regression_test(void) {
         },
         {
             .name = "active_colonies",
-            .expected_mean = 21.0000f,
+            .expected_mean = 22.5000f,
             .mean_tolerance = 3.0000f,
-            .expected_stddev = 3.4000f,
-            .stddev_tolerance = 1.8000f,
+            .expected_stddev = 4.8000f,
+            .stddev_tolerance = 2.2000f,
         },
         {
             .name = "dominant_share",

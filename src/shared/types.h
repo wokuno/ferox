@@ -234,6 +234,8 @@ typedef struct {
     uint32_t* alarm_source;
     
     float* scratch_signals;
+    float* scratch_nutrients;
+    float* scratch_toxins;
     uint32_t* scratch_sources;
 
     struct {
