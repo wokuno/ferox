@@ -85,6 +85,10 @@ typedef struct Genome {
     // Survival Strategies
     float dormancy_threshold;    // Population ratio triggering dormancy (0-1)
     float dormancy_resistance;   // Dormant cell resistance (0-1)
+    float persister_entry_stress; // Stress threshold to enter persister mode (0-1)
+    float persister_exit_stress;  // Stress threshold to exit persister mode (0-1)
+    float persister_entry_rate;   // Probability scale for stress-driven entry (0-1)
+    float persister_exit_rate;    // Probability scale for recovery-driven exit (0-1)
     float sporulation_threshold; // Stress level triggering dormancy (0-1)
     float biofilm_investment;    // Trade growth for resilience (0-1)
     float biofilm_tendency;      // Tendency to form biofilm (0-1)
@@ -118,6 +122,8 @@ typedef struct Colony {
     
     // Dynamic state
     ColonyState state;        // NORMAL, DORMANT, or STRESSED
+    bool is_dormant;          // Dormancy flag (strong suppression/protection)
+    bool is_persister;        // Active/persister substate controlled by stress
     float stress_level;       // Accumulated stress (0-1)
     float biofilm_strength;   // Current biofilm protection (0-1)
 } Colony;

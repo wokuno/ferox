@@ -7,7 +7,7 @@ This document explains how the simulation works, including the world grid, tick 
 - **Atomic path order (`atomic_tick`)**: parallel age → parallel spread (CAS) → sync to `World` → nutrient update → scent update → combat resolution → cell turnover/death → mutation → division check → recombination check → dynamic colony spawn → stats/behavior update → sync back.
 - **Spread dynamics**: 8-neighbor spreading from occupied cells only, with age-0 cascade prevention; spread claims empty cells only in atomic phase (`neighbor_colony != 0` is skipped, not overtaken there).
 - **Strategy archetypes**: new genomes are seeded from 8 archetypes in `genome_create_random()` (`BERSERKER`, `TURTLE`, `SWARM`, `TOXIC`, `HIVE`, `NOMAD`, `PARASITE`, `CHAOTIC`), then mutated over time.
-- **Scent/quorum/biofilm/dormancy**: scent and neighbor sampling bias spread direction; quorum activation is derived from `signal_strength` vs `quorum_threshold`; biofilm grows/decays each tick; dormancy is stress-triggered and reduces turnover death while suppressing expansion pressure.
+- **Scent/quorum/biofilm/dormancy/persister switching**: scent and neighbor sampling bias spread direction; quorum activation is derived from `signal_strength` vs `quorum_threshold`; biofilm grows/decays each tick; stress also drives active<->persister switching (`persister_entry_stress`, `persister_exit_stress`, entry/exit rates), while dormancy remains the deeper high-protection mode.
 
 ## Expensive-Trait Cost Accounting
 
@@ -870,11 +870,24 @@ Colonies can exist in different behavioral states that affect their metabolism a
 
 ### State Behaviors
 
+In addition to `NORMAL/STRESSED/DORMANT`, each living colony has an active/persister substate:
+
+- **ACTIVE**: full spread/combat pressure, baseline turnover survival.
+- **PERSISTER**: reduced spread, reduced toxin output, improved turnover survival.
+- **DORMANT coupling**: dormant colonies are always treated as persister-like for survival/throughput modifiers.
+
 | State | Spread Rate | Resilience | Metabolism | Description |
 |-------|-------------|------------|------------|-------------|
 | NORMAL | Baseline from genome traits | Baseline | Baseline | Standard active growth |
 | STRESSED | Context-dependent combat pressure | Context-dependent | Context-dependent | Transitional state when stress > 0.5 |
 | DORMANT | Strongly reduced expansion pressure | Higher effective survival | Lower effective activity | Triggered by stress + sporulation/dormancy thresholds |
+
+### Persister Transition Controls
+
+- `persister_entry_stress`: stress threshold where active cells may switch to persister mode.
+- `persister_exit_stress`: lower stress threshold for switching back to active mode (hysteresis).
+- `persister_entry_rate`: per-tick transition probability scale while stress remains above entry threshold.
+- `persister_exit_rate`: per-tick transition probability scale while stress stays below exit threshold.
 
 ### Stress Accumulation
 

@@ -359,6 +359,7 @@ uint32_t world_add_colony(World* world, Colony colony) {
     // Assign new ID using atomic increment
     colony.id = atomic_fetch_add(&world->next_colony_id, 1);
     colony.active = true;
+    colony.is_persister = false;
     
     // Initialize cell tracking and centroid
     colony.cell_indices = NULL;

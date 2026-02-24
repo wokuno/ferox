@@ -10,6 +10,11 @@
 float calculate_expensive_trait_load(const Genome* genome);
 float calculate_growth_cost_multiplier(const Colony* colony);
 float calculate_survival_cost_multiplier(const Colony* colony);
+float colony_spread_activity_factor(const Colony* colony);
+float colony_toxin_output_factor(const Colony* colony);
+float colony_turnover_factor(const Colony* colony);
+float colony_signal_activity_factor(const Colony* colony);
+void colony_update_persister_switching(Colony* colony);
 
 #if defined(FEROX_SIMD_AVX2)
 #include <immintrin.h>
@@ -673,9 +678,7 @@ void simulation_spread(World* world) {
                     float history_bonus = 1.0f + colony->success_history[d] * 0.3f;
                     float quorum_activation = get_quorum_activation(colony);
                     float quorum_boost = 1.0f + quorum_activation * colony->genome.motility * 0.8f;
-                    float dormancy_factor = colony->is_dormant
-                        ? (0.12f + colony->genome.dormancy_resistance * 0.28f)
-                        : 1.0f;
+                    float dormancy_factor = colony_spread_activity_factor(colony);
                     float trait_growth_cost = calculate_growth_cost_multiplier(colony);
                     
                     // Curvature smoothing: prefer filling concavities for smooth edges
@@ -1159,9 +1162,7 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                     float biomass_pressure = calculate_biomass_pressure(world, x, y, cell->colony_id);
                     float quorum_activation = get_quorum_activation(colony);
                     float quorum_boost = 1.0f + quorum_activation * colony->genome.motility * 0.8f;
-                    float dormancy_factor = colony->is_dormant
-                        ? (0.12f + colony->genome.dormancy_resistance * 0.28f)
-                        : 1.0f;
+                    float dormancy_factor = colony_spread_activity_factor(colony);
                     float trait_growth_cost = calculate_growth_cost_multiplier(colony);
                     float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * world->width + x]);
                     float spread_chance = colony->genome.spread_rate * colony->genome.metabolism *
@@ -1684,7 +1685,7 @@ void simulation_resolve_combat(World* world) {
             float quorum_activation = get_quorum_activation(colony);
             float toxin_emit = colony->genome.toxin_production *
                                (0.06f + 0.06f * quorum_activation);
-            if (colony->is_dormant) toxin_emit *= 0.5f;
+            toxin_emit *= colony_toxin_output_factor(colony);
             if (toxin_emit > 0.01f) {
                 // Emit to self and neighbors
                 world->toxins[idx] = utils_clamp_f(world->toxins[idx] + toxin_emit, 0.0f, 1.0f);
@@ -1934,12 +1935,8 @@ void simulation_tick(World* world) {
         // Efficiency reduces decay (better resource management)
         base_death_rate *= (1.0f - colony->genome.efficiency * 0.4f);
         // Persister-like dormancy reduces death but suppresses growth elsewhere
-        if (colony->is_dormant) {
-            float dormancy_protection = 0.5f - colony->genome.dormancy_resistance * 0.35f;
-            base_death_rate *= utils_clamp_f(dormancy_protection, 0.12f, 0.5f);
-        }
-
         base_death_rate *= trait_survival_cost;
+        base_death_rate *= colony_turnover_factor(colony);
         
         if (rand_float() < base_death_rate) {
             // NUTRIENT RECYCLING: Dead cells release nutrients back into environment
@@ -2057,6 +2054,7 @@ void simulation_tick(World* world) {
                 colony.cell_count = 1;
                 colony.max_cell_count = 1;
                 colony.active = true;
+                colony.is_persister = false;
                 colony.parent_id = 0;
                 colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
                 colony.wobble_phase = (float)(rand() % 628) / 100.0f;
@@ -2097,7 +2095,7 @@ void simulation_tick(World* world) {
         float scaled_density = utils_clamp_f(colony_density * 900.0f, 0.0f, 1.0f);
         float ai_input = scaled_density * colony->genome.signal_emission *
                          (0.7f + colony->genome.signal_sensitivity * 0.6f);
-        if (colony->is_dormant) ai_input *= 0.6f;
+        ai_input *= colony_signal_activity_factor(colony);
         colony->signal_strength = utils_clamp_f(
             colony->signal_strength * 0.92f + ai_input * 0.35f, 0.0f, 1.0f
         );
@@ -2142,6 +2140,7 @@ void simulation_tick(World* world) {
             colony->state = COLONY_STATE_NORMAL;
             colony->is_dormant = false;
         }
+        colony_update_persister_switching(colony);
         
         // Track population changes for learning
         int pop_delta = (int)colony->cell_count - (int)colony->last_population;
