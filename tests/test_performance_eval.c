@@ -433,38 +433,14 @@ TEST(atomic_tick_phase_breakdown_eval) {
     double total_ms = 0.0;
 
     for (int i = 0; i < ticks; i++) {
-        double tick_start = now_ms();
-
-        double start = now_ms();
-        atomic_age(aworld);
-        atomic_barrier(aworld);
-        age_ms += now_ms() - start;
-
-        start = now_ms();
-        atomic_spread(aworld);
-        atomic_barrier(aworld);
-        spread_ms += now_ms() - start;
-
-        start = now_ms();
-        atomic_world_sync_to_world(aworld);
-        sync_to_ms += now_ms() - start;
-
-        start = now_ms();
-        simulation_update_nutrients(world);
-        simulation_update_scents(world);
-        simulation_resolve_combat(world);
-        simulation_mutate(world);
-        if (world->tick % 10 == 0) simulation_check_divisions(world);
-        if (world->tick % 15 == 5) simulation_check_recombinations(world);
-        simulation_update_colony_stats(world);
-        serial_ms += now_ms() - start;
-
-        start = now_ms();
-        atomic_world_sync_from_world(aworld);
-        sync_from_ms += now_ms() - start;
-
-        world->tick++;
-        total_ms += now_ms() - tick_start;
+        AtomicTickBreakdown breakdown;
+        atomic_tick_with_breakdown(aworld, &breakdown);
+        age_ms += breakdown.age_ms;
+        spread_ms += breakdown.spread_ms;
+        sync_to_ms += breakdown.sync_to_world_ms;
+        serial_ms += breakdown.serial_ms;
+        sync_from_ms += breakdown.sync_from_world_ms;
+        total_ms += breakdown.total_ms;
     }
 
     print_metric("atomic phase: age", age_ms, (double)ticks);

@@ -46,7 +46,7 @@ jobs:
         run: |
           set +e
           cd build
-          ctest --output-on-failure --timeout 600 -C "${{ matrix.build_type }}" | tee ctest.log
+          ctest --output-on-failure -V --timeout 600 -C "${{ matrix.build_type }}" | tee ctest.log
           test_exit_code=${PIPESTATUS[0]}
           python3 - <<'PY'
           import os
@@ -150,7 +150,7 @@ jobs:
         run: |
           set +e
           cd build
-          ctest --output-on-failure --timeout 600 -C "${{ matrix.build_type }}" | tee ctest.log
+          ctest --output-on-failure -V --timeout 600 -C "${{ matrix.build_type }}" | tee ctest.log
           test_exit_code=${PIPESTATUS[0]}
           python3 - <<'PY'
           import os
