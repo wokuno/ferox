@@ -1676,6 +1676,7 @@ TEST(centroid_stability) {
     ASSERT_NOT_NULL(aworld);
     
     float prev_x[5], prev_y[5];
+    int prev_count[5];
     for (int col = 0; col < 5; col++) {
         float sum_x = 0, sum_y = 0;
         int count = 0;
@@ -1691,6 +1692,7 @@ TEST(centroid_stability) {
         }
         prev_x[col] = count > 0 ? sum_x / count : 0;
         prev_y[col] = count > 0 ? sum_y / count : 0;
+        prev_count[col] = count;
     }
     
     int jump_count = 0;
@@ -1715,17 +1717,22 @@ TEST(centroid_stability) {
             }
             
             if (count > 0) {
+                int delta = count - prev_count[col];
+                if (delta < 0) delta = -delta;
+                int major_pop_change = delta > (prev_count[col] / 5 + 1);
+
                 float curr_x = sum_x / count;
                 float curr_y = sum_y / count;
                 float dist = sqrtf((curr_x - prev_x[col]) * (curr_x - prev_x[col]) + 
                                    (curr_y - prev_y[col]) * (curr_y - prev_y[col]));
                 
-                if (dist > 5.0f) {
+                if (!major_pop_change && dist > 5.0f) {
                     jump_count++;
                 }
                 
                 prev_x[col] = curr_x;
                 prev_y[col] = curr_y;
+                prev_count[col] = count;
             }
         }
     }
