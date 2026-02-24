@@ -3,6 +3,16 @@
 
 #include "world.h"
 
+typedef struct {
+    float nutrient_diffusivity;
+    float toxin_diffusivity;
+    float signal_neighbor_transfer;
+    float signal_decay;
+    float eps_attenuation;
+    float eps_exponent;
+    float min_relative_diffusivity;
+} TransportModelParams;
+
 // Main simulation tick - advances world by one step
 void simulation_tick(World* world);
 
@@ -75,5 +85,10 @@ void simulation_update_nutrients(World* world);
 
 // Update scent field - colonies emit scent that diffuses outward
 void simulation_update_scents(World* world);
+
+// Configure EPS-dependent transport model parameters.
+void simulation_set_transport_params(const TransportModelParams* params);
+void simulation_get_transport_params(TransportModelParams* out_params);
+void simulation_reset_transport_params(void);
 
 #endif // FEROX_SIMULATION_H

@@ -1862,6 +1862,162 @@ TEST(persister_activity_modifiers_reduce_growth_pressure) {
     ASSERT_GT(active_spread, persister_spread);
     ASSERT_GT(active_turnover, persister_turnover);
 }
+
+static uint32_t add_transport_test_colony(World* world, float biofilm_strength) {
+    Colony colony = create_test_colony();
+    colony.active = true;
+    colony.biofilm_strength = biofilm_strength;
+    colony.genome.biofilm_investment = 1.0f;
+    colony.genome.signal_emission = 0.0f;
+    colony.genome.toxin_production = 0.0f;
+    return world_add_colony(world, colony);
+}
+
+static float measure_signal_penetration_depth(float barrier_biofilm) {
+    World* world = world_create(64, 9);
+    if (!world) return 0.0f;
+
+    uint32_t barrier_id = add_transport_test_colony(world, barrier_biofilm);
+    if (barrier_id == 0u) {
+        world_destroy(world);
+        return 0.0f;
+    }
+
+    Colony* barrier = world_get_colony(world, barrier_id);
+    if (!barrier) {
+        world_destroy(world);
+        return 0.0f;
+    }
+
+    for (int y = 0; y < world->height; y++) {
+        for (int x = 28; x <= 33; x++) {
+            Cell* cell = world_get_cell(world, x, y);
+            cell->colony_id = barrier_id;
+            cell->is_border = false;
+            barrier->cell_count++;
+        }
+    }
+
+    for (int y = 0; y < world->height; y++) {
+        int idx = y * world->width + 18;
+        world->signals[idx] = 1.0f;
+        world->signal_source[idx] = barrier_id;
+    }
+
+    for (int t = 0; t < 120; t++) {
+        for (int y = 0; y < world->height; y++) {
+            int source_idx = y * world->width + 18;
+            world->signals[source_idx] = 1.0f;
+            world->signal_source[source_idx] = barrier_id;
+        }
+        simulation_update_scents(world);
+    }
+
+    float weighted_sum = 0.0f;
+    float total_mass = 0.0f;
+    for (int x = 34; x < world->width; x++) {
+        for (int y = 0; y < world->height; y++) {
+            float v = world->signals[y * world->width + x];
+            weighted_sum += v * (float)(x - 33);
+            total_mass += v;
+        }
+    }
+
+    world_destroy(world);
+    return total_mass <= 1e-6f ? 0.0f : (weighted_sum / total_mass);
+}
+
+static float measure_toxin_penetration_depth(float barrier_biofilm) {
+    World* world = world_create(64, 9);
+    if (!world) return 0.0f;
+
+    uint32_t emitter_id = add_transport_test_colony(world, 0.0f);
+    uint32_t barrier_id = add_transport_test_colony(world, barrier_biofilm);
+    if (emitter_id == 0u || barrier_id == 0u) {
+        world_destroy(world);
+        return 0.0f;
+    }
+
+    Colony* emitter = world_get_colony(world, emitter_id);
+    Colony* barrier = world_get_colony(world, barrier_id);
+    if (!emitter || !barrier) {
+        world_destroy(world);
+        return 0.0f;
+    }
+    emitter->genome.toxin_production = 1.0f;
+
+    for (int y = 0; y < world->height; y++) {
+        Cell* emitter_cell = world_get_cell(world, 10, y);
+        emitter_cell->colony_id = emitter_id;
+        emitter_cell->is_border = true;
+        emitter->cell_count++;
+
+        for (int x = 28; x <= 33; x++) {
+            Cell* barrier_cell = world_get_cell(world, x, y);
+            barrier_cell->colony_id = barrier_id;
+            barrier_cell->is_border = false;
+            barrier->cell_count++;
+        }
+    }
+
+    for (int t = 0; t < 120; t++) {
+        simulation_resolve_combat(world);
+    }
+
+    float weighted_sum = 0.0f;
+    float total_mass = 0.0f;
+    for (int x = 34; x < world->width; x++) {
+        for (int y = 0; y < world->height; y++) {
+            float v = world->toxins[y * world->width + x];
+            weighted_sum += v * (float)(x - 33);
+            total_mass += v;
+        }
+    }
+
+    world_destroy(world);
+    return total_mass <= 1e-6f ? 0.0f : (weighted_sum / total_mass);
+}
+
+TEST(higher_eps_reduces_signal_penetration_depth) {
+    TransportModelParams previous;
+    simulation_get_transport_params(&previous);
+
+    TransportModelParams params = previous;
+    params.signal_neighbor_transfer = 0.20f;
+    params.signal_decay = 0.01f;
+    params.eps_attenuation = 1.0f;
+    params.eps_exponent = 2.0f;
+    params.min_relative_diffusivity = 0.02f;
+    simulation_set_transport_params(&params);
+
+    float low_eps_depth = measure_signal_penetration_depth(0.0f);
+    float high_eps_depth = measure_signal_penetration_depth(1.0f);
+
+    simulation_set_transport_params(&previous);
+
+    ASSERT_GT(low_eps_depth, 0.0f);
+    ASSERT_LT(high_eps_depth, low_eps_depth);
+}
+
+TEST(higher_eps_reduces_toxin_penetration_depth) {
+    TransportModelParams previous;
+    simulation_get_transport_params(&previous);
+
+    TransportModelParams params = previous;
+    params.toxin_diffusivity = 0.22f;
+    params.eps_attenuation = 1.0f;
+    params.eps_exponent = 2.0f;
+    params.min_relative_diffusivity = 0.02f;
+    simulation_set_transport_params(&params);
+
+    float low_eps_depth = measure_toxin_penetration_depth(0.0f);
+    float high_eps_depth = measure_toxin_penetration_depth(1.0f);
+
+    simulation_set_transport_params(&previous);
+
+    ASSERT_GT(low_eps_depth, 0.0f);
+    ASSERT_LT(high_eps_depth, low_eps_depth);
+}
 // Run Tests
 // ============================================================================
 
@@ -1939,6 +2095,10 @@ int run_simulation_logic_tests(void) {
     RUN_TEST(persister_switch_hysteresis_holds_mid_stress);
     RUN_TEST(dormancy_forces_persister_state);
     RUN_TEST(persister_activity_modifiers_reduce_growth_pressure);
+
+    printf("\nEPS Transport Tests:\n");
+    RUN_TEST(higher_eps_reduces_signal_penetration_depth);
+    RUN_TEST(higher_eps_reduces_toxin_penetration_depth);
     
     printf("\n--- Simulation Logic Results ---\n");
     printf("Passed: %d\n", tests_passed);

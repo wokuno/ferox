@@ -52,6 +52,11 @@ Average values from repeated runs:
 - Eliminates 2× `calloc` + 2× `free` per tick (~640 KB allocation per tick on 400×200 grid).
 - Replaced scalar source copy loop with `memcpy`.
 
+### ✅ EPS-attenuated transport with reusable field buffers
+- Nutrient and toxin transport now use world-owned scratch arrays (`scratch_nutrients`, `scratch_toxins`).
+- Avoids transient allocations while adding explicit diffusion passes for both fields.
+- Tradeoff: extra per-cell arithmetic (`powf` + neighbor flux sums) in exchange for better transport fidelity.
+
 ### ✅ Protocol buffer optimization
 - RLE serialize starts with smaller initial allocation (size/2 estimate) and grows if needed.
 - Removed final shrink-realloc (buffer is immediately consumed).
@@ -67,7 +72,7 @@ the parallel regions are too small to amortize thread coordination costs. The at
 would benefit from larger grids (1000×1000+) or reduced sync frequency.
 
 ### 2) Multiple grid passes remain in simulation
-Functions like `simulation_resolve_combat()` (2 passes), `simulation_update_scents()` (2 passes + diffusion),
+Functions like `simulation_resolve_combat()` (2 passes + toxin diffusion), `simulation_update_scents()` (2 passes + diffusion),
 and `simulation_spread()` still do separate full-grid iterations. Further fusion is possible but
 adds code complexity.
 
@@ -89,4 +94,3 @@ If deeper profiling is needed beyond built-in tests:
 - **Linux**: `perf`, `heaptrack`, `valgrind --tool=callgrind`
 
 Built-in performance tests are great for regression tracking; external profilers are better for precise flamegraph hotspot attribution.
-

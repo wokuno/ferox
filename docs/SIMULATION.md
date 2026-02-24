@@ -7,7 +7,7 @@ This document explains how the simulation works, including the world grid, tick 
 - **Atomic path order (`atomic_tick`)**: parallel age → HGT kinetics update (cost/loss) → parallel spread (CAS) → sync to `World` → nutrient update → scent update → combat resolution → cell turnover/death → mutation → division check → recombination check → dynamic colony spawn → stats/behavior update → sync back.
 - **Spread dynamics**: 8-neighbor spreading from occupied cells only, with age-0 cascade prevention; spread claims empty cells only in atomic phase (`neighbor_colony != 0` is skipped, not overtaken there).
 - **Strategy archetypes**: new genomes are seeded from 8 archetypes in `genome_create_random()` (`BERSERKER`, `TURTLE`, `SWARM`, `TOXIC`, `HIVE`, `NOMAD`, `PARASITE`, `CHAOTIC`), then mutated over time.
-- **Scent/quorum/biofilm/dormancy/persister switching**: scent and neighbor sampling bias spread direction; quorum activation is derived from `signal_strength` vs `quorum_threshold`; biofilm grows/decays each tick; stress also drives active<->persister switching (`persister_entry_stress`, `persister_exit_stress`, entry/exit rates), while dormancy remains the deeper high-protection mode.
+- **Scent/quorum/biofilm/dormancy/persister switching**: scent and neighbor sampling bias spread direction; quorum activation is derived from `signal_strength` vs `quorum_threshold`; biofilm grows/decays each tick and EPS-rich biofilm reduces effective diffusivity for nutrient/toxin/signal transport; stress also drives active<->persister switching (`persister_entry_stress`, `persister_exit_stress`, entry/exit rates), while dormancy remains the deeper high-protection mode.
 - **HGT kinetics**: adjacent enemy colonies exchange plasmid-like material using donor/recipient/transconjugant rates, with optional plasmid cost and segregation loss controlled by `world->hgt_kinetics`; aggregate metrics are tracked in `world->hgt_metrics`.
 
 ## Expensive-Trait Cost Accounting
@@ -993,6 +993,48 @@ Additional bounds:
 - `diffusion` in `[0.0, 0.25]`
 - `decay` in `[0.0, 1.0]`
 
+### EPS-Dependent Effective Diffusivity
+
+Transport for nutrients, toxins, and signals now uses an EPS/biofilm attenuation model.
+
+For neighboring cells `i` and `j`:
+
+```text
+eps_i = biofilm_strength_i * (0.35 + 0.65 * biofilm_investment_i)
+eps_ij = 0.5 * (eps_i + eps_j)
+
+D_eff(i,j) = D_base * clamp(1 - alpha * eps_ij^p, D_min_rel, 1)
+```
+
+- `alpha` controls how strongly EPS attenuates transport.
+- `p` controls non-linearity (higher values make attenuation kick in later but harder).
+- `D_min_rel` avoids zero-diffusivity deadlocks in enclosed areas.
+
+All parameters are runtime-configurable through `TransportModelParams`:
+
+```c
+typedef struct {
+    float nutrient_diffusivity;
+    float toxin_diffusivity;
+    float signal_neighbor_transfer;
+    float signal_decay;
+    float eps_attenuation;
+    float eps_exponent;
+    float min_relative_diffusivity;
+} TransportModelParams;
+```
+
+Use `simulation_set_transport_params()`, `simulation_get_transport_params()`, and
+`simulation_reset_transport_params()` for controlled experiments and tuning.
+
+### Model Assumptions
+
+- EPS is represented as a coarse per-cell scalar inferred from colony biofilm state.
+- EPS affects transport (effective diffusivity), not direct reaction kinetics.
+- Empty cells are treated as zero-EPS pores.
+- Transport uses an explicit 4-neighbor finite-difference update with clamped `[0,1]` fields.
+- Signal source tracking is heuristic (dominant local contributor) and intended for behavior bias, not exact provenance.
+
 ## Border Detection
 
 Cells are marked as border cells for rendering purposes:
@@ -1121,6 +1163,7 @@ The world is divided into regions for parallel processing with lock-free spreadi
 - Flat contiguous arrays for GPU compatibility
 - Double-buffered grid avoids read-write conflicts
 - Thread-local RNG eliminates false sharing
+- Dedicated scratch buffers for nutrient/toxin/signal transport avoid per-tick heap churn
 
 ### Tick Rate
 

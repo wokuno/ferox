@@ -167,6 +167,16 @@ World* world_create(int width, int height) {
     if (!world->scratch_signals) {
         goto fail;
     }
+
+    world->scratch_nutrients = (float*)calloc(grid_size, sizeof(float));
+    if (!world->scratch_nutrients) {
+        goto fail;
+    }
+
+    world->scratch_toxins = (float*)calloc(grid_size, sizeof(float));
+    if (!world->scratch_toxins) {
+        goto fail;
+    }
     
     world->scratch_sources = (uint32_t*)calloc(grid_size, sizeof(uint32_t));
     if (!world->scratch_sources) {
@@ -197,6 +207,8 @@ fail:
     free(world->colony_by_id);
     free(world->colonies);
     free(world->scratch_sources);
+    free(world->scratch_toxins);
+    free(world->scratch_nutrients);
     free(world->scratch_signals);
     free(world->alarm_source);
     free(world->signal_source);
@@ -266,6 +278,8 @@ void world_destroy(World* world) {
     if (world->signal_source) free(world->signal_source);
     if (world->alarm_source) free(world->alarm_source);
     if (world->scratch_signals) free(world->scratch_signals);
+    if (world->scratch_nutrients) free(world->scratch_nutrients);
+    if (world->scratch_toxins) free(world->scratch_toxins);
     if (world->scratch_sources) free(world->scratch_sources);
     free(world);
 }
