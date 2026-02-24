@@ -13,6 +13,7 @@ This document describes the test organization, how to run tests, and guidelines 
 - Client/server implementation
 - Visual stability (shape, radius, centroid)
 - Stress/performance testing
+- Statistical simulation regression testing (multi-seed distributions)
 
 ## Test Organization
 
@@ -29,6 +30,7 @@ tests/
 ├── test_genetics_advanced.c   # Extended genetics tests
 ├── test_world_advanced.c      # Extended world tests
 ├── test_simulation_logic.c    # Simulation correctness (38 tests)
+├── test_simulation_stat_regression.c # Multi-seed statistical regression checks
 ├── test_visual_stability.c    # Visual smoothness tests (4 tests)
 ├── test_simulation_stress.c   # Stress/performance tests
 ├── test_threadpool_stress.c   # Thread pool stress tests
@@ -420,6 +422,7 @@ CI is defined in `.github/workflows/ci.yml`:
 
 - `build-and-test-macos`: runs on `macos-latest` for `Release` and `Debug`.
 - `build-and-test-ferox`: runs on self-hosted labels `self-hosted`, `Linux`, `X64`, `ferox`, `rocky10` for `Release` and `Debug`.
+- Build jobs run `SimulationStatRegressionTests` and publish metric summaries in the GitHub Actions job summary.
 - `coverage-macos`: runs on `macos-latest` with `-DENABLE_COVERAGE=ON`, excludes `PerformanceEvalTests|AllTests`, and generates `coverage-summary.txt` + `coverage.xml` with `uvx gcovr`.
 - `coverage-ferox`: runs on self-hosted Linux for non-PR events with the same coverage configuration.
 - `pr-test-summary`: runs only on pull requests and posts a consolidated comment with build and coverage job status.

@@ -82,6 +82,52 @@ jobs:
           echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
           exit "$test_exit_code"
 
+      - name: Run simulation statistical regression report
+        id: stat_regression
+        shell: bash
+        run: |
+          set +e
+          cd build
+          ctest --output-on-failure --timeout 600 -C "${{ matrix.build_type }}" -R "SimulationStatRegressionTests" -V | tee stat-regression.log
+          stat_exit_code=${PIPESTATUS[0]}
+          python3 - <<'PY'
+          import os
+          import re
+
+          metrics = []
+          status = "passed"
+          log_path = "stat-regression.log"
+          pattern = re.compile(
+              r"STAT_REGRESSION metric=(?P<metric>\S+) mean=(?P<mean>[-+0-9.eE]+) stddev=(?P<stddev>[-+0-9.eE]+) "
+              r"min=(?P<min>[-+0-9.eE]+) max=(?P<max>[-+0-9.eE]+) expected_mean=(?P<expected_mean>[-+0-9.eE]+) "
+              r"mean_tol=(?P<mean_tol>[-+0-9.eE]+) expected_stddev=(?P<expected_stddev>[-+0-9.eE]+) "
+              r"stddev_tol=(?P<stddev_tol>[-+0-9.eE]+)"
+          )
+
+          try:
+              with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                  log_text = f.read()
+              for line in log_text.splitlines():
+                  m = pattern.search(line)
+                  if m:
+                      metrics.append(m.groupdict())
+              if "Simulation Statistical Regression: FAILED" in log_text or not metrics:
+                  status = "failed"
+          except FileNotFoundError:
+              status = "failed"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"status={status}\n")
+              out.write(f"metrics_count={len(metrics)}\n")
+              for metric in metrics:
+                  key = metric["metric"]
+                  out.write(f"{key}_mean={metric['mean']}\n")
+                  out.write(f"{key}_stddev={metric['stddev']}\n")
+                  out.write(f"{key}_min={metric['min']}\n")
+                  out.write(f"{key}_max={metric['max']}\n")
+          PY
+          exit "$stat_exit_code"
+
       - name: Summarize test results
         if: always()
         run: |
@@ -91,6 +137,11 @@ jobs:
           - Passed: ${{ steps.run_tests.outputs.passed || '0' }}
           - Failed: ${{ steps.run_tests.outputs.failed || '0' }}
           - Total: ${{ steps.run_tests.outputs.total || '0' }}
+          - Statistical regression: **${{ steps.stat_regression.outputs.status || 'failed' }}**
+          - Statistical metrics captured: ${{ steps.stat_regression.outputs.metrics_count || '0' }}
+          - occupied_ratio: mean=${{ steps.stat_regression.outputs.occupied_ratio_mean || 'n/a' }}, stddev=${{ steps.stat_regression.outputs.occupied_ratio_stddev || 'n/a' }}
+          - active_colonies: mean=${{ steps.stat_regression.outputs.active_colonies_mean || 'n/a' }}, stddev=${{ steps.stat_regression.outputs.active_colonies_stddev || 'n/a' }}
+          - dominant_share: mean=${{ steps.stat_regression.outputs.dominant_share_mean || 'n/a' }}, stddev=${{ steps.stat_regression.outputs.dominant_share_stddev || 'n/a' }}
           - Details: ${{ steps.run_tests.outputs.run_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
           EOF
 
@@ -165,6 +216,52 @@ jobs:
           echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
           exit "$test_exit_code"
 
+      - name: Run simulation statistical regression report
+        id: stat_regression
+        shell: bash
+        run: |
+          set +e
+          cd build
+          ctest --output-on-failure --timeout 600 -C "${{ matrix.build_type }}" -R "SimulationStatRegressionTests" -V | tee stat-regression.log
+          stat_exit_code=${PIPESTATUS[0]}
+          python3 - <<'PY'
+          import os
+          import re
+
+          metrics = []
+          status = "passed"
+          log_path = "stat-regression.log"
+          pattern = re.compile(
+              r"STAT_REGRESSION metric=(?P<metric>\S+) mean=(?P<mean>[-+0-9.eE]+) stddev=(?P<stddev>[-+0-9.eE]+) "
+              r"min=(?P<min>[-+0-9.eE]+) max=(?P<max>[-+0-9.eE]+) expected_mean=(?P<expected_mean>[-+0-9.eE]+) "
+              r"mean_tol=(?P<mean_tol>[-+0-9.eE]+) expected_stddev=(?P<expected_stddev>[-+0-9.eE]+) "
+              r"stddev_tol=(?P<stddev_tol>[-+0-9.eE]+)"
+          )
+
+          try:
+              with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                  log_text = f.read()
+              for line in log_text.splitlines():
+                  m = pattern.search(line)
+                  if m:
+                      metrics.append(m.groupdict())
+              if "Simulation Statistical Regression: FAILED" in log_text or not metrics:
+                  status = "failed"
+          except FileNotFoundError:
+              status = "failed"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"status={status}\n")
+              out.write(f"metrics_count={len(metrics)}\n")
+              for metric in metrics:
+                  key = metric["metric"]
+                  out.write(f"{key}_mean={metric['mean']}\n")
+                  out.write(f"{key}_stddev={metric['stddev']}\n")
+                  out.write(f"{key}_min={metric['min']}\n")
+                  out.write(f"{key}_max={metric['max']}\n")
+          PY
+          exit "$stat_exit_code"
+
       - name: Summarize test results
         if: always()
         run: |
@@ -174,6 +271,11 @@ jobs:
           - Passed: ${{ steps.run_tests.outputs.passed || '0' }}
           - Failed: ${{ steps.run_tests.outputs.failed || '0' }}
           - Total: ${{ steps.run_tests.outputs.total || '0' }}
+          - Statistical regression: **${{ steps.stat_regression.outputs.status || 'failed' }}**
+          - Statistical metrics captured: ${{ steps.stat_regression.outputs.metrics_count || '0' }}
+          - occupied_ratio: mean=${{ steps.stat_regression.outputs.occupied_ratio_mean || 'n/a' }}, stddev=${{ steps.stat_regression.outputs.occupied_ratio_stddev || 'n/a' }}
+          - active_colonies: mean=${{ steps.stat_regression.outputs.active_colonies_mean || 'n/a' }}, stddev=${{ steps.stat_regression.outputs.active_colonies_stddev || 'n/a' }}
+          - dominant_share: mean=${{ steps.stat_regression.outputs.dominant_share_mean || 'n/a' }}, stddev=${{ steps.stat_regression.outputs.dominant_share_stddev || 'n/a' }}
           - Details: ${{ steps.run_tests.outputs.run_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
           EOF
 
