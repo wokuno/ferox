@@ -4,10 +4,11 @@ This document explains how the simulation works, including the world grid, tick 
 
 ## Current Behavior Snapshot
 
-- **Atomic path order (`atomic_tick`)**: parallel age → parallel spread (CAS) → sync to `World` → nutrient update → scent update → combat resolution → cell turnover/death → mutation → division check → recombination check → dynamic colony spawn → stats/behavior update → sync back.
+- **Atomic path order (`atomic_tick`)**: parallel age → HGT kinetics update (cost/loss) → parallel spread (CAS) → sync to `World` → nutrient update → scent update → combat resolution → cell turnover/death → mutation → division check → recombination check → dynamic colony spawn → stats/behavior update → sync back.
 - **Spread dynamics**: 8-neighbor spreading from occupied cells only, with age-0 cascade prevention; spread claims empty cells only in atomic phase (`neighbor_colony != 0` is skipped, not overtaken there).
 - **Strategy archetypes**: new genomes are seeded from 8 archetypes in `genome_create_random()` (`BERSERKER`, `TURTLE`, `SWARM`, `TOXIC`, `HIVE`, `NOMAD`, `PARASITE`, `CHAOTIC`), then mutated over time.
 - **Scent/quorum/biofilm/dormancy/persister switching**: scent and neighbor sampling bias spread direction; quorum activation is derived from `signal_strength` vs `quorum_threshold`; biofilm grows/decays each tick; stress also drives active<->persister switching (`persister_entry_stress`, `persister_exit_stress`, entry/exit rates), while dormancy remains the deeper high-protection mode.
+- **HGT kinetics**: adjacent enemy colonies exchange plasmid-like material using donor/recipient/transconjugant rates, with optional plasmid cost and segregation loss controlled by `world->hgt_kinetics`; aggregate metrics are tracked in `world->hgt_metrics`.
 
 ## Expensive-Trait Cost Accounting
 

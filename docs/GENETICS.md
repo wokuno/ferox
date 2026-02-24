@@ -349,33 +349,43 @@ The Ferox genetics system implements a **genetic algorithm** with these key prop
 
 ### Horizontal Gene Transfer
 
-In addition to vertical inheritance (parent→child), Ferox supports **horizontal gene transfer** between adjacent colonies:
+In addition to vertical inheritance (parent→child), Ferox models **mechanistic HGT kinetics** with donor/recipient/transconjugant dynamics.
+
+Each colony tracks a plasmid-like carrier fraction:
+
+- `hgt_plasmid_fraction` (0..1): fraction of cells in the colony carrying transferable material.
+- `hgt_is_transconjugant`: whether the colony became a donor through prior HGT.
+
+On donor-recipient contact, transfer follows mass-action style kinetics:
 
 ```
-      Colony A                Colony B
-    ┌───────────┐            ┌───────────┐
-    │ toxin_res │            │ toxin_res │
-    │   = 0.3   │───TOUCH───▶│   = 0.8   │
-    │           │            │           │
-    │ gene_xfer │            │           │
-    │   = 0.05  │            │ RECEIVES: │
-    │           │            │ +strength │
-    └───────────┘            └───────────┘
-                                   │
-                                   ▼
-                             ┌───────────┐
-                             │ toxin_res │
-                             │  = 0.45   │  (partial transfer)
-                             └───────────┘
+P(transfer) = contact_rate
+              × donor_rate(class)
+              × recipient_uptake_rate
+              × donor.gene_transfer_rate
+              × donor_plasmid_fraction
+              × (1 - recipient_plasmid_fraction)
 
-    genome_transfer_genes(recipient, donor, transfer_strength)
-    
-    Transferred traits:
-    • toxin_resistance (30% chance)
-    • nutrient_sensitivity (30% chance)  
-    • efficiency (20% chance)
-    • dormancy_resistance (20% chance)
+recipient_plasmid_fraction += transfer_efficiency
+                              × donor_plasmid_fraction
+                              × (1 - recipient_plasmid_fraction)
 ```
+
+Where `donor_rate(class)` is selected from `donor_transfer_rate` or `transconjugant_transfer_rate`.
+
+Optional plasmid dynamics:
+
+- **Cost (optional):** `hgt_fitness_scale = 1 - plasmid_cost_per_fraction × hgt_plasmid_fraction`; this scales spread pressure.
+- **Loss (optional):** `hgt_plasmid_fraction -= plasmid_loss_rate × hgt_plasmid_fraction` each kinetics update.
+
+Both behaviors are runtime configurable via `World.hgt_kinetics` (or `world_set_hgt_kinetics()`).
+
+Instrumentation is exposed through `World.hgt_metrics` and per-colony counters:
+
+- transfer totals
+- transconjugant emergence events
+- plasmid loss events
+- cross-lineage transfer events
 
 ## Genome Structure
 

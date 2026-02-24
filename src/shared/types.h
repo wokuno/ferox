@@ -174,6 +174,13 @@ typedef struct {
     
     float centroid_x;
     float centroid_y;
+
+    float hgt_plasmid_fraction;
+    float hgt_fitness_scale;
+    bool hgt_is_transconjugant;
+    uint64_t hgt_transfer_events_in;
+    uint64_t hgt_transfer_events_out;
+    uint64_t hgt_plasmid_loss_events;
 } Colony;
 
 typedef struct {
@@ -186,6 +193,25 @@ typedef struct {
     RDFieldControl toxins;
     RDFieldControl signals;
 } RDSolverControls;
+
+typedef struct {
+    float contact_rate;
+    float donor_transfer_rate;
+    float transconjugant_transfer_rate;
+    float recipient_uptake_rate;
+    float transfer_efficiency;
+    float plasmid_cost_per_fraction;
+    float plasmid_loss_rate;
+    bool enable_plasmid_cost;
+    bool enable_plasmid_loss;
+} HGTKinetics;
+
+typedef struct {
+    uint64_t transfer_events_total;
+    uint64_t transconjugant_events_total;
+    uint64_t plasmid_loss_events_total;
+    uint64_t cross_lineage_transfer_events_total;
+} HGTMetrics;
 
 typedef struct {
     int width;
@@ -219,6 +245,8 @@ typedef struct {
     } monod;
 
     RDSolverControls rd_controls;
+    HGTKinetics hgt_kinetics;
+    HGTMetrics hgt_metrics;
 } World;
 
 #endif

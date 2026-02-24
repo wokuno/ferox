@@ -58,4 +58,13 @@ bool world_set_rd_controls(World* world, const RDSolverControls* controls,
 // Copy current solver controls.
 RDSolverControls world_get_rd_controls(const World* world);
 
+// Configure horizontal gene transfer kinetics.
+void world_set_hgt_kinetics(World* world, const HGTKinetics* kinetics);
+
+// Restore default horizontal gene transfer kinetics.
+void world_reset_hgt_kinetics(World* world);
+
+// Reset accumulated horizontal gene transfer metrics.
+void world_reset_hgt_metrics(World* world);
+
 #endif // FEROX_WORLD_H
