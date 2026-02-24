@@ -676,29 +676,30 @@ static int test_efficient_colony_survives_starvation(void) {
             cell->colony_id = id_eff;
             cell->is_border = false;
             int idx = y * world->width + x;
-            world->nutrients[idx] = 0.2f;
+            world->nutrients[idx] = 0.05f;
         }
         for (int x = 18; x < 28; x++) {
             Cell* cell = world_get_cell(world, x, y);
             cell->colony_id = id_ineff;
             cell->is_border = false;  // Same as efficient - interior
             int idx = y * world->width + x;
-            world->nutrients[idx] = 0.2f;  // Same nutrients
+            world->nutrients[idx] = 0.05f;  // Same depleted nutrients
         }
     }
     world_get_colony(world, id_eff)->cell_count = 60;
     world_get_colony(world, id_ineff)->cell_count = 60;
     
-    // Run very few ticks due to aggressive decay
-    for (int i = 0; i < 5; i++) {
+    // Run enough ticks for starvation differences to emerge
+    for (int i = 0; i < 20; i++) {
         simulation_tick(world);
     }
     
-    Colony* col_eff = world_get_colony(world, id_eff);
-    Colony* col_ineff = world_get_colony(world, id_ineff);
-    
-    size_t final_eff = col_eff ? col_eff->cell_count : 0;
-    size_t final_ineff = col_ineff ? col_ineff->cell_count : 0;
+    size_t final_eff = 0;
+    size_t final_ineff = 0;
+    for (int i = 0; i < world->width * world->height; i++) {
+        if (world->cells[i].colony_id == id_eff) final_eff++;
+        if (world->cells[i].colony_id == id_ineff) final_ineff++;
+    }
     
     // With same conditions, biofilm-protected efficient colony should survive better
     // Or both die (which is fine - shows the simulation is dynamic)
