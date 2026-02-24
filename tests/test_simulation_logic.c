@@ -1803,7 +1803,9 @@ TEST(persister_switch_enters_under_high_stress) {
     colony.genome.persister_entry_stress = 0.15f;
     colony.is_persister = false;
 
-    colony_update_persister_switching(&colony);
+    for (int i = 0; i < 16 && !colony.is_persister; i++) {
+        colony_update_persister_switching(&colony);
+    }
 
     ASSERT_TRUE(colony.is_persister);
 }

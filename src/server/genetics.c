@@ -13,10 +13,10 @@
 // Environmental (5): nutrient_sensitivity(1) + toxin_sensitivity(1) + edge_affinity*0.5(1) + density_tolerance(1) + quorum_threshold(1) = 5
 // Colony interactions (6): toxin_production(1) + toxin_resistance(1) + signal_emission(1) + signal_sensitivity(1) + alarm_threshold(1) + gene_transfer_rate*10(1) = 6
 // Competitive (2): resource_consumption(1) + defense_priority(1) = 2
-// Survival (6): dormancy_threshold(1) + persister entry/exit rates and thresholds(2) + biofilm_investment(1) + motility(1) + efficiency(1) = 6
+// Survival (8): dormancy_threshold(1) + persister entry/exit rates and thresholds(4) + biofilm_investment(1) + motility(1) + efficiency(1) = 8
 // Neural (3): hidden_weights avg*0.5(1) + learning_rate(1) + memory_factor(1) = 3
-// Total: 4.5 + 3.75 + 5 + 6 + 2 + 6 + 3 = 30.25
-#define GENOME_DISTANCE_WEIGHT_SUM 30.25f
+// Total: 4.5 + 3.75 + 5 + 6 + 2 + 8 + 3 = 32.25
+#define GENOME_DISTANCE_WEIGHT_SUM 32.25f
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
