@@ -15,6 +15,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <time.h>
 
 #define QS_SIGNAL_MEMORY 0.82f
 
@@ -146,6 +147,11 @@ static const float DIR8_NORM_DY[8] = {
     1.0f, 0.70710677f, 0.0f, -0.70710677f
 };
 
+static double atomic_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+}
 // ============================================================================
 // Social/Chemotaxis behavior - neighbor detection and influence
 // ============================================================================
@@ -912,61 +918,75 @@ void atomic_barrier(AtomicWorld* aworld) {
 // Main Tick Function
 // ============================================================================
 
-void atomic_tick(AtomicWorld* aworld) {
+static void atomic_tick_internal(AtomicWorld* aworld, AtomicTickBreakdown* breakdown) {
     if (!aworld || !aworld->world) return;
-    
+
     World* world = aworld->world;
-    
-    // === Parallel Phase ===
-    
-    // Age all cells in parallel
+    const bool capture_breakdown = breakdown != NULL;
+    double tick_start = 0.0;
+    if (capture_breakdown) {
+        memset(breakdown, 0, sizeof(*breakdown));
+        tick_start = atomic_now_ms();
+    }
+
+    double phase_start = atomic_now_ms();
     atomic_age(aworld);
     atomic_barrier(aworld);
-    
-    // Spread colonies in parallel using atomic CAS
+    if (capture_breakdown) {
+        breakdown->age_ms = atomic_now_ms() - phase_start;
+    }
+
+    phase_start = atomic_now_ms();
     atomic_spread(aworld);
     atomic_barrier(aworld);
-    
-    // === Serial Phase ===
-    // Sync atomic state back to regular world for complex operations
+    if (capture_breakdown) {
+        breakdown->spread_ms = atomic_now_ms() - phase_start;
+    }
+
+    phase_start = atomic_now_ms();
     atomic_world_sync_to_world(aworld);
-    
-    // Resource and chemical fields drive long-term dynamics.
+    if (capture_breakdown) {
+        breakdown->sync_to_world_ms = atomic_now_ms() - phase_start;
+    }
+
+    phase_start = atomic_now_ms();
     simulation_update_nutrients(world);
-
-    // Update scent field (colonies emit and scent diffuses)
     simulation_update_scents(world);
-
-    // Border combat keeps territories fluid and competitive.
     simulation_resolve_combat(world);
-
-    // Continuous turnover prevents late-game lockup/static equilibria.
     atomic_apply_cell_turnover(world);
-    
-    // Mutations (per-colony, serial)
     simulation_mutate(world);
-    
-    // Division detection is expensive (flood-fill per colony) — only check every 10 ticks
     if (world->tick % 10 == 0) {
         simulation_check_divisions(world);
     }
-    
-    // Recombination is expensive (full grid scan) — only check every 15 ticks
     if (world->tick % 15 == 5) {
         simulation_check_recombinations(world);
     }
-
-    // Keep introducing new lineages so ecosystem stays volatile.
     atomic_spawn_dynamic_colonies(world);
-    
-    // Update colony stats (wobble animation, shape evolution)
     simulation_update_colony_stats(world);
     atomic_update_colony_behavior(world);
-    
-    // Sync any changes back to atomic world
+    if (capture_breakdown) {
+        breakdown->serial_ms = atomic_now_ms() - phase_start;
+    }
+
+    phase_start = atomic_now_ms();
     atomic_world_sync_from_world(aworld);
-    
+    if (capture_breakdown) {
+        breakdown->sync_from_world_ms = atomic_now_ms() - phase_start;
+    }
+
     world->tick++;
+
+    if (capture_breakdown) {
+        breakdown->total_ms = atomic_now_ms() - tick_start;
+    }
+}
+
+void atomic_tick(AtomicWorld* aworld) {
+    atomic_tick_internal(aworld, NULL);
+}
+
+void atomic_tick_with_breakdown(AtomicWorld* aworld, AtomicTickBreakdown* breakdown) {
+    atomic_tick_internal(aworld, breakdown);
 }
 
 // ============================================================================
