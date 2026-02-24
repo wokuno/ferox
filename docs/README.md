@@ -226,6 +226,7 @@ ferox/
 - [Protocol](PROTOCOL.md) - Network protocol specification
 - [Genetics](GENETICS.md) - Genome structure and evolution
 - [Simulation](SIMULATION.md) - World update mechanics
+- [Science Benchmarks](SCIENCE_BENCHMARKS.md) - Canonical validation scenarios and pass bands
 - [API Reference](API.md) - Function documentation
 - [Science Bibliography](SCIENCE_BIBLIOGRAPHY.md) - DOI-backed research mapped to Ferox mechanics
 - [Testing](TESTING.md) - Test organization and coverage

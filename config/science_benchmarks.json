@@ -1,0 +1,246 @@
+{
+  "version": "1.0",
+  "description": "Canonical science benchmark scenarios for ferox model validation.",
+  "scenarios": [
+    {
+      "id": "nutrient_limited_growth",
+      "title": "Nutrient-Limited Growth",
+      "setup": {
+        "world": {
+          "width": 180,
+          "height": 120
+        },
+        "initial_colonies": 12,
+        "seed": 1047,
+        "notes": "Baseline growth under constrained resource replenishment conditions."
+      },
+      "run": {
+        "ticks": 3500,
+        "replicates": 5,
+        "warmup_ticks": 300,
+        "tick_rate_ms": 40,
+        "threads": 4
+      },
+      "metrics": [
+        {
+          "id": "population_peak_fraction",
+          "description": "Median peak occupied-cell fraction after warmup.",
+          "unit": "fraction",
+          "pass_band": {
+            "min": 0.24,
+            "max": 0.52
+          }
+        },
+        {
+          "id": "late_stage_population_slope",
+          "description": "Linear slope of occupied-cell count during the last 20% of ticks.",
+          "unit": "cells_per_tick",
+          "pass_band": {
+            "min": -1.9,
+            "max": 0.25
+          }
+        }
+      ]
+    },
+    {
+      "id": "toxin_duel",
+      "title": "Toxin Duel",
+      "setup": {
+        "world": {
+          "width": 160,
+          "height": 120
+        },
+        "initial_colonies": 2,
+        "seed": 1048,
+        "notes": "Two adversarial colonies initialized to stress toxin offense and resistance tradeoffs."
+      },
+      "run": {
+        "ticks": 2500,
+        "replicates": 8,
+        "warmup_ticks": 200,
+        "tick_rate_ms": 35,
+        "threads": 4
+      },
+      "metrics": [
+        {
+          "id": "boundary_switch_rate",
+          "description": "Average ownership transitions per 1000 border cells.",
+          "unit": "transitions_per_kborder",
+          "pass_band": {
+            "min": 28.0,
+            "max": 140.0
+          }
+        },
+        {
+          "id": "winner_peak_toxin_mean",
+          "description": "Winner colony mean toxin concentration at or before dominance.",
+          "unit": "fraction",
+          "pass_band": {
+            "min": 0.22,
+            "max": 0.78
+          }
+        }
+      ]
+    },
+    {
+      "id": "quorum_activation_wave",
+      "title": "Quorum Activation Wave",
+      "setup": {
+        "world": {
+          "width": 220,
+          "height": 140
+        },
+        "initial_colonies": 14,
+        "seed": 1049,
+        "notes": "Dense mixed colonies to trigger signaling propagation and quorum behavior transitions."
+      },
+      "run": {
+        "ticks": 3000,
+        "replicates": 5,
+        "warmup_ticks": 250,
+        "tick_rate_ms": 40,
+        "threads": 4
+      },
+      "metrics": [
+        {
+          "id": "quorum_activation_latency_ticks",
+          "description": "Ticks between initial growth and first quorum activation wave apex.",
+          "unit": "ticks",
+          "pass_band": {
+            "min": 80,
+            "max": 700
+          }
+        },
+        {
+          "id": "active_signal_front_speed",
+          "description": "Estimated radial speed of activation front over time.",
+          "unit": "cells_per_tick",
+          "pass_band": {
+            "min": 0.15,
+            "max": 1.95
+          }
+        }
+      ]
+    },
+    {
+      "id": "persistence_stress_response",
+      "title": "Persistence Stress Response",
+      "setup": {
+        "world": {
+          "width": 180,
+          "height": 120
+        },
+        "initial_colonies": 10,
+        "seed": 1050,
+        "notes": "Stress-heavy conditions used to quantify dormant-state entry and recovery characteristics."
+      },
+      "run": {
+        "ticks": 4200,
+        "replicates": 6,
+        "warmup_ticks": 350,
+        "tick_rate_ms": 35,
+        "threads": 4
+      },
+      "metrics": [
+        {
+          "id": "dormant_fraction_at_peak_stress",
+          "description": "Fraction of active colonies in dormant state at stress apex.",
+          "unit": "fraction",
+          "pass_band": {
+            "min": 0.18,
+            "max": 0.72
+          }
+        },
+        {
+          "id": "post_stress_recovery_ticks",
+          "description": "Ticks from peak stress to 80% recovery in occupied-cell count.",
+          "unit": "ticks",
+          "pass_band": {
+            "min": 140,
+            "max": 1300
+          }
+        }
+      ]
+    },
+    {
+      "id": "frontier_genetic_drift",
+      "title": "Frontier Genetic Drift",
+      "setup": {
+        "world": {
+          "width": 260,
+          "height": 160
+        },
+        "initial_colonies": 6,
+        "seed": 1051,
+        "notes": "Sparse frontier growth setup to measure divergence between core and advancing edge lineages."
+      },
+      "run": {
+        "ticks": 4600,
+        "replicates": 6,
+        "warmup_ticks": 300,
+        "tick_rate_ms": 40,
+        "threads": 4
+      },
+      "metrics": [
+        {
+          "id": "frontier_core_genome_distance",
+          "description": "Mean genome distance between frontier cells and interior cells per lineage.",
+          "unit": "distance",
+          "pass_band": {
+            "min": 0.035,
+            "max": 0.33
+          }
+        },
+        {
+          "id": "lineage_retention_half_life_ticks",
+          "description": "Half-life of lineage identity retention in the frontier band.",
+          "unit": "ticks",
+          "pass_band": {
+            "min": 180,
+            "max": 2200
+          }
+        }
+      ]
+    },
+    {
+      "id": "coexistence_dynamics",
+      "title": "Coexistence Dynamics",
+      "setup": {
+        "world": {
+          "width": 220,
+          "height": 140
+        },
+        "initial_colonies": 20,
+        "seed": 1052,
+        "notes": "Mixed initial ecology intended to measure long-run multi-lineage coexistence stability."
+      },
+      "run": {
+        "ticks": 5200,
+        "replicates": 8,
+        "warmup_ticks": 500,
+        "tick_rate_ms": 40,
+        "threads": 4
+      },
+      "metrics": [
+        {
+          "id": "effective_diversity_shannon",
+          "description": "Shannon diversity of active colonies at steady state.",
+          "unit": "index",
+          "pass_band": {
+            "min": 1.1,
+            "max": 2.9
+          }
+        },
+        {
+          "id": "survivor_count_at_end",
+          "description": "Median number of active colonies at final tick.",
+          "unit": "count",
+          "pass_band": {
+            "min": 3,
+            "max": 12
+          }
+        }
+      ]
+    }
+  ]
+}

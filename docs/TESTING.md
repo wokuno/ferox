@@ -117,6 +117,17 @@ echo ""
 echo "=== Test Suite Complete ==="
 ```
 
+### Science Benchmark Config Validation
+
+Canonical science scenario definitions are validated by script and CTest:
+
+```bash
+python3 scripts/science_benchmarks.py validate --strict
+./scripts/test.sh science
+```
+
+The check fails on malformed JSON, missing canonical scenarios, duplicate IDs, or invalid metric pass bands.
+
 ## Test Coverage Areas
 
 ### Phase 1: Core Data Structures (23 tests)
