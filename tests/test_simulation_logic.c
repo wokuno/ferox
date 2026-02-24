@@ -79,6 +79,116 @@ static int count_colony_cells(World* world, uint32_t colony_id) {
     return count;
 }
 
+static uint64_t mix64(uint64_t value) {
+    value ^= value >> 30;
+    value *= 0xbf58476d1ce4e5b9ULL;
+    value ^= value >> 27;
+    value *= 0x94d049bb133111ebULL;
+    value ^= value >> 31;
+    return value;
+}
+
+static uint64_t world_signature(const World* world) {
+    uint64_t sig = 0x9e3779b97f4a7c15ULL;
+    int grid_size = world->width * world->height;
+
+    for (int i = 0; i < grid_size; i++) {
+        uint64_t cell_bits = ((uint64_t)world->cells[i].colony_id << 32) |
+                             ((uint64_t)world->cells[i].age << 24) |
+                             (uint64_t)(world->cells[i].is_border ? 1u : 0u);
+        sig ^= mix64(cell_bits ^ (uint64_t)i * 0x9e3779b97f4a7c15ULL);
+    }
+
+    for (size_t i = 0; i < world->colony_count; i++) {
+        const Colony* colony = &world->colonies[i];
+        if (!colony->active) continue;
+        uint64_t colony_bits = ((uint64_t)colony->id << 32) ^
+                               (uint64_t)colony->cell_count ^
+                               ((uint64_t)colony->max_cell_count << 1);
+        sig ^= mix64(colony_bits);
+    }
+
+    return sig ^ mix64(world->tick);
+}
+
+static World* create_atomic_rng_fixture(void) {
+    World* world = world_create(48, 48);
+    if (!world) return NULL;
+
+    Colony colony = create_test_colony();
+    colony.genome.spread_rate = 0.28f;
+    colony.genome.metabolism = 0.92f;
+    colony.genome.social_factor = 0.0f;
+    colony.genome.detection_range = 0.0f;
+    colony.genome.max_tracked = 1;
+    for (int d = 0; d < 8; d++) {
+        colony.genome.spread_weights[d] = 1.0f;
+    }
+
+    uint32_t id = world_add_colony(world, colony);
+    if (id == 0) {
+        world_destroy(world);
+        return NULL;
+    }
+
+    int seeded_cells = 0;
+    for (int y = 23; y <= 25; y++) {
+        for (int x = 23; x <= 25; x++) {
+            Cell* cell = world_get_cell(world, x, y);
+            if (!cell) continue;
+            cell->colony_id = id;
+            cell->age = 0;
+            seeded_cells++;
+        }
+    }
+
+    Colony* inserted = world_get_colony(world, id);
+    if (!inserted) {
+        world_destroy(world);
+        return NULL;
+    }
+    inserted->cell_count = (size_t)seeded_cells;
+    inserted->max_cell_count = (size_t)seeded_cells;
+
+    return world;
+}
+
+static uint64_t run_atomic_spread_signature(uint64_t seed, int thread_count, int ticks) {
+    rng_seed(seed);
+    World* world = create_atomic_rng_fixture();
+    if (!world) return 0;
+
+    ThreadPool* pool = threadpool_create(thread_count);
+    if (!pool) {
+        world_destroy(world);
+        return 0;
+    }
+
+    AtomicWorld* aworld = atomic_world_create(world, pool, thread_count);
+    if (!aworld) {
+        threadpool_destroy(pool);
+        world_destroy(world);
+        return 0;
+    }
+
+    for (int i = 0; i < ticks; i++) {
+        atomic_age(aworld);
+        atomic_barrier(aworld);
+        atomic_spread(aworld);
+        atomic_barrier(aworld);
+        atomic_world_sync_to_world(aworld);
+        world->tick++;
+    }
+
+    atomic_world_sync_to_world(aworld);
+    uint64_t sig = world_signature(world);
+
+    atomic_world_destroy(aworld);
+    threadpool_destroy(pool);
+    world_destroy(world);
+    return sig;
+}
+
 // ============================================================================
 // Division Logic Tests
 // ============================================================================
@@ -1380,6 +1490,24 @@ TEST(atomic_tick_concurrent_stability) {
     world_destroy(world);
 }
 
+TEST(atomic_parallel_rng_reproducible_across_runs) {
+    uint64_t sig_a = run_atomic_spread_signature(0x1234ULL, 4, 45);
+    uint64_t sig_b = run_atomic_spread_signature(0x1234ULL, 4, 45);
+
+    ASSERT_NE(sig_a, 0);
+    ASSERT_NE(sig_b, 0);
+    ASSERT_EQ(sig_a, sig_b);
+}
+
+TEST(atomic_parallel_rng_reproducible_across_thread_counts) {
+    uint64_t sig_single = run_atomic_spread_signature(0xC0FFEEULL, 1, 45);
+    uint64_t sig_multi = run_atomic_spread_signature(0xC0FFEEULL, 4, 45);
+
+    ASSERT_NE(sig_single, 0);
+    ASSERT_NE(sig_multi, 0);
+    ASSERT_EQ(sig_single, sig_multi);
+}
+
 TEST(rand_thread_safety_issue) {
     // This test demonstrates that rand() is not thread-safe
     // When shape_seed mutation uses rand() in a multi-threaded context,
@@ -1707,6 +1835,8 @@ int run_simulation_logic_tests(void) {
     
     printf("\nMulti-threaded Stress Tests:\n");
     RUN_TEST(atomic_tick_concurrent_stability);
+    RUN_TEST(atomic_parallel_rng_reproducible_across_runs);
+    RUN_TEST(atomic_parallel_rng_reproducible_across_thread_counts);
     RUN_TEST(rand_thread_safety_issue);
     RUN_TEST(cell_count_concurrent_consistency);
     

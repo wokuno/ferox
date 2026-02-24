@@ -72,17 +72,29 @@
 // Age is applied atomically: atomic_cell_age() increments age with
 // saturation at 255 (max uint8_t value).
 
-static inline uint32_t xorshift32(uint32_t* state) {
-    uint32_t x = *state;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    *state = x;
-    return x;
+static inline uint32_t mix_u32(uint32_t value) {
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    value *= 0x846ca68bu;
+    value ^= value >> 16;
+    return value;
 }
 
-static inline float rand_float_local(uint32_t* state) {
-    return (float)(xorshift32(state) & 0x7FFFFFFF) / (float)0x7FFFFFFF;
+static inline float deterministic_float(
+    uint32_t base_seed,
+    uint64_t tick,
+    uint32_t cell_idx,
+    uint32_t colony_id,
+    uint32_t lane
+) {
+    uint32_t mixed = base_seed;
+    mixed ^= (uint32_t)tick;
+    mixed ^= (uint32_t)(tick >> 32) * 0x9e3779b9u;
+    mixed ^= cell_idx * 0x85ebca6bu;
+    mixed ^= colony_id * 0xc2b2ae35u;
+    mixed ^= lane * 0x27d4eb2du;
+    return (float)(mix_u32(mixed) & 0x00FFFFFFu) / 16777216.0f;
 }
 
 typedef struct {
@@ -474,27 +486,16 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
         return NULL;
     }
     
-    // Allocate per-thread RNG seeds
-    aworld->thread_seeds = (uint32_t*)malloc(thread_count * sizeof(uint32_t));
-    if (!aworld->thread_seeds) {
-        free(aworld->colony_stats);
-        free(aworld->grid.buffers[0]);
-        free(aworld->grid.buffers[1]);
-        free(aworld);
-        return NULL;
-    }
-    
-    // Initialize thread seeds with different values
-    for (int i = 0; i < thread_count; i++) {
-        aworld->thread_seeds[i] = (uint32_t)(12345 + i * 7919);  // Prime offset
-    }
+    aworld->deterministic_seed =
+        mix_u32(0x9e3779b9u ^
+                ((uint32_t)world->width * 0x85ebca6bu) ^
+                ((uint32_t)world->height * 0xc2b2ae35u));
     
     // Preallocate region work items
     int regions_per_side = thread_count > 4 ? 4 : 2;
     aworld->region_work_count = regions_per_side * regions_per_side;
     aworld->region_work = (AtomicRegionWork*)calloc(aworld->region_work_count, sizeof(AtomicRegionWork));
     if (!aworld->region_work) {
-        free(aworld->thread_seeds);
         free(aworld->colony_stats);
         free(aworld->grid.buffers[0]);
         free(aworld->grid.buffers[1]);
@@ -512,7 +513,6 @@ void atomic_world_destroy(AtomicWorld* aworld) {
     if (!aworld) return;
     
     free(aworld->region_work);
-    free(aworld->thread_seeds);
     free(aworld->colony_stats);
     free(aworld->grid.buffers[0]);
     free(aworld->grid.buffers[1]);
@@ -660,9 +660,6 @@ void atomic_spread_region(AtomicRegionWork* work) {
     const int width = grid->width;
     const int height = grid->height;
     
-    // Thread-local RNG
-    uint32_t rng_state = aworld->thread_seeds[work->thread_id];
-    
     // Process each cell in region
     for (int y = work->start_y; y < work->end_y; y++) {
         int idx = y * width + work->start_x;
@@ -705,8 +702,16 @@ void atomic_spread_region(AtomicRegionWork* work) {
                                    colony->genome.spread_weights[d] *
                                    DIR8_WEIGHT[d];  // 1/√2 for diagonals
                 
-                // Per-cell stochastic noise for organic/irregular edges
-                float noise = 0.6f + rand_float_local(&rng_state) * 0.8f;
+                // Per-cell stochastic noise from deterministic seed/tick/cell/direction
+                uint32_t cell_idx = (uint32_t)(y * width + x);
+                uint32_t lane = (uint32_t)d * 2u;
+                float noise = 0.6f + deterministic_float(
+                    aworld->deterministic_seed,
+                    world->tick,
+                    cell_idx,
+                    colony_id,
+                    lane
+                ) * 0.8f;
                 spread_prob *= noise;
                 
                 // Apply social influence (chemotaxis toward/away from neighbors)
@@ -716,7 +721,14 @@ void atomic_spread_region(AtomicRegionWork* work) {
                 
                 if (neighbor_colony == 0) {
                     // Empty cell - try to spread
-                    if (rand_float_local(&rng_state) < spread_prob) {
+                    float spread_roll = deterministic_float(
+                        aworld->deterministic_seed,
+                        world->tick,
+                        cell_idx,
+                        colony_id,
+                        lane + 1u
+                    );
+                    if (spread_roll < spread_prob) {
                         // Atomic CAS: try to claim the cell
                         // Only succeeds if cell is still empty
                         if (atomic_cell_try_claim(neighbor, 0, colony_id)) {
@@ -736,9 +748,6 @@ void atomic_spread_region(AtomicRegionWork* work) {
             }
         }
     }
-    
-    // Save RNG state back (for reproducibility)
-    aworld->thread_seeds[work->thread_id] = rng_state;
 }
 
 void atomic_age_region(AtomicRegionWork* work) {

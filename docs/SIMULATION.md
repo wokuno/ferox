@@ -292,25 +292,20 @@ if (atomic_cell_try_claim(neighbor, 0, colony_id)) {
 }
 ```
 
-### Thread-Local RNG
+### Deterministic Parallel RNG
 
-Each thread uses its own xorshift32 RNG state to avoid contention:
+Parallel spread randomness is now generated from a deterministic hash key:
 
-```c
-static inline uint32_t xorshift32(uint32_t* state) {
-    uint32_t x = *state;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    *state = x;
-    return x;
-}
+```
+(base_seed, tick, source_cell_index, colony_id, direction/lane)
 ```
 
-This provides:
-- No locks on random number generation
-- Deterministic results (given same initial seeds)
-- Cache-friendly access pattern
+This means random draws are independent of worker execution order and thread scheduling.
+
+Determinism boundaries:
+- Same initial world state + same simulation configuration -> same spread RNG stream.
+- Changing world initialization, world dimensions, or RNG seed changes outcomes.
+- CAS claim races still decide winner when different colonies claim the same target cell in the same tick.
 
 ### Atomic Population Tracking
 
