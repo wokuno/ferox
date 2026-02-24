@@ -1743,61 +1743,70 @@ void simulation_update_scents(World* world) {
             
             uint32_t source = signal_source[idx];
             float center_eps = get_cell_eps_density(world, idx);
-            float remaining = current * (1.0f - g_transport_params.signal_decay);
+            float retained = current * (1.0f - g_transport_params.signal_decay);
+            float remaining = retained;
+
+            int neighbor_idx[4];
+            float neighbor_weight[4];
+            int neighbor_count = 0;
             if (y > 0) {
                 int ni = idx - width;
                 float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
-                float transfer = current * g_transport_params.signal_neighbor_transfer * scale;
-                if (transfer > remaining) transfer = remaining;
-                if (transfer > 0.0f) {
-                    float prev = new_signals[ni];
-                    new_signals[ni] = prev + transfer;
-                    remaining -= transfer;
-                    if (source > 0 && transfer > prev) {
-                        new_sources[ni] = source;
-                    }
-                }
+                neighbor_idx[neighbor_count] = ni;
+                neighbor_weight[neighbor_count++] = g_transport_params.signal_neighbor_transfer * scale;
             }
             if (x + 1 < width) {
                 int ni = idx + 1;
                 float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
-                float transfer = current * g_transport_params.signal_neighbor_transfer * scale;
-                if (transfer > remaining) transfer = remaining;
-                if (transfer > 0.0f) {
-                    float prev = new_signals[ni];
-                    new_signals[ni] = prev + transfer;
-                    remaining -= transfer;
-                    if (source > 0 && transfer > prev) {
-                        new_sources[ni] = source;
-                    }
-                }
+                neighbor_idx[neighbor_count] = ni;
+                neighbor_weight[neighbor_count++] = g_transport_params.signal_neighbor_transfer * scale;
             }
             if (y + 1 < height) {
                 int ni = idx + width;
                 float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
-                float transfer = current * g_transport_params.signal_neighbor_transfer * scale;
-                if (transfer > remaining) transfer = remaining;
-                if (transfer > 0.0f) {
-                    float prev = new_signals[ni];
-                    new_signals[ni] = prev + transfer;
-                    remaining -= transfer;
-                    if (source > 0 && transfer > prev) {
-                        new_sources[ni] = source;
-                    }
-                }
+                neighbor_idx[neighbor_count] = ni;
+                neighbor_weight[neighbor_count++] = g_transport_params.signal_neighbor_transfer * scale;
             }
             if (x > 0) {
                 int ni = idx - 1;
                 float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
-                float transfer = current * g_transport_params.signal_neighbor_transfer * scale;
-                if (transfer > remaining) transfer = remaining;
-                if (transfer > 0.0f) {
-                    float prev = new_signals[ni];
-                    new_signals[ni] = prev + transfer;
-                    remaining -= transfer;
-                    if (source > 0 && transfer > prev) {
-                        new_sources[ni] = source;
+                neighbor_idx[neighbor_count] = ni;
+                neighbor_weight[neighbor_count++] = g_transport_params.signal_neighbor_transfer * scale;
+            }
+
+            if (neighbor_count > 0) {
+                float weight_sum = 0.0f;
+                for (int n = 0; n < neighbor_count; n++) {
+                    if (neighbor_weight[n] > 0.0f) {
+                        weight_sum += neighbor_weight[n];
                     }
+                }
+
+                if (weight_sum > 0.0f) {
+                    float max_neighbor_fraction = (1.0f - g_transport_params.signal_decay);
+                    float transfer_scale = 1.0f;
+                    if (weight_sum > max_neighbor_fraction) {
+                        transfer_scale = max_neighbor_fraction / weight_sum;
+                    }
+
+                    float spent = 0.0f;
+                    for (int n = 0; n < neighbor_count; n++) {
+                        float weight = neighbor_weight[n];
+                        if (weight <= 0.0f) continue;
+
+                        float transfer = current * weight * transfer_scale;
+                        if (transfer <= 0.0f) continue;
+
+                        int ni = neighbor_idx[n];
+                        float prev = new_signals[ni];
+                        new_signals[ni] = prev + transfer;
+                        spent += transfer;
+                        if (source > 0 && transfer > prev) {
+                            new_sources[ni] = source;
+                        }
+                    }
+                    remaining = retained - spent;
+                    if (remaining < 0.0f) remaining = 0.0f;
                 }
             }
 
