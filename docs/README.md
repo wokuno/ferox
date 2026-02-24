@@ -227,6 +227,7 @@ ferox/
 - [Genetics](GENETICS.md) - Genome structure and evolution
 - [Simulation](SIMULATION.md) - World update mechanics
 - [API Reference](API.md) - Function documentation
+- [Science Bibliography](SCIENCE_BIBLIOGRAPHY.md) - DOI-backed research mapped to Ferox mechanics
 - [Testing](TESTING.md) - Test organization and coverage
 - [Contributing](CONTRIBUTING.md) - Development guidelines
 - [Self-Hosted Runner Ops](RUNNER_OPS.md) - Operations and incident response for CI runner
