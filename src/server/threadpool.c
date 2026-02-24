@@ -238,8 +238,6 @@ void threadpool_submit(ThreadPool* pool, task_func func, void* arg) {
     task->arg = arg;
     task->next = NULL;
 
-    bool queue_was_empty = (pool->task_queue_head == NULL);
-    
     // Enqueue the task
     if (pool->task_queue_tail == NULL) {
         pool->task_queue_head = task;
@@ -251,10 +249,8 @@ void threadpool_submit(ThreadPool* pool, task_func func, void* arg) {
     
     pool->pending_tasks++;
 
-    // Wake up workers when transitioning from empty queue.
-    if (queue_was_empty) {
-        pthread_cond_signal(&pool->queue_cond);
-    }
+    // Wake a worker for each submit to maintain burst parallelism.
+    pthread_cond_signal(&pool->queue_cond);
     
     pthread_mutex_unlock(&pool->queue_mutex);
 }
