@@ -152,6 +152,7 @@ static TransportModelParams g_transport_params = {
     .eps_exponent = 1.5f,
     .min_relative_diffusivity = 0.15f,
 };
+static bool g_transport_params_overridden = false;
 
 void simulation_set_transport_params(const TransportModelParams* params) {
     if (!params) return;
@@ -163,6 +164,7 @@ void simulation_set_transport_params(const TransportModelParams* params) {
     g_transport_params.eps_attenuation = utils_clamp_f(params->eps_attenuation, 0.0f, 1.0f);
     g_transport_params.eps_exponent = utils_clamp_f(params->eps_exponent, 0.5f, 4.0f);
     g_transport_params.min_relative_diffusivity = utils_clamp_f(params->min_relative_diffusivity, 0.01f, 1.0f);
+    g_transport_params_overridden = true;
 }
 
 void simulation_get_transport_params(TransportModelParams* out_params) {
@@ -172,6 +174,7 @@ void simulation_get_transport_params(TransportModelParams* out_params) {
 
 void simulation_reset_transport_params(void) {
     g_transport_params = DEFAULT_TRANSPORT_PARAMS;
+    g_transport_params_overridden = false;
 }
 
 static inline float get_cell_eps_density(World* world, int idx) {
@@ -1733,8 +1736,12 @@ void simulation_update_scents(World* world) {
             new_sources[idx] = cell->colony_id;
     }
     
-    const float signal_decay = world->rd_controls.signals.decay;
-    const float signal_diffusion = world->rd_controls.signals.diffusion;
+    float signal_decay = world->rd_controls.signals.decay;
+    float signal_diffusion = world->rd_controls.signals.diffusion;
+    if (g_transport_params_overridden) {
+        signal_decay = g_transport_params.signal_decay;
+        signal_diffusion = g_transport_params.signal_neighbor_transfer;
+    }
 
     // Step 2: Diffuse existing scent with EPS-dependent effective diffusivity
     for (int y = 0; y < height; y++) {
