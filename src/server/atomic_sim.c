@@ -97,6 +97,20 @@ static inline float deterministic_float(
     return (float)(mix_u32(mixed) & 0x00FFFFFFu) / 16777216.0f;
 }
 
+static inline float monod_saturation(float substrate, float half_saturation) {
+    if (substrate <= 0.0f) return 0.0f;
+    if (half_saturation <= 0.0f) return 1.0f;
+    return substrate / (half_saturation + substrate);
+}
+
+static inline float monod_growth_multiplier(const World* world, float substrate) {
+    if (!world || !world->monod.enabled) return 1.0f;
+
+    float saturation = monod_saturation(substrate, world->monod.half_saturation);
+    float coupling = utils_clamp_f(world->monod.growth_coupling, 0.0f, 1.0f);
+    return (1.0f - coupling) + coupling * saturation;
+}
+
 typedef struct {
     float social_factor;
     float nearest_norm_dx;
@@ -697,10 +711,12 @@ void atomic_spread_region(AtomicRegionWork* work) {
                 uint32_t neighbor_colony = atomic_load_explicit(&neighbor->colony_id, memory_order_relaxed);
                 
                 // Calculate base spread probability with diagonal correction
+                float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * width + x]);
                 float spread_prob = colony->genome.spread_rate * 
                                    colony->genome.metabolism *
                                    colony->genome.spread_weights[d] *
-                                   DIR8_WEIGHT[d];  // 1/√2 for diagonals
+                                   DIR8_WEIGHT[d] *
+                                   growth_uptake;  // 1/sqrt(2) for diagonals
                 
                 // Per-cell stochastic noise from deterministic seed/tick/cell/direction
                 uint32_t cell_idx = (uint32_t)(y * width + x);

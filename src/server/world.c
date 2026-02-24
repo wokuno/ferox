@@ -11,6 +11,12 @@
 #define INITIAL_COLONY_CAPACITY 16
 #define INITIAL_LOOKUP_CAPACITY 32
 
+#define MONOD_DEFAULT_ENABLED false
+#define MONOD_DEFAULT_HALF_SATURATION 0.35f
+#define MONOD_DEFAULT_UPTAKE_MIN 0.25f
+#define MONOD_DEFAULT_UPTAKE_MAX 1.0f
+#define MONOD_DEFAULT_GROWTH_COUPLING 0.0f
+
 World* world_create(int width, int height) {
     if (width <= 0 || height <= 0) {
         return NULL;
@@ -38,6 +44,12 @@ World* world_create(int width, int height) {
     world->colony_count = 0;
     world->colony_capacity = INITIAL_COLONY_CAPACITY;
     atomic_init(&world->next_colony_id, 1);
+
+    world->monod.enabled = MONOD_DEFAULT_ENABLED;
+    world->monod.half_saturation = MONOD_DEFAULT_HALF_SATURATION;
+    world->monod.uptake_min = MONOD_DEFAULT_UPTAKE_MIN;
+    world->monod.uptake_max = MONOD_DEFAULT_UPTAKE_MAX;
+    world->monod.growth_coupling = MONOD_DEFAULT_GROWTH_COUPLING;
     
     // Allocate cells as flat array
     world->cells = (Cell*)calloc(grid_size, sizeof(Cell));
@@ -125,6 +137,42 @@ fail:
     free(world->cells);
     free(world);
     return NULL;
+}
+
+void world_set_monod_kinetics(World* world, const MonodKineticsConfig* config) {
+    if (!world || !config) return;
+
+    float uptake_min = utils_clamp_f(config->uptake_min, 0.0f, 1.0f);
+    float uptake_max = utils_clamp_f(config->uptake_max, 0.0f, 1.0f);
+    if (uptake_max < uptake_min) {
+        float tmp = uptake_min;
+        uptake_min = uptake_max;
+        uptake_max = tmp;
+    }
+
+    world->monod.enabled = config->enabled;
+    world->monod.half_saturation = config->half_saturation < 0.0f ? 0.0f : config->half_saturation;
+    world->monod.uptake_min = uptake_min;
+    world->monod.uptake_max = uptake_max;
+    world->monod.growth_coupling = utils_clamp_f(config->growth_coupling, 0.0f, 1.0f);
+}
+
+MonodKineticsConfig world_get_monod_kinetics(const World* world) {
+    MonodKineticsConfig config = {
+        .enabled = MONOD_DEFAULT_ENABLED,
+        .half_saturation = MONOD_DEFAULT_HALF_SATURATION,
+        .uptake_min = MONOD_DEFAULT_UPTAKE_MIN,
+        .uptake_max = MONOD_DEFAULT_UPTAKE_MAX,
+        .growth_coupling = MONOD_DEFAULT_GROWTH_COUPLING,
+    };
+    if (!world) return config;
+
+    config.enabled = world->monod.enabled;
+    config.half_saturation = world->monod.half_saturation;
+    config.uptake_min = world->monod.uptake_min;
+    config.uptake_max = world->monod.uptake_max;
+    config.growth_coupling = world->monod.growth_coupling;
+    return config;
 }
 
 void world_destroy(World* world) {

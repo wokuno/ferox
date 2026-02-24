@@ -876,6 +876,41 @@ float* nutrients;  // Per-cell nutrient concentration (0-1)
 - Consumed by colony growth
 - Colonies with high `nutrient_sensitivity` spread toward nutrient-rich areas
 
+#### Optional Monod Growth/Uptake Coupling
+
+When `world->monod.enabled` is true, nutrient-driven growth and uptake follow a Monod-style saturation curve:
+
+```text
+Saturation(S) = S / (Ks + S)
+```
+
+- `S` = local substrate (nutrient concentration in [0, 1])
+- `Ks` = half-saturation constant (`half_saturation`)
+
+Uptake scales consumption using configurable bounds:
+
+```text
+uptake_multiplier = uptake_min + (uptake_max - uptake_min) * Saturation(S)
+```
+
+Growth couples spread probability to substrate availability:
+
+```text
+growth_multiplier = (1 - growth_coupling) + growth_coupling * Saturation(S)
+```
+
+Final spread terms in both serial and atomic spread paths include `growth_multiplier`, while nutrient depletion uses `uptake_multiplier`.
+
+Defaults preserve existing behavior:
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `enabled` | `false` | Disables Monod scaling entirely |
+| `half_saturation` | `0.35` | Substrate level where saturation is 0.5 |
+| `uptake_min` | `0.25` | Lower bound when substrate is near zero |
+| `uptake_max` | `1.0` | Upper bound in rich substrate |
+| `growth_coupling` | `0.0` | `0` keeps legacy spread behavior |
+
 ### Toxin Layer
 
 ```c
