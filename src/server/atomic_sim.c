@@ -368,6 +368,8 @@ static void atomic_spawn_dynamic_colonies(World* world) {
             colony.max_cell_count = 1;
             colony.active = true;
             colony.parent_id = 0;
+            colony.hgt_plasmid_fraction = utils_clamp_f(colony.genome.gene_transfer_rate * 0.25f, 0.0f, 0.35f);
+            colony.hgt_is_transconjugant = false;
             colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
             colony.wobble_phase = (float)(rand() % 628) / 100.0f;
             colony.shape_evolution = (float)(rand() % 1000) / 1000.0f;

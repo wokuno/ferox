@@ -285,6 +285,8 @@ void world_init_random_colonies(World* world, int count) {
         colony.active = true;
         colony.age = 0;
         colony.parent_id = 0;
+        colony.hgt_plasmid_fraction = utils_clamp_f(colony.genome.gene_transfer_rate * 0.25f, 0.0f, 0.35f);
+        colony.hgt_is_transconjugant = false;
         
         // Generate unique shape seed for procedural shape generation
         colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);

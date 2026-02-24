@@ -906,6 +906,8 @@ void simulation_mutate(World* world) {
                     new_species.wobble_phase = rand_float() * 6.28f;
                     new_species.cell_count = 0;
                     new_species.max_cell_count = 0;
+                    new_species.hgt_plasmid_fraction = colony->hgt_plasmid_fraction;
+                    new_species.hgt_is_transconjugant = colony->hgt_is_transconjugant;
                     generate_scientific_name(new_species.name, sizeof(new_species.name));
                     
                     // Revert parent to original genome
@@ -1025,6 +1027,8 @@ void simulation_check_divisions(World* world) {
                 new_colony.active = true;
                 new_colony.age = 0;
                 new_colony.parent_id = colony->id;
+                new_colony.hgt_plasmid_fraction = colony->hgt_plasmid_fraction;
+                new_colony.hgt_is_transconjugant = colony->hgt_is_transconjugant;
                 
                 // Generate unique shape seed for procedural shape (inherit and mutate from parent)
                 new_colony.shape_seed = colony->shape_seed ^ (uint32_t)rand() ^ ((uint32_t)rand() << 8);
@@ -2130,6 +2134,8 @@ void simulation_tick(World* world) {
                 colony.active = true;
                 colony.is_persister = false;
                 colony.parent_id = 0;
+                colony.hgt_plasmid_fraction = utils_clamp_f(colony.genome.gene_transfer_rate * 0.25f, 0.0f, 0.35f);
+                colony.hgt_is_transconjugant = false;
                 colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
                 colony.wobble_phase = (float)(rand() % 628) / 100.0f;
                 generate_scientific_name(colony.name, sizeof(colony.name));
