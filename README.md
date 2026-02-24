@@ -167,6 +167,11 @@ make install
 
 See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for development guidelines.
 
+## Documentation
+
+- [Docs index](docs/README.md)
+- [Science bibliography](docs/SCIENCE_BIBLIOGRAPHY.md)
+
 ## Security
 
 See [SECURITY.md](SECURITY.md) for security policy and vulnerability reporting.
