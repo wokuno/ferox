@@ -36,6 +36,69 @@ static inline Colony* lookup_active_colony(World* world, uint32_t id) {
     return (colony && colony->active) ? colony : NULL;
 }
 
+static uint32_t lineage_root_id(World* world, const Colony* colony) {
+    if (!world || !colony) return 0;
+
+    uint32_t root_id = colony->id;
+    uint32_t parent_id = colony->parent_id;
+    int guard = 0;
+
+    while (parent_id != 0 && guard < 64) {
+        Colony* parent = lookup_active_colony(world, parent_id);
+        if (!parent) {
+            root_id = parent_id;
+            break;
+        }
+        root_id = parent->id;
+        parent_id = parent->parent_id;
+        guard++;
+    }
+
+    return root_id;
+}
+
+static bool colonies_share_lineage(World* world, const Colony* a, const Colony* b) {
+    if (!world || !a || !b) return false;
+    if (a->id == b->id) return true;
+    if (a->parent_id == b->id || b->parent_id == a->id) return true;
+    uint32_t root_a = lineage_root_id(world, a);
+    uint32_t root_b = lineage_root_id(world, b);
+    return root_a != 0 && root_a == root_b;
+}
+
+static void update_hgt_cost_and_loss(World* world) {
+    if (!world) return;
+
+    for (size_t i = 0; i < world->colony_count; i++) {
+        Colony* colony = &world->colonies[i];
+        if (!colony->active) continue;
+
+        float plasmid = utils_clamp_f(colony->hgt_plasmid_fraction, 0.0f, 1.0f);
+
+        if (world->hgt_kinetics.enable_plasmid_loss && plasmid > 0.0f) {
+            float loss = plasmid * world->hgt_kinetics.plasmid_loss_rate;
+            float next_plasmid = utils_clamp_f(plasmid - loss, 0.0f, 1.0f);
+            if (next_plasmid < plasmid) {
+                colony->hgt_plasmid_loss_events++;
+                world->hgt_metrics.plasmid_loss_events_total++;
+            }
+            plasmid = next_plasmid;
+        }
+
+        if (plasmid < 0.0001f) {
+            plasmid = 0.0f;
+            colony->hgt_is_transconjugant = false;
+        }
+
+        colony->hgt_plasmid_fraction = plasmid;
+        colony->hgt_fitness_scale = 1.0f;
+        if (world->hgt_kinetics.enable_plasmid_cost && plasmid > 0.0f) {
+            float cost = world->hgt_kinetics.plasmid_cost_per_fraction * plasmid;
+            colony->hgt_fitness_scale = utils_clamp_f(1.0f - cost, 0.2f, 1.0f);
+        }
+    }
+}
+
 // Direction offsets for 8-connectivity (N, NE, E, SE, S, SW, W, NW)
 static const int DX8[] = {0, 1, 1, 1, 0, -1, -1, -1};
 static const int DY8[] = {-1, -1, 0, 1, 1, 1, 0, -1};
@@ -218,6 +281,7 @@ static void apply_diffusion_decay(World* world, float* layer, const RDFieldContr
 // Forward declarations
 static float get_scent_influence(World* world, int x, int y, int dx, int dy, 
                                   uint32_t colony_id, const Genome* genome);
+static void attempt_horizontal_gene_transfer(World* world, Colony* donor, Colony* recipient);
 
 // Calculate local population density around a cell
 static float calculate_local_density(World* world, int x, int y, uint32_t colony_id) {
@@ -700,7 +764,8 @@ void simulation_spread(World* world) {
                                         env_modifier * dir_weight * scent_modifier * 
                                         strategic_modifier * history_bonus * biomass_pressure *
                                         quorum_boost * dormancy_factor * trait_growth_cost * curvature *
-                                        iso_correction * noise * perception * growth_uptake * 2.0f;
+                                        iso_correction * noise * perception * growth_uptake *
+                                        colony->hgt_fitness_scale * 2.0f;
                     
                     if (rand_float() < spread_prob) {
                         if (pending_count >= pending_capacity) {
@@ -715,6 +780,12 @@ void simulation_spread(World* world) {
                             pending = new_pending;
                         }
                         pending[pending_count++] = (PendingCell){nx, ny, cell->colony_id};
+                    }
+                } else if (neighbor->colony_id != cell->colony_id) {
+                    Colony* enemy = world_get_colony(world, neighbor->colony_id);
+                    if (enemy && enemy->active) {
+                        attempt_horizontal_gene_transfer(world, colony, enemy);
+                        attempt_horizontal_gene_transfer(world, enemy, colony);
                     }
                 }
             }
@@ -757,6 +828,10 @@ void simulation_spread(World* world) {
     }
     
     free(pending);
+}
+
+void simulation_update_hgt_kinetics(World* world) {
+    update_hgt_cost_and_loss(world);
 }
 
 void simulation_mutate(World* world) {
@@ -1095,45 +1170,42 @@ void pending_buffer_clear(PendingBuffer* buf) {
 
 // Horizontal gene transfer between touching colonies
 // When two different colonies are adjacent, they can exchange genetic material
-static void attempt_horizontal_gene_transfer(Colony* donor, Colony* recipient) {
-    if (!donor || !recipient) return;
-    
-    // Use recipient's gene transfer rate to determine probability
-    float transfer_chance = recipient->genome.gene_transfer_rate;
-    if (rand_float() >= transfer_chance) return;
-    
-    // Pick a random trait to transfer (weighted towards beneficial traits)
-    int trait_choice = rand() % 10;
-    
-    switch (trait_choice) {
-        case 0:  // Transfer toxin resistance
-            recipient->genome.toxin_resistance = 
-                (recipient->genome.toxin_resistance + donor->genome.toxin_resistance) * 0.5f;
-            break;
-        case 1:  // Transfer metabolism efficiency
-            if (donor->genome.metabolism > recipient->genome.metabolism) {
-                recipient->genome.metabolism += 
-                    (donor->genome.metabolism - recipient->genome.metabolism) * 0.1f;
-            }
-            break;
-        case 2:  // Transfer spread rate
-            recipient->genome.spread_rate = 
-                (recipient->genome.spread_rate + donor->genome.spread_rate) * 0.5f;
-            break;
-        case 3:  // Transfer resilience
-            recipient->genome.resilience = 
-                (recipient->genome.resilience + donor->genome.resilience) * 0.5f;
-            break;
-        case 4:  // Transfer neural weight (learned behavior)
-            {
-                int w = rand() % 8;
-                recipient->genome.hidden_weights[w] = 
-                    (recipient->genome.hidden_weights[w] + donor->genome.hidden_weights[w]) * 0.5f;
-            }
-            break;
-        default:
-            // No transfer for other traits (too rare/protected)
-            break;
+static void attempt_horizontal_gene_transfer(World* world, Colony* donor, Colony* recipient) {
+    if (!world || !donor || !recipient) return;
+
+    float donor_plasmid = utils_clamp_f(donor->hgt_plasmid_fraction, 0.0f, 1.0f);
+    float recipient_plasmid = utils_clamp_f(recipient->hgt_plasmid_fraction, 0.0f, 1.0f);
+    float recipient_pool = 1.0f - recipient_plasmid;
+    if (donor_plasmid <= 0.0f || recipient_pool <= 0.0f) return;
+
+    float donor_rate = donor->hgt_is_transconjugant
+        ? world->hgt_kinetics.transconjugant_transfer_rate
+        : world->hgt_kinetics.donor_transfer_rate;
+
+    float contact_force = world->hgt_kinetics.contact_rate * donor->genome.gene_transfer_rate;
+    float transfer_probability = contact_force * donor_rate * world->hgt_kinetics.recipient_uptake_rate *
+                                 donor_plasmid * recipient_pool;
+    transfer_probability = utils_clamp_f(transfer_probability, 0.0f, 1.0f);
+    if (rand_float() >= transfer_probability) return;
+
+    float gain = world->hgt_kinetics.transfer_efficiency * donor_plasmid * recipient_pool;
+    float next_plasmid = utils_clamp_f(recipient_plasmid + gain, 0.0f, 1.0f);
+    if (next_plasmid <= recipient_plasmid) return;
+
+    bool became_transconjugant = recipient_plasmid <= 0.0f && next_plasmid > 0.0f;
+
+    recipient->hgt_plasmid_fraction = next_plasmid;
+    recipient->hgt_is_transconjugant = recipient->hgt_is_transconjugant || became_transconjugant;
+    recipient->hgt_transfer_events_in++;
+    donor->hgt_transfer_events_out++;
+    world->hgt_metrics.transfer_events_total++;
+
+    if (became_transconjugant) {
+        world->hgt_metrics.transconjugant_events_total++;
+    }
+
+    if (!colonies_share_lineage(world, donor, recipient)) {
+        world->hgt_metrics.cross_lineage_transfer_events_total++;
     }
 }
 
@@ -1167,7 +1239,8 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                     float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * world->width + x]);
                     float spread_chance = colony->genome.spread_rate * colony->genome.metabolism *
                                           biomass_pressure * quorum_boost * dormancy_factor *
-                                          trait_growth_cost * growth_uptake * 3.2f;
+                                          trait_growth_cost * growth_uptake *
+                                          colony->hgt_fitness_scale * 3.2f;
                     if (rand_float() < spread_chance) {
                         pending_buffer_add(pending, nx, ny, cell->colony_id);
                     }
@@ -1177,8 +1250,8 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                     if (enemy && enemy->active) {
                         // HORIZONTAL GENE TRANSFER: Small chance to exchange genes on contact
                         // This simulates conjugation, transformation, transduction
-                        attempt_horizontal_gene_transfer(colony, enemy);
-                        attempt_horizontal_gene_transfer(enemy, colony);
+                        attempt_horizontal_gene_transfer(world, colony, enemy);
+                        attempt_horizontal_gene_transfer(world, enemy, colony);
                         
                         // Wide variance in combat: aggression 0-1, defense 0-1
                         float attack = colony->genome.aggression * (1.0f + colony->genome.toxin_production * 0.8f);
@@ -2003,6 +2076,7 @@ void simulation_tick(World* world) {
     }
     
     // Run simulation phases
+    simulation_update_hgt_kinetics(world);
     simulation_spread(world);
     simulation_mutate(world);
     // Division detection is expensive (flood-fill per colony) — only check every 10 ticks

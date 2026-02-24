@@ -72,6 +72,18 @@ static bool world_validate_rd_field(const RDFieldControl* field,
     return true;
 }
 
+static const HGTKinetics DEFAULT_HGT_KINETICS = {
+    .contact_rate = 0.6f,
+    .donor_transfer_rate = 0.75f,
+    .transconjugant_transfer_rate = 0.5f,
+    .recipient_uptake_rate = 0.7f,
+    .transfer_efficiency = 0.25f,
+    .plasmid_cost_per_fraction = 0.12f,
+    .plasmid_loss_rate = 0.01f,
+    .enable_plasmid_cost = true,
+    .enable_plasmid_loss = true,
+};
+
 World* world_create(int width, int height) {
     if (width <= 0 || height <= 0) {
         return NULL;
@@ -105,6 +117,9 @@ World* world_create(int width, int height) {
     world->monod.uptake_max = MONOD_DEFAULT_UPTAKE_MAX;
     world->monod.growth_coupling = MONOD_DEFAULT_GROWTH_COUPLING;
     world->rd_controls = world_default_rd_controls();
+    
+    world->hgt_kinetics = DEFAULT_HGT_KINETICS;
+    memset(&world->hgt_metrics, 0, sizeof(world->hgt_metrics));
     
     // Allocate cells as flat array
     world->cells = (Cell*)calloc(grid_size, sizeof(Cell));
@@ -367,6 +382,16 @@ uint32_t world_add_colony(World* world, Colony colony) {
     colony.cell_indices_count = 0;
     colony.centroid_x = 0;
     colony.centroid_y = 0;
+    if (colony.hgt_plasmid_fraction <= 0.0f) {
+        colony.hgt_plasmid_fraction = utils_clamp_f(colony.genome.gene_transfer_rate * 10.0f, 0.0f, 1.0f);
+    } else {
+        colony.hgt_plasmid_fraction = utils_clamp_f(colony.hgt_plasmid_fraction, 0.0f, 1.0f);
+    }
+    colony.hgt_fitness_scale = 1.0f;
+    colony.hgt_is_transconjugant = colony.hgt_is_transconjugant && colony.hgt_plasmid_fraction > 0.0f;
+    colony.hgt_transfer_events_in = 0;
+    colony.hgt_transfer_events_out = 0;
+    colony.hgt_plasmid_loss_events = 0;
     
     world->colonies[world->colony_count] = colony;
     
@@ -385,6 +410,21 @@ uint32_t world_add_colony(World* world, Colony colony) {
     
     world->colony_count++;
     return colony.id;
+}
+
+void world_set_hgt_kinetics(World* world, const HGTKinetics* kinetics) {
+    if (!world || !kinetics) return;
+    world->hgt_kinetics = *kinetics;
+}
+
+void world_reset_hgt_kinetics(World* world) {
+    if (!world) return;
+    world->hgt_kinetics = DEFAULT_HGT_KINETICS;
+}
+
+void world_reset_hgt_metrics(World* world) {
+    if (!world) return;
+    memset(&world->hgt_metrics, 0, sizeof(world->hgt_metrics));
 }
 
 void world_colony_add_cell(World* world, uint32_t colony_id, uint32_t cell_idx) {

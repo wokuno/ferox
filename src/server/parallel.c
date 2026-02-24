@@ -231,6 +231,9 @@ void parallel_tick(ParallelContext* ctx) {
     // Phase 1: Age cells in parallel
     parallel_age(ctx);
     parallel_barrier(ctx);
+
+    // Update HGT donor/recipient/transconjugant kinetics before spread.
+    simulation_update_hgt_kinetics(world);
     
     // Phase 2: Spread colonies in parallel (writes to pending buffers)
     parallel_spread(ctx);

@@ -12,6 +12,9 @@ void simulation_spread(World* world);
 // Apply mutations to all colonies
 void simulation_mutate(World* world);
 
+// Update HGT plasmid cost/loss state before spread.
+void simulation_update_hgt_kinetics(World* world);
+
 // Detect and handle colony divisions (flood-fill based)
 void simulation_check_divisions(World* world);
 

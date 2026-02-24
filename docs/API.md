@@ -993,10 +993,47 @@ MonodKineticsConfig world_get_monod_kinetics(const World* world);
 
 Read the current Monod kinetics settings.
 
+**Returns:** Current Monod kinetics configuration
+
+---
+
+#### world_set_hgt_kinetics
+
+```c
+void world_set_hgt_kinetics(World* world, const HGTKinetics* kinetics);
+```
+
+Set donor/recipient/transconjugant HGT rates and optional cost/loss behavior.
+
+**Parameters:**
+- `world` - World
+- `kinetics` - HGT kinetics configuration
+
+---
+
+#### world_reset_hgt_kinetics
+
+```c
+void world_reset_hgt_kinetics(World* world);
+```
+
+Restore default HGT kinetics for a world.
+
 **Parameters:**
 - `world` - World
 
-**Returns:** Current Monod kinetics configuration
+---
+
+#### world_reset_hgt_metrics
+
+```c
+void world_reset_hgt_metrics(World* world);
+```
+
+Reset accumulated HGT instrumentation counters in `world->hgt_metrics`.
+
+**Parameters:**
+- `world` - World
 
 ---
 
@@ -1118,6 +1155,20 @@ void simulation_mutate(World* world);
 ```
 
 Apply mutations to all active colonies.
+
+**Parameters:**
+- `world` - World to update
+
+---
+
+#### simulation_update_hgt_kinetics
+
+```c
+void simulation_update_hgt_kinetics(World* world);
+```
+
+Apply plasmid loss and plasmid cost terms from `world->hgt_kinetics` and update
+per-colony fitness scaling prior to spread.
 
 **Parameters:**
 - `world` - World to update
