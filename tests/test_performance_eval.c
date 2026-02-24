@@ -16,6 +16,7 @@
 #include "../src/shared/protocol.h"
 #include "../src/server/world.h"
 #include "../src/server/genetics.h"
+#include "../src/server/frontier_metrics.h"
 #include "../src/server/simulation.h"
 #include "../src/server/threadpool.h"
 #include "../src/server/atomic_sim.h"
@@ -293,6 +294,44 @@ TEST(simulation_tick_throughput) {
     world_destroy(world);
 }
 
+TEST(frontier_telemetry_seeded_run_eval) {
+    const int scale = get_perf_scale();
+    const int ticks = 30 * scale;
+    const uint32_t seed = 48048u;
+
+    World* world = create_seeded_world(220, 140, 40, seed);
+    ASSERT_NOT_NULL(world);
+
+    FrontierTelemetry sample;
+    char telemetry_line[256];
+    double start = now_ms();
+
+    printf("    [perf] frontier telemetry csv: seed,tick,frontier_sector_count,lineage_diversity_proxy,lineage_entropy_bits\n");
+
+    for (int i = 0; i < ticks; i++) {
+        simulation_tick(world);
+        ASSERT(frontier_telemetry_compute(world, seed, &sample), "frontier telemetry computed");
+
+        ASSERT(sample.frontier_sector_count <= FRONTIER_TELEMETRY_SECTORS,
+               "frontier sector count should be bounded");
+        ASSERT(sample.lineage_diversity_proxy >= 0.0f && sample.lineage_diversity_proxy <= 1.0f,
+               "lineage diversity proxy should be normalized");
+        ASSERT(sample.lineage_entropy_bits >= 0.0f,
+               "lineage entropy should be non-negative");
+
+        if ((i + 1) % 10 == 0) {
+            ASSERT(frontier_telemetry_format_logfmt(&sample, telemetry_line, sizeof(telemetry_line)) > 0,
+                   "telemetry line formatting succeeds");
+            printf("    [perf] frontier_telemetry %s\n", telemetry_line);
+        }
+    }
+
+    double elapsed = now_ms() - start;
+    print_metric("frontier telemetry compute", elapsed, (double)ticks);
+
+    world_destroy(world);
+}
+
 TEST(atomic_tick_throughput_and_speedup_eval) {
     const int scale = get_perf_scale();
     const int ticks = 30 * scale;
@@ -463,6 +502,7 @@ int run_performance_eval_tests(void) {
     RUN_TEST(protocol_world_serialize_deserialize_throughput);
     RUN_TEST(protocol_world_path_breakdown_eval);
     RUN_TEST(simulation_tick_throughput);
+    RUN_TEST(frontier_telemetry_seeded_run_eval);
     RUN_TEST(atomic_tick_throughput_and_speedup_eval);
     RUN_TEST(atomic_tick_thread_scaling_eval);
     RUN_TEST(threadpool_task_throughput);

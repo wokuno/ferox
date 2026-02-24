@@ -1105,6 +1105,31 @@ colony.parent_id  // 0 if original, else parent colony ID
 
 This enables future features like family trees and ancestry analysis.
 
+## Frontier Genetics Telemetry
+
+Ferox exposes per-tick frontier genetics telemetry for seeded runs. The reference implementation is in `src/server/frontier_metrics.c` and is consumed in `tests/test_performance_eval.c`.
+
+### Output Format
+
+Telemetry is emitted in logfmt key-value format so it remains machine-readable while matching existing perf logging style:
+
+```text
+[perf] frontier_telemetry seed=48048 tick=30 frontier_sector_count=12 lineage_diversity_proxy=0.643112 lineage_entropy_bits=2.418337 frontier_cells=1984 occupied_cells=10954 active_lineages=7
+```
+
+### Definitions and Units
+
+| Metric | Definition | Units | Range |
+|--------|------------|-------|-------|
+| `frontier_sector_count` | Number of occupied angular sectors (16 total) that contain at least one frontier cell around world occupancy centroid | sectors | 0-16 |
+| `lineage_diversity_proxy` | Frontier heterozygosity proxy: `1 - Σ(p_i^2)` over root-lineage shares on frontier cells | unitless | 0-1 |
+| `lineage_entropy_bits` | Shannon entropy across root-lineage shares over all occupied cells: `-Σ(p_i log2 p_i)` | bits | >=0 |
+
+Additional metadata fields in each sample:
+- `seed`: RNG seed used to initialize run.
+- `tick`: simulation tick for the sample.
+- `frontier_cells`, `occupied_cells`, `active_lineages`: supporting counts for analysis.
+
 ## Colony Visualization System
 
 Colonies in Ferox are rendered using **cell-based rendering**, where each cell in the simulation grid is drawn directly. This provides accurate territory visualization.

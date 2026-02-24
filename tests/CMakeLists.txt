@@ -100,6 +100,12 @@ target_link_libraries(test_monod_kinetics PRIVATE ferox_server_lib)
 target_compile_definitions(test_monod_kinetics PRIVATE STANDALONE_TEST)
 add_test(NAME MonodKineticsTests COMMAND test_monod_kinetics)
 
+# Frontier genetics telemetry tests
+add_executable(test_frontier_metrics test_frontier_metrics.c)
+target_link_libraries(test_frontier_metrics PRIVATE ferox_server_lib)
+target_compile_definitions(test_frontier_metrics PRIVATE STANDALONE_TEST)
+add_test(NAME FrontierMetricsTests COMMAND test_frontier_metrics)
+
 # Visual stability stress tests
 add_executable(test_visual_stability test_visual_stability.c)
 target_link_libraries(test_visual_stability PRIVATE ferox_server_lib)
