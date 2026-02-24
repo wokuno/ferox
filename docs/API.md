@@ -1148,7 +1148,7 @@ typedef struct {
     World* world;                    // Reference to original world
     ThreadPool* pool;
     int thread_count;
-    uint32_t* thread_seeds;          // RNG seeds per thread
+    uint32_t deterministic_seed;     // Base seed mixed with tick/cell/lane
 } AtomicWorld;
 
 // Work item for region-based processing

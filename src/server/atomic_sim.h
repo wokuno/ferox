@@ -44,8 +44,8 @@ typedef struct AtomicWorldStruct {
     ThreadPool* pool;
     int thread_count;
     
-    // RNG seeds per thread for deterministic parallel RNG
-    uint32_t* thread_seeds;
+    // Base seed for deterministic parallel RNG (mixed with tick/cell/direction)
+    uint32_t deterministic_seed;
     
     // Preallocated region work items to avoid per-tick malloc
     AtomicRegionWork* region_work;
