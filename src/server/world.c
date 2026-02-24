@@ -384,6 +384,19 @@ uint32_t world_add_colony(World* world, Colony colony) {
     colony.cell_indices_count = 0;
     colony.centroid_x = 0;
     colony.centroid_y = 0;
+    if (colony.parent_id != 0 && colony.hgt_plasmid_fraction <= 0.0f) {
+        Colony* parent = world_get_colony(world, colony.parent_id);
+        if (parent) {
+            colony.hgt_plasmid_fraction = parent->hgt_plasmid_fraction;
+            colony.hgt_is_transconjugant = parent->hgt_is_transconjugant;
+        }
+    }
+
+    if (colony.parent_id == 0 && colony.hgt_plasmid_fraction <= 0.0f && colony.cell_count > 0) {
+        colony.hgt_plasmid_fraction = utils_clamp_f(colony.genome.gene_transfer_rate * 0.25f, 0.0f, 0.35f);
+        colony.hgt_is_transconjugant = false;
+    }
+
     colony.hgt_plasmid_fraction = utils_clamp_f(colony.hgt_plasmid_fraction, 0.0f, 1.0f);
     colony.hgt_fitness_scale = 1.0f;
     colony.hgt_is_transconjugant = colony.hgt_is_transconjugant && colony.hgt_plasmid_fraction > 0.0f;
