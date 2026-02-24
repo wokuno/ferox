@@ -256,7 +256,7 @@ void colony_update_persister_switching(Colony* colony) {
                 colony->is_persister = true;
             }
         }
-    } else if (colony->stress_level < exit_stress) {
+    } else if (colony->stress_level <= exit_stress) {
         float relief = (exit_stress - colony->stress_level) / (exit_stress + 0.001f);
         float chance = exit_rate * (0.20f + relief * 0.80f);
         chance *= (1.0f - colony->genome.dormancy_resistance * 0.30f);

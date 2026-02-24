@@ -714,11 +714,13 @@ void atomic_spread_region(AtomicRegionWork* work) {
                 
                 // Calculate base spread probability with diagonal correction
                 float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * width + x]);
+                float activity_factor = colony_spread_activity_factor(colony);
                 float spread_prob = colony->genome.spread_rate * 
                                    colony->genome.metabolism *
                                    colony->genome.spread_weights[d] *
                                    DIR8_WEIGHT[d] *
-                                   growth_uptake;  // 1/sqrt(2) for diagonals
+                                   growth_uptake *
+                                   activity_factor;  // 1/sqrt(2) for diagonals
                 
                 // Per-cell stochastic noise from deterministic seed/tick/cell/direction
                 uint32_t cell_idx = (uint32_t)(y * width + x);
