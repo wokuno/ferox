@@ -196,3 +196,31 @@ int count_enemy_neighbors(World* world, int x, int y, uint32_t colony_id) {
     }
     return count;
 }
+
+float calculate_expensive_trait_load(const Genome* genome) {
+    if (!genome) return 0.0f;
+
+    // Energetic burden from expensive social traits.
+    // Weights are calibrated so all-max does not collapse the simulation,
+    // but is still clearly penalized versus balanced configurations.
+    const float toxin_cost = genome->toxin_production * 0.24f;
+    const float biofilm_cost = (genome->biofilm_investment * genome->biofilm_tendency) * 0.20f;
+    const float signaling_cost = genome->signal_emission * 0.16f;
+    const float motility_cost = genome->motility * 0.18f;
+
+    return utils_clamp_f(toxin_cost + biofilm_cost + signaling_cost + motility_cost, 0.0f, 1.0f);
+}
+
+float calculate_growth_cost_multiplier(const Colony* colony) {
+    if (!colony) return 1.0f;
+
+    float load = calculate_expensive_trait_load(&colony->genome);
+    return utils_clamp_f(1.0f - load, 0.35f, 1.0f);
+}
+
+float calculate_survival_cost_multiplier(const Colony* colony) {
+    if (!colony) return 1.0f;
+
+    float load = calculate_expensive_trait_load(&colony->genome);
+    return 1.0f + load * 0.55f;
+}

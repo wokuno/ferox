@@ -23,4 +23,9 @@ float get_scent_influence(World* world, int x, int y, int dx, int dy, uint32_t c
 int count_friendly_neighbors(World* world, int x, int y, uint32_t colony_id);
 int count_enemy_neighbors(World* world, int x, int y, uint32_t colony_id);
 
+// Expensive-trait energetic burden used by growth/survival accounting.
+float calculate_expensive_trait_load(const Genome* genome);
+float calculate_growth_cost_multiplier(const Colony* colony);
+float calculate_survival_cost_multiplier(const Colony* colony);
+
 #endif

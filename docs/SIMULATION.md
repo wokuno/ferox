@@ -9,6 +9,31 @@ This document explains how the simulation works, including the world grid, tick 
 - **Strategy archetypes**: new genomes are seeded from 8 archetypes in `genome_create_random()` (`BERSERKER`, `TURTLE`, `SWARM`, `TOXIC`, `HIVE`, `NOMAD`, `PARASITE`, `CHAOTIC`), then mutated over time.
 - **Scent/quorum/biofilm/dormancy**: scent and neighbor sampling bias spread direction; quorum activation is derived from `signal_strength` vs `quorum_threshold`; biofilm grows/decays each tick; dormancy is stress-triggered and reduces turnover death while suppressing expansion pressure.
 
+## Expensive-Trait Cost Accounting
+
+To prevent all lineages converging on universal max values, expensive social traits now add an explicit energetic burden that feeds both growth and survival.
+
+### Costed Traits and Weights
+
+| Trait | Symbol | Weight |
+|-------|--------|--------|
+| Toxin secretion | `toxin_production` | `0.24` |
+| EPS/biofilm production | `biofilm_investment * biofilm_tendency` | `0.20` |
+| Signaling output | `signal_emission` | `0.16` |
+| Motility drive | `motility` | `0.18` |
+
+`trait_load = clamp(sum(weighted_traits), 0, 1)`
+
+### How It Affects Dynamics
+
+- **Growth pressure**: spread chance is multiplied by `growth_cost_multiplier = clamp(1 - trait_load, 0.35, 1.0)`.
+- **Survival pressure**: turnover/starvation/toxin death calculations are multiplied by `survival_cost_multiplier = 1 + trait_load * 0.55`.
+- **Resource pressure**: occupied-cell nutrient consumption is scaled by `1 + trait_load * 0.6`.
+
+### Rationale
+
+This keeps high-investment strategies viable in the right contexts, while forcing tradeoffs: lineages that max toxin/EPS/signaling/motility gain tactical advantages but pay ongoing metabolic and mortality costs.
+
 ## World Grid Structure
 
 The simulation takes place on a 2D rectangular grid.

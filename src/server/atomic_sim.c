@@ -285,6 +285,7 @@ static void atomic_apply_cell_turnover(World* world) {
 
         Colony* colony = world_get_colony(world, cell->colony_id);
         if (!colony || !colony->active) continue;
+        float trait_survival_cost = calculate_survival_cost_multiplier(colony);
 
         float death_chance = 0.0015f;
 
@@ -321,6 +322,8 @@ static void atomic_apply_cell_turnover(World* world) {
         if (cell->age > 140) {
             death_chance += ((float)cell->age - 140.0f) * 0.0008f;
         }
+
+        death_chance *= trait_survival_cost;
 
         death_chance = utils_clamp_f(death_chance, 0.0f, 0.35f);
         if (rand_float() < death_chance) {

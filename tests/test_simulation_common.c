@@ -143,6 +143,77 @@ TEST(get_quorum_activation_handles_null_below_and_above_threshold) {
     ASSERT(get_quorum_activation(&colony) > 0.6f, "activation increases above threshold");
 }
 
+TEST(expensive_trait_load_reflects_configured_weights) {
+    Genome g;
+    memset(&g, 0, sizeof(Genome));
+
+    g.toxin_production = 1.0f;
+    g.biofilm_investment = 1.0f;
+    g.biofilm_tendency = 1.0f;
+    g.signal_emission = 1.0f;
+    g.motility = 1.0f;
+
+    float load = calculate_expensive_trait_load(&g);
+    ASSERT_NEAR(load, 0.78f, 0.0001f);
+}
+
+TEST(growth_and_survival_costs_create_tradeoff_for_max_traits) {
+    Colony balanced = make_colony(30);
+    balanced.genome.toxin_production = 0.3f;
+    balanced.genome.biofilm_investment = 0.3f;
+    balanced.genome.biofilm_tendency = 0.6f;
+    balanced.genome.signal_emission = 0.3f;
+    balanced.genome.motility = 0.3f;
+
+    Colony maxed = make_colony(31);
+    maxed.genome.toxin_production = 1.0f;
+    maxed.genome.biofilm_investment = 1.0f;
+    maxed.genome.biofilm_tendency = 1.0f;
+    maxed.genome.signal_emission = 1.0f;
+    maxed.genome.motility = 1.0f;
+
+    float balanced_growth = calculate_growth_cost_multiplier(&balanced);
+    float max_growth = calculate_growth_cost_multiplier(&maxed);
+    ASSERT(max_growth < balanced_growth, "max expensive traits should reduce growth multiplier");
+
+    float balanced_survival = calculate_survival_cost_multiplier(&balanced);
+    float max_survival = calculate_survival_cost_multiplier(&maxed);
+    ASSERT(max_survival > balanced_survival, "max expensive traits should increase survival burden");
+}
+
+TEST(baseline_sweep_avoids_universal_max_trait_dominance) {
+    const float levels[] = {0.0f, 0.5f, 1.0f};
+    float best_score = -1.0f;
+    bool best_all_max = false;
+
+    for (int ti = 0; ti < 3; ti++) {
+        for (int bi = 0; bi < 3; bi++) {
+            for (int si = 0; si < 3; si++) {
+                for (int mi = 0; mi < 3; mi++) {
+                    Colony colony = make_colony(40);
+                    colony.genome.toxin_production = levels[ti];
+                    colony.genome.biofilm_investment = levels[bi];
+                    colony.genome.biofilm_tendency = levels[bi];
+                    colony.genome.signal_emission = levels[si];
+                    colony.genome.motility = levels[mi];
+
+                    float growth = calculate_growth_cost_multiplier(&colony);
+                    float survival = calculate_survival_cost_multiplier(&colony);
+                    float score = growth / survival;
+
+                    if (score > best_score) {
+                        best_score = score;
+                        best_all_max = (levels[ti] == 1.0f && levels[bi] == 1.0f &&
+                                        levels[si] == 1.0f && levels[mi] == 1.0f);
+                    }
+                }
+            }
+        }
+    }
+
+    ASSERT(!best_all_max, "all-max expensive trait profile should not dominate baseline sweep");
+}
+
 TEST(get_direction_weight_maps_all_cardinals_and_default) {
     Genome g;
     memset(&g, 0, sizeof(Genome));
@@ -275,6 +346,9 @@ int run_simulation_common_tests(void) {
     RUN_TEST(calculate_biomass_pressure_handles_isolated_world);
     RUN_TEST(calculate_biomass_pressure_scales_with_friendly_neighbors);
     RUN_TEST(get_quorum_activation_handles_null_below_and_above_threshold);
+    RUN_TEST(expensive_trait_load_reflects_configured_weights);
+    RUN_TEST(growth_and_survival_costs_create_tradeoff_for_max_traits);
+    RUN_TEST(baseline_sweep_avoids_universal_max_trait_dominance);
     RUN_TEST(get_direction_weight_maps_all_cardinals_and_default);
     RUN_TEST(calculate_curvature_boost_reflects_neighbor_count);
     RUN_TEST(calculate_perception_modifier_handles_range_and_threat_branches);
