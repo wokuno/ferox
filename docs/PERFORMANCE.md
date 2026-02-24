@@ -52,6 +52,7 @@ Average values from repeated runs:
 - Name + color generation: **39.6 ms** for 250k iterations
 - World create/init/destroy: **32.8 ms** for 900 iterations
 - Protocol serialize+deserialize: **24.0 ms** for 600 iterations (**630.6 MB/s**)
+- Broadcast path breakdown metrics now emitted (`build snapshot`, `build+serialize`, `end-to-end (0 clients)`, plus stage-share percentages)
 - `simulation_tick` (serial): **533 ms** for 175 ticks (~3.0 ms/tick)
 - `atomic_tick` (4 threads): **1299 ms** for 150 ticks (~8.7 ms/tick)
 - Atomic vs serial ratio: **2.19x** (atomic path still slower; see notes)
@@ -92,6 +93,11 @@ Average values from repeated runs:
 - Removed final shrink-realloc (buffer is immediately consumed).
 - World state serialization writes grid directly into message buffer (no intermediate copy).
 - Deserialize zero-fill uses `memset` instead of scalar loop.
+
+### ✅ Broadcast/protocol build-path optimization
+- `server_build_protocol_world_snapshot()` now folds grid copy + centroid accumulation into one pass.
+- Removed per-broadcast heap allocations for centroid accumulation (stack-backed fixed arrays).
+- Replaced per-cell colony lookup + division/modulo work with binary-search id mapping and row/column iteration.
 
 ## Remaining Bottlenecks
 
