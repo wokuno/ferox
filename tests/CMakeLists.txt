@@ -166,6 +166,17 @@ target_link_libraries(test_server_branch_coverage PRIVATE ferox_server_lib)
 target_compile_definitions(test_server_branch_coverage PRIVATE STANDALONE_TEST)
 add_test(NAME ServerBranchCoverageTests COMMAND test_server_branch_coverage)
 
+# Science benchmark scenario config validation
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(
+        NAME ScienceBenchmarkConfigTests
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/science_benchmarks.py validate --strict
+    )
+else()
+    message(WARNING "Python3 interpreter not found; skipping ScienceBenchmarkConfigTests")
+endif()
+
 # Combined test runner
 add_executable(test_runner test_runner.c
     test_genetics_advanced.c

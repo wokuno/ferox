@@ -83,6 +83,12 @@ case "$CATEGORY" in
         echo ""
         ctest --output-on-failure -R "SimdEvalTests|PerformanceEvalTests" -V
         ;;
+
+    science|bench|benchmarks)
+        echo "🔬 Running science benchmark scenario config checks..."
+        echo ""
+        ctest --output-on-failure -R "ScienceBenchmarkConfigTests" -V
+        ;;
     
     phase1)
         run_ctest "Phase1" "Phase 1 tests (types, names, colors, utils)"
@@ -187,6 +193,7 @@ case "$CATEGORY" in
             echo "  unit      Run all unit tests"
             echo "  stress    Run stress tests"
             echo "  perf      Run SIMD/performance evaluation tests"
+            echo "  science   Validate benchmark scenario configuration"
             echo "  quick     Run tests excluding stress tests"
             echo "  phase1    Phase 1 tests (types, names, colors)"
             echo "  phase2    Phase 2 tests (world, genetics)"
