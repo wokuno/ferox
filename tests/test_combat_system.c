@@ -56,6 +56,12 @@ static Colony create_test_colony(float aggression, float resilience, float defen
     c.genome.toxin_production = 0.0f;
     c.genome.toxin_resistance = 0.5f;
     c.genome.defense_priority = defense_priority;
+    c.genome.dormancy_threshold = 1.0f;
+    c.genome.sporulation_threshold = 1.0f;
+    c.genome.persister_entry_stress = 1.0f;
+    c.genome.persister_exit_stress = 1.0f;
+    c.genome.persister_entry_rate = 0.0f;
+    c.genome.persister_exit_rate = 0.0f;
     c.genome.biofilm_tendency = 0.5f;
     c.genome.learning_rate = 0.1f;
     for (int i = 0; i < 8; i++) {

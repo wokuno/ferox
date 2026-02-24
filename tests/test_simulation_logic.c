@@ -16,6 +16,7 @@
 #include "../src/server/world.h"
 #include "../src/server/genetics.h"
 #include "../src/server/simulation.h"
+#include "../src/server/simulation_common.h"
 #include "../src/server/threadpool.h"
 #include "../src/server/atomic_sim.h"
 
@@ -187,6 +188,19 @@ static uint64_t run_atomic_spread_signature(uint64_t seed, int thread_count, int
     threadpool_destroy(pool);
     world_destroy(world);
     return sig;
+}
+
+static Colony create_switch_test_colony(void) {
+    Colony colony = create_test_colony();
+    colony.state = COLONY_STATE_STRESSED;
+    colony.is_dormant = false;
+    colony.is_persister = false;
+    colony.genome.persister_entry_stress = 0.60f;
+    colony.genome.persister_exit_stress = 0.30f;
+    colony.genome.persister_entry_rate = 1.0f;
+    colony.genome.persister_exit_rate = 1.0f;
+    colony.genome.dormancy_resistance = 0.0f;
+    return colony;
 }
 
 // ============================================================================
@@ -1782,6 +1796,72 @@ TEST(shape_function_smooth_with_phase) {
     
     ASSERT_EQ(large_jump_count, 0);
 }
+
+TEST(persister_switch_enters_under_high_stress) {
+    Colony colony = create_switch_test_colony();
+    colony.stress_level = 1.0f;
+    colony.genome.persister_entry_stress = 0.15f;
+    colony.is_persister = false;
+
+    for (int i = 0; i < 16 && !colony.is_persister; i++) {
+        colony_update_persister_switching(&colony);
+    }
+
+    ASSERT_TRUE(colony.is_persister);
+}
+
+TEST(persister_switch_exits_under_low_stress) {
+    Colony colony = create_switch_test_colony();
+    colony.stress_level = 0.0f;
+    colony.is_persister = true;
+    colony.genome.persister_exit_stress = 0.6f;
+
+    for (int i = 0; i < 16 && colony.is_persister; i++) {
+        colony_update_persister_switching(&colony);
+    }
+
+    ASSERT_FALSE(colony.is_persister);
+}
+
+TEST(persister_switch_hysteresis_holds_mid_stress) {
+    Colony colony = create_switch_test_colony();
+    colony.stress_level = 0.45f;
+
+    colony.is_persister = false;
+    colony_update_persister_switching(&colony);
+    ASSERT_FALSE(colony.is_persister);
+
+    colony.is_persister = true;
+    colony_update_persister_switching(&colony);
+    ASSERT_TRUE(colony.is_persister);
+}
+
+TEST(dormancy_forces_persister_state) {
+    Colony colony = create_switch_test_colony();
+    colony.stress_level = 0.95f;
+    colony.is_dormant = true;
+    colony.is_persister = false;
+
+    colony_update_persister_switching(&colony);
+
+    ASSERT_TRUE(colony.is_persister);
+    ASSERT_LT(colony_spread_activity_factor(&colony), 0.5f);
+}
+
+TEST(persister_activity_modifiers_reduce_growth_pressure) {
+    Colony colony = create_switch_test_colony();
+    colony.is_dormant = false;
+    colony.is_persister = false;
+    float active_spread = colony_spread_activity_factor(&colony);
+    float active_turnover = colony_turnover_factor(&colony);
+
+    colony.is_persister = true;
+    float persister_spread = colony_spread_activity_factor(&colony);
+    float persister_turnover = colony_turnover_factor(&colony);
+
+    ASSERT_GT(active_spread, persister_spread);
+    ASSERT_GT(active_turnover, persister_turnover);
+}
 // Run Tests
 // ============================================================================
 
@@ -1852,6 +1932,13 @@ int run_simulation_logic_tests(void) {
     RUN_TEST(centroid_stability);
     RUN_TEST(shape_function_deterministic);
     RUN_TEST(shape_function_smooth_with_phase);
+
+    printf("\nPersister Switching Tests:\n");
+    RUN_TEST(persister_switch_enters_under_high_stress);
+    RUN_TEST(persister_switch_exits_under_low_stress);
+    RUN_TEST(persister_switch_hysteresis_holds_mid_stress);
+    RUN_TEST(dormancy_forces_persister_state);
+    RUN_TEST(persister_activity_modifiers_reduce_growth_pressure);
     
     printf("\n--- Simulation Logic Results ---\n");
     printf("Passed: %d\n", tests_passed);

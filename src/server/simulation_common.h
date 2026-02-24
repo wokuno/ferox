@@ -28,4 +28,11 @@ float calculate_expensive_trait_load(const Genome* genome);
 float calculate_growth_cost_multiplier(const Colony* colony);
 float calculate_survival_cost_multiplier(const Colony* colony);
 
+bool colony_in_persister_state(const Colony* colony);
+void colony_update_persister_switching(Colony* colony);
+float colony_spread_activity_factor(const Colony* colony);
+float colony_signal_activity_factor(const Colony* colony);
+float colony_toxin_output_factor(const Colony* colony);
+float colony_turnover_factor(const Colony* colony);
+
 #endif

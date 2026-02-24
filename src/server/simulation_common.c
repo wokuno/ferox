@@ -224,3 +224,83 @@ float calculate_survival_cost_multiplier(const Colony* colony) {
     float load = calculate_expensive_trait_load(&colony->genome);
     return 1.0f + load * 0.55f;
 }
+
+bool colony_in_persister_state(const Colony* colony) {
+    if (!colony) return false;
+    return colony->is_dormant || colony->is_persister;
+}
+
+void colony_update_persister_switching(Colony* colony) {
+    if (!colony) return;
+
+    if (colony->is_dormant) {
+        colony->is_persister = true;
+        return;
+    }
+
+    float enter_stress = utils_clamp_f(colony->genome.persister_entry_stress, 0.15f, 0.98f);
+    float exit_stress = utils_clamp_f(colony->genome.persister_exit_stress, 0.0f, 0.92f);
+    if (exit_stress >= enter_stress - 0.02f) {
+        exit_stress = utils_clamp_f(enter_stress - 0.02f, 0.0f, 0.92f);
+    }
+
+    float entry_rate = utils_clamp_f(colony->genome.persister_entry_rate, 0.0f, 1.0f);
+    float exit_rate = utils_clamp_f(colony->genome.persister_exit_rate, 0.0f, 1.0f);
+
+    if (!colony->is_persister) {
+        if (colony->stress_level > enter_stress) {
+            float stress_pressure = (colony->stress_level - enter_stress) / (1.0f - enter_stress + 0.001f);
+            float chance = entry_rate * (0.25f + stress_pressure * 0.75f);
+            chance = utils_clamp_f(chance, 0.0f, 1.0f);
+            if (rand_float() < chance) {
+                colony->is_persister = true;
+            }
+        }
+    } else if (colony->stress_level <= exit_stress) {
+        float relief = (exit_stress - colony->stress_level) / (exit_stress + 0.001f);
+        float chance = exit_rate * (0.20f + relief * 0.80f);
+        chance *= (1.0f - colony->genome.dormancy_resistance * 0.30f);
+        chance = utils_clamp_f(chance, 0.0f, 1.0f);
+        if (rand_float() < chance) {
+            colony->is_persister = false;
+        }
+    }
+}
+
+float colony_spread_activity_factor(const Colony* colony) {
+    if (!colony) return 1.0f;
+    if (colony->is_dormant) {
+        return 0.12f + colony->genome.dormancy_resistance * 0.28f;
+    }
+    if (colony->is_persister) {
+        return 0.40f + colony->genome.dormancy_resistance * 0.25f;
+    }
+    return 1.0f;
+}
+
+float colony_signal_activity_factor(const Colony* colony) {
+    if (!colony) return 1.0f;
+    if (colony->is_dormant) return 0.60f;
+    if (colony->is_persister) return 0.78f;
+    return 1.0f;
+}
+
+float colony_toxin_output_factor(const Colony* colony) {
+    if (!colony) return 1.0f;
+    if (colony->is_dormant) return 0.50f;
+    if (colony->is_persister) return 0.72f;
+    return 1.0f;
+}
+
+float colony_turnover_factor(const Colony* colony) {
+    if (!colony) return 1.0f;
+    if (colony->is_dormant) {
+        float protection = 0.50f - colony->genome.dormancy_resistance * 0.35f;
+        return utils_clamp_f(protection, 0.12f, 0.50f);
+    }
+    if (colony->is_persister) {
+        float protection = 0.88f - colony->genome.dormancy_resistance * 0.18f;
+        return utils_clamp_f(protection, 0.62f, 0.88f);
+    }
+    return 1.0f;
+}

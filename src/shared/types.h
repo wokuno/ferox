@@ -63,6 +63,10 @@ typedef struct {
     float density_tolerance;
     float dormancy_threshold;
     float dormancy_resistance;
+    float persister_entry_stress;
+    float persister_exit_stress;
+    float persister_entry_rate;
+    float persister_exit_rate;
     float sporulation_threshold;
     float biofilm_investment;
     float biofilm_tendency;
@@ -105,6 +109,10 @@ typedef struct Genome {
     
     float dormancy_threshold;
     float dormancy_resistance;
+    float persister_entry_stress;
+    float persister_exit_stress;
+    float persister_entry_rate;
+    float persister_exit_rate;
     float sporulation_threshold;
     float biofilm_investment;
     float biofilm_tendency;
@@ -151,6 +159,7 @@ typedef struct {
     
     ColonyState state;
     bool is_dormant;
+    bool is_persister;
     float stress_level;
     float biofilm_strength;
     float drift_x, drift_y;

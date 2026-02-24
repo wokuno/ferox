@@ -314,10 +314,7 @@ static void atomic_apply_cell_turnover(World* world) {
         }
 
         // Persister-like dormancy: better survival, weaker expansion elsewhere.
-        if (colony->is_dormant) {
-            float dormancy_factor = 0.50f - colony->genome.dormancy_resistance * 0.30f;
-            death_chance *= utils_clamp_f(dormancy_factor, 0.18f, 0.50f);
-        }
+        death_chance *= colony_turnover_factor(colony);
 
         if (cell->age > 140) {
             death_chance += ((float)cell->age - 140.0f) * 0.0008f;
@@ -376,6 +373,7 @@ static void atomic_spawn_dynamic_colonies(World* world) {
             colony.shape_evolution = (float)(rand() % 1000) / 1000.0f;
             colony.state = COLONY_STATE_NORMAL;
             colony.is_dormant = false;
+            colony.is_persister = false;
             colony.stress_level = 0.0f;
             colony.biofilm_strength = 0.0f;
             colony.drift_x = 0.0f;
@@ -410,7 +408,7 @@ static void atomic_update_colony_behavior(World* world) {
         float scaled_density = utils_clamp_f(colony_density * 900.0f, 0.0f, 1.0f);
         float ai_input = scaled_density * colony->genome.signal_emission *
                          (0.7f + colony->genome.signal_sensitivity * 0.6f);
-        if (colony->is_dormant) ai_input *= 0.6f;
+        ai_input *= colony_signal_activity_factor(colony);
         colony->signal_strength = utils_clamp_f(
             colony->signal_strength * 0.92f + ai_input * 0.35f, 0.0f, 1.0f
         );
@@ -452,6 +450,7 @@ static void atomic_update_colony_behavior(World* world) {
             colony->state = COLONY_STATE_NORMAL;
             colony->is_dormant = false;
         }
+        colony_update_persister_switching(colony);
 
         colony->shape_evolution += 0.002f;
         if (colony->shape_evolution > 100.0f) colony->shape_evolution -= 100.0f;
@@ -715,11 +714,13 @@ void atomic_spread_region(AtomicRegionWork* work) {
                 
                 // Calculate base spread probability with diagonal correction
                 float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * width + x]);
+                float activity_factor = colony_spread_activity_factor(colony);
                 float spread_prob = colony->genome.spread_rate * 
                                    colony->genome.metabolism *
                                    colony->genome.spread_weights[d] *
                                    DIR8_WEIGHT[d] *
-                                   growth_uptake;  // 1/sqrt(2) for diagonals
+                                   growth_uptake *
+                                   activity_factor;  // 1/sqrt(2) for diagonals
                 
                 // Per-cell stochastic noise from deterministic seed/tick/cell/direction
                 uint32_t cell_idx = (uint32_t)(y * width + x);

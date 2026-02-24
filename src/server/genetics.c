@@ -13,10 +13,10 @@
 // Environmental (5): nutrient_sensitivity(1) + toxin_sensitivity(1) + edge_affinity*0.5(1) + density_tolerance(1) + quorum_threshold(1) = 5
 // Colony interactions (6): toxin_production(1) + toxin_resistance(1) + signal_emission(1) + signal_sensitivity(1) + alarm_threshold(1) + gene_transfer_rate*10(1) = 6
 // Competitive (2): resource_consumption(1) + defense_priority(1) = 2
-// Survival (4): dormancy_threshold(1) + biofilm_investment(1) + motility(1) + efficiency(1) = 4
+// Survival (8): dormancy_threshold(1) + persister entry/exit rates and thresholds(4) + biofilm_investment(1) + motility(1) + efficiency(1) = 8
 // Neural (3): hidden_weights avg*0.5(1) + learning_rate(1) + memory_factor(1) = 3
-// Total: 4.5 + 3.75 + 5 + 6 + 2 + 4 + 3 = 28.25
-#define GENOME_DISTANCE_WEIGHT_SUM 28.25f
+// Total: 4.5 + 3.75 + 5 + 6 + 2 + 8 + 3 = 32.25
+#define GENOME_DISTANCE_WEIGHT_SUM 32.25f
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -236,6 +236,10 @@ Genome genome_create_random(void) {
     // === SURVIVAL STRATEGIES ===
     g.dormancy_threshold = defense_bias * 0.3f + rand_float() * 0.2f;
     g.dormancy_resistance = defense_bias * 0.6f + rand_float() * 0.4f;
+    g.persister_entry_stress = utils_clamp_f(0.45f + defense_bias * 0.35f + rand_float() * 0.15f, 0.35f, 0.95f);
+    g.persister_exit_stress = utils_clamp_f(g.persister_entry_stress - (0.10f + rand_float() * 0.20f), 0.05f, 0.80f);
+    g.persister_entry_rate = utils_clamp_f(0.12f + defense_bias * 0.45f + rand_float() * 0.25f, 0.05f, 0.98f);
+    g.persister_exit_rate = utils_clamp_f(0.10f + (1.0f - defense_bias) * 0.45f + rand_float() * 0.25f, 0.05f, 0.98f);
     g.sporulation_threshold = 0.2f + defense_bias * 0.4f + rand_float() * 0.2f;
     g.biofilm_investment = defense_bias * 0.5f + rand_float() * 0.3f;
     g.biofilm_tendency = defense_bias * 0.6f + rand_float() * 0.2f;
@@ -387,6 +391,10 @@ void genome_mutate(Genome* genome) {
     // === Survival Strategies ===
     MUTATE_FIELD_SLOW(dormancy_threshold, 0.0f, 0.5f);
     MUTATE_FIELD(dormancy_resistance, 0.0f, 1.0f);
+    MUTATE_FIELD(persister_entry_stress, 0.2f, 0.98f);
+    MUTATE_FIELD(persister_exit_stress, 0.0f, 0.9f);
+    MUTATE_FIELD(persister_entry_rate, 0.0f, 1.0f);
+    MUTATE_FIELD(persister_exit_rate, 0.0f, 1.0f);
     MUTATE_FIELD(biofilm_investment, 0.0f, 1.0f);
     MUTATE_FIELD_LARGE(motility, 0.0f, 0.8f);  // Higher max motility
     
@@ -471,6 +479,10 @@ float genome_distance(const Genome* a, const Genome* b) {
     
     // Survival strategies
     diff += utils_abs_f(a->dormancy_threshold - b->dormancy_threshold);
+    diff += utils_abs_f(a->persister_entry_stress - b->persister_entry_stress);
+    diff += utils_abs_f(a->persister_exit_stress - b->persister_exit_stress);
+    diff += utils_abs_f(a->persister_entry_rate - b->persister_entry_rate);
+    diff += utils_abs_f(a->persister_exit_rate - b->persister_exit_rate);
     diff += utils_abs_f(a->biofilm_investment - b->biofilm_investment);
     diff += utils_abs_f(a->motility - b->motility);
     diff += utils_abs_f(a->efficiency - b->efficiency);
@@ -543,6 +555,10 @@ Genome genome_merge(const Genome* a, size_t count_a, const Genome* b, size_t cou
     // Survival strategies
     MERGE_FIELD(dormancy_threshold);
     MERGE_FIELD(dormancy_resistance);
+    MERGE_FIELD(persister_entry_stress);
+    MERGE_FIELD(persister_exit_stress);
+    MERGE_FIELD(persister_entry_rate);
+    MERGE_FIELD(persister_exit_rate);
     MERGE_FIELD(biofilm_investment);
     MERGE_FIELD(motility);
     // Average motility direction using circular mean
