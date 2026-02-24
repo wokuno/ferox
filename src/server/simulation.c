@@ -1733,6 +1733,9 @@ void simulation_update_scents(World* world) {
             new_sources[idx] = cell->colony_id;
     }
     
+    const float signal_decay = world->rd_controls.signals.decay;
+    const float signal_diffusion = world->rd_controls.signals.diffusion;
+
     // Step 2: Diffuse existing scent with EPS-dependent effective diffusivity
     for (int y = 0; y < height; y++) {
         int row = y * width;
@@ -1743,7 +1746,7 @@ void simulation_update_scents(World* world) {
             
             uint32_t source = signal_source[idx];
             float center_eps = get_cell_eps_density(world, idx);
-            float retained = current * (1.0f - g_transport_params.signal_decay);
+            float retained = current * (1.0f - signal_decay);
             float remaining = retained;
 
             int neighbor_idx[4];
@@ -1753,25 +1756,25 @@ void simulation_update_scents(World* world) {
                 int ni = idx - width;
                 float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
                 neighbor_idx[neighbor_count] = ni;
-                neighbor_weight[neighbor_count++] = g_transport_params.signal_neighbor_transfer * scale;
+                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
             }
             if (x + 1 < width) {
                 int ni = idx + 1;
                 float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
                 neighbor_idx[neighbor_count] = ni;
-                neighbor_weight[neighbor_count++] = g_transport_params.signal_neighbor_transfer * scale;
+                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
             }
             if (y + 1 < height) {
                 int ni = idx + width;
                 float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
                 neighbor_idx[neighbor_count] = ni;
-                neighbor_weight[neighbor_count++] = g_transport_params.signal_neighbor_transfer * scale;
+                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
             }
             if (x > 0) {
                 int ni = idx - 1;
                 float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
                 neighbor_idx[neighbor_count] = ni;
-                neighbor_weight[neighbor_count++] = g_transport_params.signal_neighbor_transfer * scale;
+                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
             }
 
             if (neighbor_count > 0) {
@@ -1783,7 +1786,7 @@ void simulation_update_scents(World* world) {
                 }
 
                 if (weight_sum > 0.0f) {
-                    float max_neighbor_fraction = (1.0f - g_transport_params.signal_decay);
+                    float max_neighbor_fraction = (1.0f - signal_decay);
                     float transfer_scale = 1.0f;
                     if (weight_sum > max_neighbor_fraction) {
                         transfer_scale = max_neighbor_fraction / weight_sum;
