@@ -737,6 +737,18 @@ Probability of **horizontal gene transfer** when adjacent to another colony.
 
 ### Survival Strategy Traits
 
+#### Expensive-Trait Energetic Burden (derived)
+
+The simulator applies explicit cost accounting to four high-impact traits:
+
+`trait_load = toxin_production*0.24 + (biofilm_investment*biofilm_tendency)*0.20 + signal_emission*0.16 + motility*0.18`
+
+- Higher `trait_load` reduces effective spread pressure.
+- Higher `trait_load` increases nutrient maintenance demand and per-tick death pressure.
+- This discourages universal all-max trait profiles and produces stable strategy tradeoffs.
+
+---
+
 #### Dormancy Threshold (float, 0-1)
 
 **Stress level** that triggers transition to dormant state.

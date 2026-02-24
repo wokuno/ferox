@@ -7,6 +7,10 @@
 #include <string.h>
 #include <math.h>
 
+float calculate_expensive_trait_load(const Genome* genome);
+float calculate_growth_cost_multiplier(const Colony* colony);
+float calculate_survival_cost_multiplier(const Colony* colony);
+
 #if defined(FEROX_SIMD_AVX2)
 #include <immintrin.h>
 #endif
@@ -668,6 +672,7 @@ void simulation_spread(World* world) {
                     float dormancy_factor = colony->is_dormant
                         ? (0.12f + colony->genome.dormancy_resistance * 0.28f)
                         : 1.0f;
+                    float trait_growth_cost = calculate_growth_cost_multiplier(colony);
                     
                     // Curvature smoothing: prefer filling concavities for smooth edges
                     float curvature = calculate_curvature_boost(world, nx, ny, cell->colony_id);
@@ -687,7 +692,7 @@ void simulation_spread(World* world) {
                     float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * 
                                         env_modifier * dir_weight * scent_modifier * 
                                         strategic_modifier * history_bonus * biomass_pressure *
-                                        quorum_boost * dormancy_factor * curvature *
+                                        quorum_boost * dormancy_factor * trait_growth_cost * curvature *
                                         iso_correction * noise * perception * growth_uptake * 2.0f;
                     
                     if (rand_float() < spread_prob) {
@@ -1153,10 +1158,11 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                     float dormancy_factor = colony->is_dormant
                         ? (0.12f + colony->genome.dormancy_resistance * 0.28f)
                         : 1.0f;
+                    float trait_growth_cost = calculate_growth_cost_multiplier(colony);
                     float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * world->width + x]);
                     float spread_chance = colony->genome.spread_rate * colony->genome.metabolism *
                                           biomass_pressure * quorum_boost * dormancy_factor *
-                                          growth_uptake * 3.2f;
+                                          trait_growth_cost * growth_uptake * 3.2f;
                     if (rand_float() < spread_chance) {
                         pending_buffer_add(pending, nx, ny, cell->colony_id);
                     }
@@ -1333,6 +1339,8 @@ void simulation_update_nutrients(World* world) {
                 consumption *= colony->genome.metabolism;
                 // High efficiency reduces consumption
                 consumption *= (1.0f - colony->genome.efficiency * 0.5f);
+                // Expensive traits increase maintenance demand.
+                consumption *= (1.0f + calculate_expensive_trait_load(&colony->genome) * 0.6f);
                 consumption *= monod_uptake_multiplier(world, nutrients[i]);
             }
             float value = nutrients[i] - consumption;
@@ -1475,6 +1483,7 @@ void simulation_consume_resources(World* world) {
             if (colony && colony->active) {
                 float consumption = colony->genome.resource_consumption * 
                                     (0.5f + colony->genome.aggression * 0.5f);
+                consumption *= (1.0f + calculate_expensive_trait_load(&colony->genome) * 0.6f);
                 consumption *= monod_uptake_multiplier(world, n);
                 n -= consumption * 0.05f;
             }
@@ -1858,12 +1867,14 @@ void simulation_tick(World* world) {
         
         Colony* colony = world_get_colony(world, cell->colony_id);
         if (!colony || !colony->active) continue;
+        float trait_survival_cost = calculate_survival_cost_multiplier(colony);
         
         // STARVATION: Cells in depleted areas may die
         float nutrients = world->nutrients[i];
         if (nutrients < 0.2f) {
             // Low nutrients - chance of cell death based on efficiency
-            float death_chance = (0.2f - nutrients) * 0.1f * (1.0f - colony->genome.efficiency);
+            float death_chance = (0.2f - nutrients) * 0.1f *
+                                 (1.0f - colony->genome.efficiency) * trait_survival_cost;
             if (rand_float() < death_chance) {
                 cell->colony_id = 0;
                 cell->age = 0;
@@ -1877,7 +1888,8 @@ void simulation_tick(World* world) {
         // TOXIN DEATH: Cells in toxic areas may die
         float toxins = world->toxins[i];
         if (toxins > 0.3f) {
-            float death_chance = (toxins - 0.3f) * 0.15f * (1.0f - colony->genome.toxin_resistance);
+            float death_chance = (toxins - 0.3f) * 0.15f *
+                                 (1.0f - colony->genome.toxin_resistance) * trait_survival_cost;
             if (rand_float() < death_chance) {
                 cell->colony_id = 0;
                 cell->age = 0;
@@ -1921,6 +1933,8 @@ void simulation_tick(World* world) {
             float dormancy_protection = 0.5f - colony->genome.dormancy_resistance * 0.35f;
             base_death_rate *= utils_clamp_f(dormancy_protection, 0.12f, 0.5f);
         }
+
+        base_death_rate *= trait_survival_cost;
         
         if (rand_float() < base_death_rate) {
             // NUTRIENT RECYCLING: Dead cells release nutrients back into environment
