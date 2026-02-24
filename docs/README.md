@@ -230,6 +230,7 @@ ferox/
 - [API Reference](API.md) - Function documentation
 - [Science Bibliography](SCIENCE_BIBLIOGRAPHY.md) - DOI-backed research mapped to Ferox mechanics
 - [Testing](TESTING.md) - Test organization and coverage
+- [Statistical Regression](STATISTICAL_REGRESSION.md) - Multi-seed simulation drift checks and CI thresholds
 - [Contributing](CONTRIBUTING.md) - Development guidelines
 - [Self-Hosted Runner Ops](RUNNER_OPS.md) - Operations and incident response for CI runner
 

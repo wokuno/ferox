@@ -135,6 +135,13 @@ target_compile_definitions(test_growth_shapes PRIVATE STANDALONE_TEST)
 add_test(NAME GrowthShapeTests COMMAND test_growth_shapes)
 set_tests_properties(GrowthShapeTests PROPERTIES TIMEOUT 300)
 
+# Statistical regression tests for simulation output distributions
+add_executable(test_simulation_stat_regression test_simulation_stat_regression.c)
+target_link_libraries(test_simulation_stat_regression PRIVATE ferox_server_lib)
+target_compile_definitions(test_simulation_stat_regression PRIVATE STANDALONE_TEST)
+add_test(NAME SimulationStatRegressionTests COMMAND test_simulation_stat_regression)
+set_tests_properties(SimulationStatRegressionTests PROPERTIES TIMEOUT 240)
+
 # GUI unit tests (no SDL dependency - tests logic only)
 add_executable(test_gui test_gui.c)
 target_link_libraries(test_gui PRIVATE m)
