@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <math.h>
 
+#define QS_SIGNAL_MEMORY 0.82f
+
 // ============================================================================
 // Lock-Free Parallel Simulation Engine
 // ============================================================================
@@ -398,6 +400,33 @@ static void atomic_spawn_dynamic_colonies(World* world) {
 static void atomic_update_colony_behavior(World* world) {
     if (!world) return;
 
+    size_t signal_capacity = world->colony_count;
+    float* signal_sums = NULL;
+    uint32_t* signal_counts = NULL;
+    if (world->signals && signal_capacity > 0) {
+        signal_sums = (float*)calloc(signal_capacity, sizeof(float));
+        signal_counts = (uint32_t*)calloc(signal_capacity, sizeof(uint32_t));
+        if (signal_sums && signal_counts) {
+            int grid_total = world->width * world->height;
+            for (int i = 0; i < grid_total; i++) {
+                uint32_t cid = world->cells[i].colony_id;
+                Colony* owner = world_get_colony(world, cid);
+                if (owner) {
+                    size_t owner_idx = (size_t)(owner - world->colonies);
+                    if (owner_idx < signal_capacity) {
+                        signal_sums[owner_idx] += world->signals[i];
+                        signal_counts[owner_idx] += 1;
+                    }
+                }
+            }
+        } else {
+            free(signal_sums);
+            free(signal_counts);
+            signal_sums = NULL;
+            signal_counts = NULL;
+        }
+    }
+
     for (size_t i = 0; i < world->colony_count; i++) {
         Colony* colony = &world->colonies[i];
         if (!colony->active) continue;
@@ -408,11 +437,19 @@ static void atomic_update_colony_behavior(World* world) {
 
         float colony_density = (float)colony->cell_count / (float)(world->width * world->height);
         float scaled_density = utils_clamp_f(colony_density * 900.0f, 0.0f, 1.0f);
-        float ai_input = scaled_density * colony->genome.signal_emission *
-                         (0.7f + colony->genome.signal_sensitivity * 0.6f);
+        float local_signal = 0.0f;
+        if (signal_sums && signal_counts && signal_counts[i] > 0) {
+            local_signal = signal_sums[i] / (float)signal_counts[i];
+        }
+
+        float ai_drive = local_signal * (0.65f + colony->genome.signal_sensitivity * 0.35f);
+        float density_drive = scaled_density * colony->genome.signal_emission * 0.25f;
+        float ai_input = ai_drive + density_drive;
+        if (colony->is_dormant) ai_input *= 0.7f;
         ai_input *= colony_signal_activity_factor(colony);
         colony->signal_strength = utils_clamp_f(
-            colony->signal_strength * 0.92f + ai_input * 0.35f, 0.0f, 1.0f
+            colony->signal_strength * QS_SIGNAL_MEMORY + ai_input * (1.0f - QS_SIGNAL_MEMORY),
+            0.0f, 1.0f
         );
 
         float quorum_activation = 0.0f;
@@ -457,6 +494,9 @@ static void atomic_update_colony_behavior(World* world) {
         colony->shape_evolution += 0.002f;
         if (colony->shape_evolution > 100.0f) colony->shape_evolution -= 100.0f;
     }
+
+    free(signal_sums);
+    free(signal_counts);
 }
 
 // ============================================================================

@@ -42,6 +42,29 @@ static int tests_failed = 0;
 
 #define ASSERT_TRUE(cond) ASSERT(cond, #cond)
 #define ASSERT_NOT_NULL(ptr) ASSERT((ptr) != NULL, #ptr " is not NULL")
+#define ASSERT_NEAR(a, b, eps) ASSERT(fabsf((a) - (b)) <= (eps), #a " ~= " #b)
+
+static void setup_signal_emitter(World* world, int cx, int cy) {
+    Colony colony;
+    memset(&colony, 0, sizeof(Colony));
+    colony.genome = genome_create_random();
+    colony.genome.signal_emission = 1.0f;
+    colony.active = true;
+    colony.cell_count = 5;
+    uint32_t id = world_add_colony(world, colony);
+
+    Cell* center = world_get_cell(world, cx, cy);
+    Cell* north = world_get_cell(world, cx, cy - 1);
+    Cell* east = world_get_cell(world, cx + 1, cy);
+    Cell* south = world_get_cell(world, cx, cy + 1);
+    Cell* west = world_get_cell(world, cx - 1, cy);
+
+    if (center) { center->colony_id = id; center->is_border = true; }
+    if (north) { north->colony_id = id; north->is_border = true; }
+    if (east) { east->colony_id = id; east->is_border = true; }
+    if (south) { south->colony_id = id; south->is_border = true; }
+    if (west) { west->colony_id = id; west->is_border = true; }
+}
 
 static double now_ms(void) {
     struct timespec ts;
@@ -162,6 +185,46 @@ TEST(simd_update_scents_clamps_signal_range) {
     world_destroy(world);
 }
 
+TEST(simd_update_scents_produces_reproducible_activation_front) {
+    World* a = world_create(21, 21);
+    World* b = world_create(21, 21);
+    ASSERT_NOT_NULL(a);
+    ASSERT_NOT_NULL(b);
+    ASSERT_NOT_NULL(a->signals);
+    ASSERT_NOT_NULL(b->signals);
+
+    int cx = a->width / 2;
+    int cy = a->height / 2;
+    setup_signal_emitter(a, cx, cy);
+    setup_signal_emitter(b, cx, cy);
+
+    for (int i = 0; i < 16; i++) {
+        simulation_update_scents(a);
+        simulation_update_scents(b);
+    }
+
+    int total = a->width * a->height;
+    for (int i = 0; i < total; i++) {
+        float diff = fabsf(a->signals[i] - b->signals[i]);
+        ASSERT(diff < 1e-6f, "signal front must be deterministic and reproducible");
+    }
+
+    float center = a->signals[cy * a->width + cx];
+    float r2 = a->signals[cy * a->width + (cx + 2)];
+    float far_corner = a->signals[0];
+    ASSERT(center > far_corner, "activation should remain strongest near emitter core");
+
+    float west2 = a->signals[cy * a->width + (cx - 2)];
+    float north2 = a->signals[(cy - 2) * a->width + cx];
+    float south2 = a->signals[(cy + 2) * a->width + cx];
+    ASSERT_NEAR(r2, west2, 1e-6f);
+    ASSERT_NEAR(r2, north2, 1e-6f);
+    ASSERT_NEAR(r2, south2, 1e-6f);
+
+    world_destroy(a);
+    world_destroy(b);
+}
+
 TEST(simd_decay_toxins_performance_eval) {
     World* world = world_create(512, 512);
     ASSERT_NOT_NULL(world);
@@ -221,6 +284,7 @@ int run_simd_eval_tests(void) {
     RUN_TEST(simd_decay_toxins_matches_scalar_reference);
     RUN_TEST(simd_produce_toxins_decay_matches_scalar_on_empty_world);
     RUN_TEST(simd_update_scents_clamps_signal_range);
+    RUN_TEST(simd_update_scents_produces_reproducible_activation_front);
     RUN_TEST(simd_decay_toxins_performance_eval);
 
     printf("\n--- SIMD Eval Results ---\n");
