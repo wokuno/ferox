@@ -285,6 +285,14 @@ static bool server_rebuild_world_state(Server* server, int width, int height, in
         return false;
     }
 
+    if (server->world) {
+        RDSolverControls controls = world_get_rd_controls(server->world);
+        if (!world_set_rd_controls(new_world, &controls, NULL, 0)) {
+            world_destroy(new_world);
+            return false;
+        }
+    }
+
     if (initial_colonies > 0) {
         world_init_random_colonies(new_world, initial_colonies);
     }

@@ -11,6 +11,15 @@ typedef struct {
     float growth_coupling;
 } MonodKineticsConfig;
 
+#define RD_FIELD_MAX_DIFFUSION 0.25f
+
+#define RD_DEFAULT_NUTRIENT_DIFFUSION 0.00f
+#define RD_DEFAULT_NUTRIENT_DECAY 0.00f
+#define RD_DEFAULT_TOXIN_DIFFUSION 0.00f
+#define RD_DEFAULT_TOXIN_DECAY 0.05f
+#define RD_DEFAULT_SIGNAL_DIFFUSION 0.075f
+#define RD_DEFAULT_SIGNAL_DECAY 0.10f
+
 // Create a new world with given dimensions
 World* world_create(int width, int height);
 
@@ -41,5 +50,12 @@ MonodKineticsConfig world_get_monod_kinetics(const World* world);
 // Track cell addition for O(active_cells) removal and centroid
 void world_colony_add_cell(World* world, uint32_t colony_id, uint32_t cell_idx);
 void world_colony_remove_cell(World* world, uint32_t colony_id, uint32_t cell_idx);
+
+// Validate and apply reaction-diffusion controls.
+bool world_set_rd_controls(World* world, const RDSolverControls* controls,
+                           char* err_buf, size_t err_buf_size);
+
+// Copy current solver controls.
+RDSolverControls world_get_rd_controls(const World* world);
 
 #endif // FEROX_WORLD_H

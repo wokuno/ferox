@@ -168,6 +168,17 @@ typedef struct {
 } Colony;
 
 typedef struct {
+    float diffusion;
+    float decay;
+} RDFieldControl;
+
+typedef struct {
+    RDFieldControl nutrients;
+    RDFieldControl toxins;
+    RDFieldControl signals;
+} RDSolverControls;
+
+typedef struct {
     int width;
     int height;
     Cell* cells;
@@ -197,6 +208,8 @@ typedef struct {
         float uptake_max;
         float growth_coupling;
     } monod;
+
+    RDSolverControls rd_controls;
 } World;
 
 #endif

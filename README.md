@@ -137,6 +137,9 @@ make install
 
 ```bash
 ./ferox_server -p 8080 -w 200 -H 100 -c 20 -t 4 -r 50
+  --nutrient-diffusion 0.00 --nutrient-decay 0.00 \
+  --toxin-diffusion 0.00 --toxin-decay 0.05 \
+  --signal-diffusion 0.075 --signal-decay 0.10
 ```
 
 | Option | Description |
@@ -147,6 +150,14 @@ make install
 | `-c, --colonies` | Initial colony count |
 | `-t, --threads` | Thread pool size |
 | `-r, --rate` | Tick rate in ms (default: 50 from `main.c`) |
+| `--nutrient-diffusion` | Nutrient diffusion coefficient (0.0-0.25) |
+| `--nutrient-decay` | Nutrient decay coefficient (0.0-1.0) |
+| `--toxin-diffusion` | Toxin diffusion coefficient (0.0-0.25) |
+| `--toxin-decay` | Toxin decay coefficient (0.0-1.0) |
+| `--signal-diffusion` | Signal diffusion coefficient (0.0-0.25) |
+| `--signal-decay` | Signal decay coefficient (0.0-1.0) |
+
+Stability guardrail: each field must satisfy `4 * diffusion + decay <= 1.0`.
 
 **Starting Clients:**
 

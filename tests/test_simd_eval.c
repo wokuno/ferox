@@ -49,9 +49,10 @@ static double now_ms(void) {
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
 }
 
-static void scalar_decay_clamp(float* values, int count, float sub) {
+static void scalar_decay_mul(float* values, int count, float decay) {
+    float factor = 1.0f - decay;
     for (int i = 0; i < count; i++) {
-        values[i] = utils_clamp_f(values[i] - sub, 0.0f, 1.0f);
+        values[i] = utils_clamp_f(values[i] * factor, 0.0f, 1.0f);
     }
 }
 
@@ -77,7 +78,7 @@ TEST(simd_decay_toxins_matches_scalar_reference) {
     }
 
     simulation_decay_toxins(world);
-    scalar_decay_clamp(expected, total, 0.01f);
+    scalar_decay_mul(expected, total, world->rd_controls.toxins.decay);
 
     for (int i = 0; i < total; i++) {
         float diff = fabsf(world->toxins[i] - expected[i]);
@@ -181,7 +182,7 @@ TEST(simd_decay_toxins_performance_eval) {
 
     // Warmup
     simulation_decay_toxins(world);
-    scalar_decay_clamp(scalar_buf, total, 0.01f);
+    scalar_decay_mul(scalar_buf, total, world->rd_controls.toxins.decay);
 
     // Reset
     rng_seed(999);
@@ -196,7 +197,7 @@ TEST(simd_decay_toxins_performance_eval) {
     double t1 = now_ms();
 
     double t2 = now_ms();
-    for (int i = 0; i < iters; i++) scalar_decay_clamp(scalar_buf, total, 0.01f);
+    for (int i = 0; i < iters; i++) scalar_decay_mul(scalar_buf, total, world->rd_controls.toxins.decay);
     double t3 = now_ms();
 
     double simd_ms = t1 - t0;
@@ -234,4 +235,3 @@ int main(void) {
     return run_simd_eval_tests() > 0 ? 1 : 0;
 }
 #endif
-

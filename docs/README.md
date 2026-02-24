@@ -127,6 +127,14 @@ Server binary defaults shown (scripts/run.sh may use different defaults):
 | `-c, --colonies` | 5 | Initial colony count |
 | `-t, --threads` | 4 | Thread pool size |
 | `-r, --rate` | 100 | Milliseconds per tick |
+| `--nutrient-diffusion` | 0.00 | Nutrient diffusion coefficient (`0.0-0.25`) |
+| `--nutrient-decay` | 0.00 | Nutrient decay coefficient (`0.0-1.0`) |
+| `--toxin-diffusion` | 0.00 | Toxin diffusion coefficient (`0.0-0.25`) |
+| `--toxin-decay` | 0.05 | Toxin decay coefficient (`0.0-1.0`) |
+| `--signal-diffusion` | 0.075 | Signal diffusion coefficient (`0.0-0.25`) |
+| `--signal-decay` | 0.10 | Signal decay coefficient (`0.0-1.0`) |
+
+Solver stability guardrail per field: `4 * diffusion + decay <= 1.0`.
 
 ### Client Options
 
