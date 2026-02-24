@@ -57,6 +57,7 @@ static Colony create_test_colony(float aggression, float resilience, float defen
     c.genome.toxin_resistance = 0.5f;
     c.genome.defense_priority = defense_priority;
     c.genome.dormancy_threshold = 1.0f;
+    c.genome.dormancy_resistance = 0.0f;
     c.genome.sporulation_threshold = 1.0f;
     c.genome.persister_entry_stress = 1.0f;
     c.genome.persister_exit_stress = 1.0f;
@@ -102,8 +103,14 @@ static int test_starvation_causes_cell_death(void) {
     }
     world_get_colony(world, id)->cell_count = initial_cells;
     
-    // Run many ticks - cells should die from starvation or natural decay
-    for (int i = 0; i < 50; i++) {
+    // Sustain hard starvation so nutrient regeneration does not mask deaths.
+    for (int i = 0; i < 120; i++) {
+        for (int y = 5; y < 15; y++) {
+            for (int x = 5; x < 15; x++) {
+                int idx = y * world->width + x;
+                world->nutrients[idx] = 0.0f;
+            }
+        }
         simulation_tick(world);
     }
     

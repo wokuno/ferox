@@ -7,7 +7,7 @@ This document explains how the simulation works, including the world grid, tick 
 - **Atomic path order (`atomic_tick`)**: parallel age → HGT kinetics update (cost/loss) → parallel spread (CAS) → sync to `World` → nutrient update → scent update → combat resolution → cell turnover/death → mutation → division check → recombination check → dynamic colony spawn → stats/behavior update → sync back.
 - **Spread dynamics**: 8-neighbor spreading from occupied cells only, with age-0 cascade prevention; spread claims empty cells only in atomic phase (`neighbor_colony != 0` is skipped, not overtaken there).
 - **Strategy archetypes**: new genomes are seeded from 8 archetypes in `genome_create_random()` (`BERSERKER`, `TURTLE`, `SWARM`, `TOXIC`, `HIVE`, `NOMAD`, `PARASITE`, `CHAOTIC`), then mutated over time.
-- **Scent/quorum/biofilm/dormancy/persister switching**: scent and neighbor sampling bias spread direction; quorum activation is derived from `signal_strength` vs `quorum_threshold`; biofilm grows/decays each tick and EPS-rich biofilm reduces effective diffusivity for nutrient/toxin/signal transport; stress also drives active<->persister switching (`persister_entry_stress`, `persister_exit_stress`, entry/exit rates), while dormancy remains the deeper high-protection mode.
+- **Scent/quorum/biofilm/dormancy/persister switching**: quorum uses an explicit production-diffusion-degradation field; colony `signal_strength` is derived from local field concentration plus density drive, then thresholded by `quorum_threshold`; biofilm grows/decays each tick and EPS-rich biofilm reduces effective diffusivity for nutrient/toxin/signal transport; stress also drives active<->persister switching (`persister_entry_stress`, `persister_exit_stress`, entry/exit rates), while dormancy remains the deeper high-protection mode.
 - **HGT kinetics**: adjacent enemy colonies exchange plasmid-like material using donor/recipient/transconjugant rates, with optional plasmid cost and segregation loss controlled by `world->hgt_kinetics`; aggregate metrics are tracked in `world->hgt_metrics`.
 
 ## Expensive-Trait Cost Accounting
@@ -972,11 +972,56 @@ uint32_t* signal_source;  // Colony ID that emitted signal
 ```
 
 **Dynamics:**
-- Emitted by colonies based on `signal_emission`
-- Diffuses rapidly
-- Decays quickly
-- Colonies respond based on `signal_sensitivity`
+- Per-cell production from occupied cells, scaled by `signal_emission`
+- Diffusion over 4-neighbor Laplacian
+- Explicit per-tick degradation
+- Colonies integrate local field concentration into `signal_strength`
 - Configurable controls: `--signal-diffusion`, `--signal-decay`
+
+### Quorum Signal Equations
+
+For each cell `x`, the signal layer update uses:
+
+```text
+S[t+1, x] = clamp01(
+    (1 - d) * S[t, x]
+    + P[t, x]
+    + k_diff * (mean_4nbr(S[t, x]) - S[t, x])
+)
+```
+
+Where:
+- `P[t, x] = k_prod * signal_emission * border_bonus * dormancy_factor` for occupied cells, else `0`
+- `d` is the degradation rate
+- `k_diff` is the diffusion coupling
+
+Colony-level quorum memory then updates as:
+
+```text
+signal_strength[t+1] = clamp01(
+    m * signal_strength[t]
+    + (1 - m) * (local_signal_drive + density_drive)
+)
+```
+
+Activation remains threshold-based:
+
+```text
+quorum_activation = clamp01((signal_strength - quorum_threshold) / (1 - quorum_threshold + 0.001))
+```
+
+### Quorum Module Parameters
+
+Current module constants:
+
+| Parameter | Value | Role |
+|-----------|-------|------|
+| `QS_PRODUCTION_RATE` | `0.22` | Baseline per-cell autoinducer production |
+| `QS_BORDER_PRODUCTION_BONUS` | `1.35` | Extra production at colony borders |
+| `QS_DIFFUSION_RATE` | `0.20` | Discrete diffusion coupling |
+| `QS_DEGRADATION_RATE` | `0.12` | Per-tick signal decay |
+| `QS_DORMANT_PRODUCTION_FACTOR` | `0.60` | Reduced production while dormant |
+| `QS_SIGNAL_MEMORY` | `0.82` | Colony memory factor for smoothed signal_strength |
 
 **Signal Uses:**
 - Coordinate movement toward kin
