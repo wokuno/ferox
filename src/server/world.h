@@ -3,6 +3,14 @@
 
 #include "../shared/types.h"
 
+typedef struct {
+    bool enabled;
+    float half_saturation;
+    float uptake_min;
+    float uptake_max;
+    float growth_coupling;
+} MonodKineticsConfig;
+
 // Create a new world with given dimensions
 World* world_create(int width, int height);
 
@@ -23,6 +31,12 @@ uint32_t world_add_colony(World* world, Colony colony);
 
 // Remove a colony from the world
 void world_remove_colony(World* world, uint32_t id);
+
+// Configure optional Monod-style nutrient uptake and growth coupling.
+void world_set_monod_kinetics(World* world, const MonodKineticsConfig* config);
+
+// Retrieve current Monod-style kinetics configuration.
+MonodKineticsConfig world_get_monod_kinetics(const World* world);
 
 // Track cell addition for O(active_cells) removal and centroid
 void world_colony_add_cell(World* world, uint32_t colony_id, uint32_t cell_idx);

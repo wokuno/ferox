@@ -39,6 +39,29 @@ static const float DIR8_WEIGHT[] = {1.0f, 0.7071f, 1.0f, 0.7071f, 1.0f, 0.7071f,
 #define TOXIN_DECAY_RATE 0.01f          // Toxin decay per tick
 #define QUORUM_SENSING_RADIUS 3         // Radius for local density calculation
 
+static inline float monod_saturation(float substrate, float half_saturation) {
+    if (substrate <= 0.0f) return 0.0f;
+    if (half_saturation <= 0.0f) return 1.0f;
+    return substrate / (half_saturation + substrate);
+}
+
+static inline float monod_growth_multiplier(const World* world, float substrate) {
+    if (!world || !world->monod.enabled) return 1.0f;
+
+    float saturation = monod_saturation(substrate, world->monod.half_saturation);
+    float coupling = utils_clamp_f(world->monod.growth_coupling, 0.0f, 1.0f);
+    return (1.0f - coupling) + coupling * saturation;
+}
+
+static inline float monod_uptake_multiplier(const World* world, float substrate) {
+    if (!world || !world->monod.enabled) return 1.0f;
+
+    float saturation = monod_saturation(substrate, world->monod.half_saturation);
+    float uptake_min = utils_clamp_f(world->monod.uptake_min, 0.0f, 1.0f);
+    float uptake_max = utils_clamp_f(world->monod.uptake_max, uptake_min, 1.0f);
+    return uptake_min + (uptake_max - uptake_min) * saturation;
+}
+
 // SIMD helpers for dense float-array updates in per-tick environment passes.
 #if defined(FEROX_SIMD_AVX2) && (defined(__x86_64__) || defined(__i386__))
 static inline bool simd_avx2_runtime_available(void) {
@@ -659,12 +682,13 @@ void simulation_spread(World* world) {
                     // Perception: look ahead in this direction for nutrients/threats/space
                     float perception = calculate_perception_modifier(world, x, y, 
                                                                       DX8[d], DY8[d], colony);
+                    float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * world->width + x]);
                     
                     float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * 
                                         env_modifier * dir_weight * scent_modifier * 
                                         strategic_modifier * history_bonus * biomass_pressure *
                                         quorum_boost * dormancy_factor * curvature *
-                                        iso_correction * noise * perception * 2.0f;
+                                        iso_correction * noise * perception * growth_uptake * 2.0f;
                     
                     if (rand_float() < spread_prob) {
                         if (pending_count >= pending_capacity) {
@@ -1129,8 +1153,10 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                     float dormancy_factor = colony->is_dormant
                         ? (0.12f + colony->genome.dormancy_resistance * 0.28f)
                         : 1.0f;
+                    float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * world->width + x]);
                     float spread_chance = colony->genome.spread_rate * colony->genome.metabolism *
-                                          biomass_pressure * quorum_boost * dormancy_factor * 3.2f;
+                                          biomass_pressure * quorum_boost * dormancy_factor *
+                                          growth_uptake * 3.2f;
                     if (rand_float() < spread_chance) {
                         pending_buffer_add(pending, nx, ny, cell->colony_id);
                     }
@@ -1307,6 +1333,7 @@ void simulation_update_nutrients(World* world) {
                 consumption *= colony->genome.metabolism;
                 // High efficiency reduces consumption
                 consumption *= (1.0f - colony->genome.efficiency * 0.5f);
+                consumption *= monod_uptake_multiplier(world, nutrients[i]);
             }
             float value = nutrients[i] - consumption;
             if (value < 0.0f) value = 0.0f;
@@ -1448,6 +1475,7 @@ void simulation_consume_resources(World* world) {
             if (colony && colony->active) {
                 float consumption = colony->genome.resource_consumption * 
                                     (0.5f + colony->genome.aggression * 0.5f);
+                consumption *= monod_uptake_multiplier(world, n);
                 n -= consumption * 0.05f;
             }
             // Occupied cells regenerate very slowly

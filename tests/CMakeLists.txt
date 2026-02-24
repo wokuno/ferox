@@ -94,6 +94,12 @@ target_link_libraries(test_simulation_common PRIVATE ferox_server_lib)
 target_compile_definitions(test_simulation_common PRIVATE STANDALONE_TEST)
 add_test(NAME SimulationCommonTests COMMAND test_simulation_common)
 
+# Monod-style growth and uptake coupling tests
+add_executable(test_monod_kinetics test_monod_kinetics.c)
+target_link_libraries(test_monod_kinetics PRIVATE ferox_server_lib)
+target_compile_definitions(test_monod_kinetics PRIVATE STANDALONE_TEST)
+add_test(NAME MonodKineticsTests COMMAND test_monod_kinetics)
+
 # Visual stability stress tests
 add_executable(test_visual_stability test_visual_stability.c)
 target_link_libraries(test_visual_stability PRIVATE ferox_server_lib)

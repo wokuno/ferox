@@ -189,6 +189,14 @@ typedef struct {
     
     float* scratch_signals;
     uint32_t* scratch_sources;
+
+    struct {
+        bool enabled;
+        float half_saturation;
+        float uptake_min;
+        float uptake_max;
+        float growth_coupling;
+    } monod;
 } World;
 
 #endif

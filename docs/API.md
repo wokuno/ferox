@@ -965,6 +965,35 @@ Remove a colony (marks inactive, clears cells).
 
 ---
 
+#### world_set_monod_kinetics
+
+```c
+void world_set_monod_kinetics(World* world, const MonodKineticsConfig* config);
+```
+
+Configure optional Monod-style uptake and growth coupling.
+
+**Parameters:**
+- `world` - World
+- `config` - Monod kinetics settings (`enabled`, `half_saturation`, `uptake_min`, `uptake_max`, `growth_coupling`)
+
+---
+
+#### world_get_monod_kinetics
+
+```c
+MonodKineticsConfig world_get_monod_kinetics(const World* world);
+```
+
+Read the current Monod kinetics settings.
+
+**Parameters:**
+- `world` - World
+
+**Returns:** Current Monod kinetics configuration
+
+---
+
 ### genetics.h
 
 Genome operations.
