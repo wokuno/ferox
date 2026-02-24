@@ -854,7 +854,6 @@ static int prepare_region_tasks(AtomicWorld* aworld) {
     int regions_x = 1;
     int regions_y = 1;
     atomic_region_layout(aworld, &regions_x, &regions_y);
-
     int region_width = aworld->grid.width / regions_x;
     int region_height = aworld->grid.height / regions_y;
     
@@ -870,6 +869,7 @@ static int prepare_region_tasks(AtomicWorld* aworld) {
             work->end_x = (rx == regions_x - 1) ? aworld->grid.width : (rx + 1) * region_width;
             work->end_y = (ry == regions_y - 1) ? aworld->grid.height : (ry + 1) * region_height;
             work->thread_id = task_idx % aworld->thread_count;
+            submit_args[task_idx] = work;
             task_idx++;
         }
     }
@@ -886,9 +886,11 @@ static void submit_region_tasks(AtomicWorld* aworld, void (*task_func)(void*)) {
         return;
     }
 
+    void* submit_args[16];
     for (int i = 0; i < task_count; i++) {
-        threadpool_submit(aworld->pool, task_func, &aworld->region_work[i]);
+        submit_args[i] = &aworld->region_work[i];
     }
+    threadpool_submit_batch(aworld->pool, task_func, submit_args, task_count);
 }
 
 void atomic_age(AtomicWorld* aworld) {

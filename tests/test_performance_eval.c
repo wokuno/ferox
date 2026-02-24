@@ -447,10 +447,16 @@ TEST(threadpool_granularity_eval) {
     const int scale = get_perf_scale();
     const int total_increments = 50000 * scale;
     const int chunk = 250;
+    const int submit_chunk = 256;
     const int batch_tasks = total_increments / chunk;
 
     ThreadPool* pool = threadpool_create(4);
     ASSERT_NOT_NULL(pool);
+
+    void* tiny_args[submit_chunk];
+    for (int i = 0; i < submit_chunk; i++) {
+        tiny_args[i] = NULL;
+    }
 
     atomic_store(&perf_task_counter, 0);
     double tiny_start = now_ms();
@@ -459,6 +465,19 @@ TEST(threadpool_granularity_eval) {
     }
     threadpool_wait(pool);
     double tiny_ms = now_ms() - tiny_start;
+    ASSERT_EQ(atomic_load(&perf_task_counter), total_increments);
+
+    atomic_store(&perf_task_counter, 0);
+    double chunked_submit_start = now_ms();
+    for (int i = 0; i < total_increments; i += submit_chunk) {
+        int count = total_increments - i;
+        if (count > submit_chunk) {
+            count = submit_chunk;
+        }
+        threadpool_submit_batch(pool, perf_increment_task, tiny_args, count);
+    }
+    threadpool_wait(pool);
+    double chunked_submit_ms = now_ms() - chunked_submit_start;
     ASSERT_EQ(atomic_load(&perf_task_counter), total_increments);
 
     PerfTaskBatch* batches = (PerfTaskBatch*)calloc((size_t)batch_tasks, sizeof(PerfTaskBatch));
@@ -477,14 +496,21 @@ TEST(threadpool_granularity_eval) {
     ASSERT_EQ(atomic_load(&perf_task_counter), total_increments);
 
     print_metric("threadpool tiny tasks", tiny_ms, (double)total_increments);
+    print_metric("threadpool chunked submit", chunked_submit_ms, (double)total_increments);
     print_metric("threadpool batched tasks", batched_ms, (double)total_increments);
 
+    if (chunked_submit_ms > 0.0) {
+        printf("    [perf] tiny/chunked-submit ratio: %.2fx\n", tiny_ms / chunked_submit_ms);
+    }
     if (batched_ms > 0.0) {
         printf("    [perf] tiny/batched ratio: %.2fx\n", tiny_ms / batched_ms);
         if (tiny_ms / batched_ms > 2.0) {
             printf("    [hint] task submission overhead is high; consider coarser work units\n");
         }
     }
+
+    ASSERT(chunked_submit_ms <= tiny_ms * 4.0 + 2.0,
+           "chunked submit path regressed severely");
 
     free(batches);
     threadpool_destroy(pool);
