@@ -10,9 +10,15 @@ This document captures how to run performance measurements, current baseline dat
 
 # Heavier run (recommended for comparisons)
 FEROX_PERF_SCALE=5 ./scripts/test.sh perf
+
+# Target only the perf eval binary (if you want focused output)
+ctest --output-on-failure -R PerformanceEvalTests -V
 ```
 
 `FEROX_PERF_SCALE` increases loop counts in `test_performance_eval.c` so timings are more stable.
+
+When comparing branches, use the same `FEROX_PERF_SCALE`, machine class, and run count.
+For regression checks, run at least 3 times and compare medians instead of single-run minima.
 
 ## Current Baseline (macOS arm64, 3 runs, `FEROX_PERF_SCALE=5`)
 
@@ -26,6 +32,26 @@ Average values from repeated runs:
 - `atomic_tick` (4 threads): **1299 ms** for 150 ticks (~8.7 ms/tick)
 - Atomic vs serial ratio: **2.19x** (atomic path still slower; see notes)
 - Threadpool submit+execute: **37.6 ms** for 250k tasks
+
+## New Phase + Sync Metrics
+
+`PerformanceEvalTests` now emits additional `[perf]` lines for:
+
+- `atomic phase: age`
+- `atomic phase: spread`
+- `atomic phase: sync_to_world`
+- `atomic phase: serial core`
+- `atomic phase: sync_from_world`
+- `atomic phase share: ...` (percentage split across major phases)
+- `sync_to_world <WxH>` and `sync_from_world <WxH>` (per-grid timings)
+- `sync_to scaling ...` and `sync_from scaling ...` (throughput scaling vs baseline grid)
+
+Interpretation guidance:
+
+- If `sync_to_world` + `sync_from_world` dominates `atomic phase share`, the bottleneck is grid/state copying rather than CAS spread work.
+- If `spread` dominates, focus on task granularity, contention, and false-sharing hotspots.
+- If `serial core` dominates, optimizing atomic regions alone will not materially improve end-to-end `atomic_tick` latency.
+- For scaling lines, values near `1.00x` indicate near-linear throughput retention as grid size grows; lower values indicate cache/memory pressure.
 
 ### Previous baseline (before optimizations)
 
@@ -89,4 +115,3 @@ If deeper profiling is needed beyond built-in tests:
 - **Linux**: `perf`, `heaptrack`, `valgrind --tool=callgrind`
 
 Built-in performance tests are great for regression tracking; external profilers are better for precise flamegraph hotspot attribution.
-

@@ -56,6 +56,12 @@ jobs:
           with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
               log = f.read()
 
+          perf_lines = []
+          for raw_line in log.splitlines():
+              if "[perf]" in raw_line:
+                  perf_lines.append(raw_line.strip())
+          perf_lines = perf_lines[:40]
+
           passed = 0
           failed = 0
           total = 0
@@ -78,6 +84,11 @@ jobs:
               out.write(f"failed={failed}\n")
               out.write(f"total={total}\n")
               out.write(f"status={status}\n")
+              out.write(f"perf_count={len(perf_lines)}\n")
+              out.write("perf_metrics<<EOF\n")
+              if perf_lines:
+                  out.write("\n".join(perf_lines) + "\n")
+              out.write("EOF\n")
           PY
           echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
           exit "$test_exit_code"
@@ -91,8 +102,18 @@ jobs:
           - Passed: ${{ steps.run_tests.outputs.passed || '0' }}
           - Failed: ${{ steps.run_tests.outputs.failed || '0' }}
           - Total: ${{ steps.run_tests.outputs.total || '0' }}
+          - Perf metrics captured: ${{ steps.run_tests.outputs.perf_count || '0' }}
           - Details: ${{ steps.run_tests.outputs.run_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
           EOF
+          if [ -n "${{ steps.run_tests.outputs.perf_metrics }}" ]; then
+            {
+              echo ""
+              echo "#### Perf Metrics (from ctest output)"
+              echo '```'
+              printf "%s\n" "${{ steps.run_tests.outputs.perf_metrics }}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   build-and-test-ferox:
     if: github.event_name != 'pull_request'
@@ -139,6 +160,12 @@ jobs:
           with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
               log = f.read()
 
+          perf_lines = []
+          for raw_line in log.splitlines():
+              if "[perf]" in raw_line:
+                  perf_lines.append(raw_line.strip())
+          perf_lines = perf_lines[:40]
+
           passed = 0
           failed = 0
           total = 0
@@ -161,6 +188,11 @@ jobs:
               out.write(f"failed={failed}\n")
               out.write(f"total={total}\n")
               out.write(f"status={status}\n")
+              out.write(f"perf_count={len(perf_lines)}\n")
+              out.write("perf_metrics<<EOF\n")
+              if perf_lines:
+                  out.write("\n".join(perf_lines) + "\n")
+              out.write("EOF\n")
           PY
           echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
           exit "$test_exit_code"
@@ -174,8 +206,18 @@ jobs:
           - Passed: ${{ steps.run_tests.outputs.passed || '0' }}
           - Failed: ${{ steps.run_tests.outputs.failed || '0' }}
           - Total: ${{ steps.run_tests.outputs.total || '0' }}
+          - Perf metrics captured: ${{ steps.run_tests.outputs.perf_count || '0' }}
           - Details: ${{ steps.run_tests.outputs.run_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
           EOF
+          if [ -n "${{ steps.run_tests.outputs.perf_metrics }}" ]; then
+            {
+              echo ""
+              echo "#### Perf Metrics (from ctest output)"
+              echo '```'
+              printf "%s\n" "${{ steps.run_tests.outputs.perf_metrics }}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   coverage-ferox:
     if: github.event_name != 'pull_request'
