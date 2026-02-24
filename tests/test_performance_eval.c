@@ -17,6 +17,7 @@
 #include "../src/server/world.h"
 #include "../src/server/genetics.h"
 #include "../src/server/simulation.h"
+#include "../src/server/server.h"
 #include "../src/server/threadpool.h"
 #include "../src/server/atomic_sim.h"
 
@@ -272,6 +273,75 @@ TEST(protocol_world_path_breakdown_eval) {
     proto_world_free(&world);
 }
 
+TEST(server_broadcast_path_breakdown_eval) {
+    const int scale = get_perf_scale();
+    const int iters = 80 * scale;
+
+    Server* server = server_create(0, 320, 180, 4);
+    ASSERT_NOT_NULL(server);
+
+    rng_seed(1337);
+    world_init_random_colonies(server->world, 72);
+    for (int i = 0; i < 3; i++) {
+        simulation_tick(server->world);
+    }
+
+    size_t total_snapshot_bytes = 0;
+    double build_start = now_ms();
+    for (int i = 0; i < iters; i++) {
+        proto_world snapshot;
+        server_build_protocol_world_snapshot(server, &snapshot);
+        total_snapshot_bytes += (size_t)snapshot.colony_count * COLONY_SERIALIZED_SIZE;
+        total_snapshot_bytes += (size_t)snapshot.grid_size * sizeof(uint16_t);
+        proto_world_free(&snapshot);
+    }
+    double build_ms = now_ms() - build_start;
+
+    size_t total_encoded_bytes = 0;
+    double build_serialize_start = now_ms();
+    for (int i = 0; i < iters; i++) {
+        proto_world snapshot;
+        server_build_protocol_world_snapshot(server, &snapshot);
+
+        uint8_t* encoded = NULL;
+        size_t encoded_len = 0;
+        int rc = protocol_serialize_world_state(&snapshot, &encoded, &encoded_len);
+        ASSERT_EQ(rc, 0);
+        ASSERT_NOT_NULL(encoded);
+
+        total_encoded_bytes += encoded_len;
+
+        free(encoded);
+        proto_world_free(&snapshot);
+    }
+    double build_serialize_ms = now_ms() - build_serialize_start;
+
+    double broadcast_start = now_ms();
+    for (int i = 0; i < iters; i++) {
+        server_broadcast_world_state(server);
+    }
+    double broadcast_ms = now_ms() - broadcast_start;
+
+    print_metric("broadcast build snapshot", build_ms, (double)iters);
+    print_metric("broadcast build+serialize", build_serialize_ms, (double)iters);
+    print_metric("broadcast end-to-end (0 clients)", broadcast_ms, (double)iters);
+
+    double avg_snapshot_kb = (double)total_snapshot_bytes / (double)iters / 1024.0;
+    double avg_encoded_kb = (double)total_encoded_bytes / (double)iters / 1024.0;
+    printf("    [perf] broadcast avg snapshot: %.2f KiB, encoded: %.2f KiB\n", avg_snapshot_kb, avg_encoded_kb);
+
+    if (build_serialize_ms > 0.0) {
+        double build_share = (build_ms / build_serialize_ms) * 100.0;
+        printf("    [perf] broadcast stage share: build=%.1f%% serialize+other=%.1f%%\n",
+               build_share, 100.0 - build_share);
+    }
+
+    ASSERT(build_ms > 0.0 && build_serialize_ms > 0.0 && broadcast_ms > 0.0,
+           "broadcast timings must be positive");
+
+    server_destroy(server);
+}
+
 TEST(simulation_tick_throughput) {
     const int scale = get_perf_scale();
     const int ticks = 35 * scale;
@@ -462,6 +532,7 @@ int run_performance_eval_tests(void) {
     RUN_TEST(world_lifecycle_throughput);
     RUN_TEST(protocol_world_serialize_deserialize_throughput);
     RUN_TEST(protocol_world_path_breakdown_eval);
+    RUN_TEST(server_broadcast_path_breakdown_eval);
     RUN_TEST(simulation_tick_throughput);
     RUN_TEST(atomic_tick_throughput_and_speedup_eval);
     RUN_TEST(atomic_tick_thread_scaling_eval);
