@@ -875,7 +875,6 @@ static int prepare_region_tasks(AtomicWorld* aworld) {
             work->end_x = (rx == regions_x - 1) ? aworld->grid.width : (rx + 1) * region_width;
             work->end_y = (ry == regions_y - 1) ? aworld->grid.height : (ry + 1) * region_height;
             work->thread_id = task_idx % aworld->thread_count;
-            submit_args[task_idx] = work;
             task_idx++;
         }
     }

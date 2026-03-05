@@ -229,3 +229,5 @@ Progress:
 - This branch restores the feature content by reverting the revert commit, so the next PR can run through the normal CI and merge flow.
 - PR `#83` initially had no checks because the branch workflow contained a duplicate `coverage-macos` job definition, which GitHub rejected at dispatch time.
 - The duplicate job was removed on the reapply branch so CI can attach and run normally.
+- PR `#83` then failed the macOS build because `prepare_region_tasks()` still referenced `submit_args` after that array had been moved into `submit_region_tasks()`.
+- The stale `submit_args[task_idx] = work;` line was removed so the branch now compiles again.
