@@ -252,3 +252,12 @@ Status: In progress
 Progress:
 - The `Update Preview GIF` workflow failed in `Commit updated preview` after checking out a detached `head_sha`.
 - The push refspec now uses `HEAD:refs/heads/<branch>` so Git can push back to branch names containing slashes from a detached checkout.
+
+## Main-only Preview Refresh
+
+Status: In progress
+
+Progress:
+- Preview GIF updates are now restricted to `main`.
+- The workflow only runs after successful `CI` runs triggered by `push` events on `main`, or manual dispatches launched from `main`.
+- The target-branch resolution step now rejects non-`main` branches explicitly.

@@ -9,10 +9,11 @@ on:
 jobs:
   refresh-preview:
     if: >
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') ||
       (
         github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
         github.event.workflow_run.head_repository.full_name == github.repository
       )
     runs-on: ubuntu-latest
@@ -33,6 +34,11 @@ jobs:
 
           if [ -z "$BRANCH" ] || [ -z "$REF" ]; then
             echo "Unable to determine target branch/ref"
+            exit 1
+          fi
+
+          if [ "$BRANCH" != "main" ]; then
+            echo "Preview refresh is restricted to main; got branch '$BRANCH'"
             exit 1
           fi
 
