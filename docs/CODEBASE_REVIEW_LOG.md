@@ -232,3 +232,7 @@ Recovery plan:
 - Create a revert branch from `origin/main` that undoes the 8 accidentally pushed commits via normal commits.
 - Open and merge a revert PR so GitHub history returns to the pre-push tree without rewriting protected history.
 - Open a second PR from the preserved feature branch content so CI can run and the changes can be merged through the normal PR path.
+
+Current progress:
+- Revert PR `#81` merged successfully, returning `main` to the pre-push tree through protected-branch-safe history.
+- `feat/perf-eval-coverage-summary` remains published with the preserved feature history and is the next PR base.
