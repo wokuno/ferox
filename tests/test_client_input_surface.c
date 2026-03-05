@@ -14,28 +14,26 @@ static int tests_run = 0;
 
 static void setup_stdin_bytes(const uint8_t* bytes, size_t len, int* saved_stdin_fd) {
     int pipefd[2];
-    int rc = pipe(pipefd);
-    assert(rc == 0);
+    (void)bytes;
+    assert(pipe(pipefd) == 0);
+    assert(bytes != NULL || len == 0);
 
     if (len > 0) {
-        ssize_t written = write(pipefd[1], bytes, len);
-        assert(written == (ssize_t)len);
+        assert(write(pipefd[1], bytes, len) == (ssize_t)len);
     }
     close(pipefd[1]);
 
     *saved_stdin_fd = dup(STDIN_FILENO);
     assert(*saved_stdin_fd >= 0);
 
-    rc = dup2(pipefd[0], STDIN_FILENO);
-    assert(rc >= 0);
+    assert(dup2(pipefd[0], STDIN_FILENO) >= 0);
     close(pipefd[0]);
 
     initialized = true;
 }
 
 static void restore_stdin(int saved_stdin_fd) {
-    int rc = dup2(saved_stdin_fd, STDIN_FILENO);
-    assert(rc >= 0);
+    assert(dup2(saved_stdin_fd, STDIN_FILENO) >= 0);
     close(saved_stdin_fd);
     initialized = false;
 }

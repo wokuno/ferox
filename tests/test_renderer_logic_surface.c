@@ -29,17 +29,6 @@ static void free_renderer(Renderer* r) {
     r->frame_buffer = NULL;
 }
 
-static int count_substring(const char* haystack, const char* needle) {
-    int count = 0;
-    const char* p = haystack;
-    size_t nlen = strlen(needle);
-    while ((p = strstr(p, needle)) != NULL) {
-        count++;
-        p += nlen;
-    }
-    return count;
-}
-
 static proto_world make_world(uint32_t width, uint32_t height) {
     proto_world world;
     memset(&world, 0, sizeof(world));
