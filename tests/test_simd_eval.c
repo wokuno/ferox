@@ -225,6 +225,31 @@ TEST(simd_update_scents_produces_reproducible_activation_front) {
     world_destroy(b);
 }
 
+TEST(simd_update_scents_tracks_strongest_source) {
+    World* world = world_create(5, 3);
+    ASSERT_NOT_NULL(world);
+    ASSERT_NOT_NULL(world->signals);
+    ASSERT_NOT_NULL(world->signal_source);
+
+    memset(world->signals, 0, (size_t)(world->width * world->height) * sizeof(float));
+    memset(world->signal_source, 0, (size_t)(world->width * world->height) * sizeof(uint32_t));
+
+    world->signals[1 * world->width + 1] = 0.10f;
+    world->signal_source[1 * world->width + 1] = 10u;
+
+    world->signals[1 * world->width + 3] = 0.90f;
+    world->signal_source[1 * world->width + 3] = 20u;
+
+    simulation_update_scents(world);
+
+    int center_idx = 1 * world->width + 2;
+    ASSERT_TRUE(world->signals[center_idx] > 0.0f);
+    ASSERT(world->signal_source[center_idx] == 20u,
+           "center cell should keep the strongest contributing source");
+
+    world_destroy(world);
+}
+
 TEST(simd_decay_toxins_performance_eval) {
     World* world = world_create(512, 512);
     ASSERT_NOT_NULL(world);
@@ -285,6 +310,7 @@ int run_simd_eval_tests(void) {
     RUN_TEST(simd_produce_toxins_decay_matches_scalar_on_empty_world);
     RUN_TEST(simd_update_scents_clamps_signal_range);
     RUN_TEST(simd_update_scents_produces_reproducible_activation_front);
+    RUN_TEST(simd_update_scents_tracks_strongest_source);
     RUN_TEST(simd_decay_toxins_performance_eval);
 
     printf("\n--- SIMD Eval Results ---\n");
