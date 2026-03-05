@@ -52,6 +52,15 @@ typedef struct AtomicWorldStruct {
     int region_work_count;
 } AtomicWorld;
 
+typedef struct {
+    double age_ms;
+    double spread_ms;
+    double sync_to_world_ms;
+    double serial_ms;
+    double sync_from_world_ms;
+    double total_ms;
+} AtomicTickBreakdown;
+
 // ============================================================================
 // Initialization / Cleanup
 // ============================================================================
@@ -95,6 +104,11 @@ void atomic_world_sync_to_world(AtomicWorld* aworld);
  * 6. Sync stats to World
  */
 void atomic_tick(AtomicWorld* aworld);
+
+/**
+ * Run one simulation tick and capture per-phase timing.
+ */
+void atomic_tick_with_breakdown(AtomicWorld* aworld, AtomicTickBreakdown* breakdown);
 
 /**
  * Parallel spread phase only.

@@ -85,6 +85,13 @@ void server_stop(Server* server);
 void server_broadcast_world_state(Server* server);
 
 /**
+ * Build a protocol snapshot from the current server world state.
+ * @param server The server
+ * @param out_world Destination protocol world (must be freed with proto_world_free)
+ */
+void server_build_protocol_world_snapshot(Server* server, proto_world* out_world);
+
+/**
  * Send detailed colony info to a specific client.
  * @param server The server
  * @param client The client session

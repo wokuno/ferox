@@ -63,7 +63,7 @@ uvx gcovr --root . --xml-pretty --output coverage.xml
 
 Notes:
 - Coverage mode is enabled via `-DENABLE_COVERAGE=ON`.
-- CI runs macOS coverage on all events (`coverage-macos`).
+- CI runs macOS coverage on pull requests (`coverage-macos`).
 - CI runs self-hosted Linux coverage only on non-PR events (`coverage-ferox`).
 - CI excludes `PerformanceEvalTests` and `AllTests` during coverage runs.
 - CI writes `coverage-summary.txt` and `coverage.xml`, then appends a short summary to the job summary.

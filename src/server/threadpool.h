@@ -25,14 +25,13 @@ typedef struct ThreadPool {
     int thread_count;
     Task* task_queue_head;
     Task* task_queue_tail;
-    Task* task_cache_head;
+    Task* task_free_list;
     pthread_mutex_t queue_mutex;
     pthread_cond_t queue_cond;
     pthread_cond_t done_cond;
     int active_tasks;
     int pending_tasks;
-    int cached_tasks;
-    int max_cached_tasks;
+    int task_free_count;
     bool shutdown;
 } ThreadPool;
 
@@ -58,6 +57,16 @@ void threadpool_destroy(ThreadPool* pool);
  * @param arg Argument to pass to the task function
  */
 void threadpool_submit(ThreadPool* pool, task_func func, void* arg);
+
+/**
+ * Submit multiple tasks with the same function in one critical section.
+ * Useful for hot loops that enqueue many small tasks.
+ * @param pool The thread pool
+ * @param func The task function to execute
+ * @param args Array of task arguments, one per task
+ * @param count Number of tasks in args
+ */
+void threadpool_submit_batch(ThreadPool* pool, task_func func, void* const* args, int count);
 
 /**
  * Wait for all submitted tasks to complete.

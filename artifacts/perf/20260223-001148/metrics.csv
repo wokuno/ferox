@@ -1,0 +1,113 @@
+scenario,build_type,scale,repeat,metric,ms,ops_per_sec
+debug_scale1,Debug,1,1,name+color generation,14.490000,3450893.820000
+debug_scale1,Debug,1,1,world create/init/destroy,28.100000,6405.690000
+debug_scale1,Debug,1,1,protocol serialize+deserialize,32.770000,3662.220000
+debug_scale1,Debug,1,1,protocol serialize only,23.530000,5100.740000
+debug_scale1,Debug,1,1,protocol deserialize only,18.400000,6522.800000
+debug_scale1,Debug,1,1,simulation_tick (serial),408.940000,85.590000
+debug_scale1,Debug,1,1,atomic_tick (4 threads),667.530000,44.940000
+debug_scale1,Debug,1,1,simulation_tick baseline,385.530000,77.820000
+debug_scale1,Debug,1,1,atomic_tick (1 thread),890.690000,22.450000
+debug_scale1,Debug,1,1,atomic_tick (2 threads),546.030000,36.630000
+debug_scale1,Debug,1,1,atomic_tick (4 threads),316.550000,63.180000
+debug_scale1,Debug,1,1,threadpool submit+execute,9.300000,5373455.230000
+debug_scale1,Debug,1,1,threadpool tiny tasks,9.240000,5408328.890000
+debug_scale1,Debug,1,1,threadpool batched tasks,1.960000,25471213.660000
+debug_scale1,Debug,1,2,name+color generation,12.540000,3988513.150000
+debug_scale1,Debug,1,2,world create/init/destroy,27.790000,6476.450000
+debug_scale1,Debug,1,2,protocol serialize+deserialize,32.580000,3683.020000
+debug_scale1,Debug,1,2,protocol serialize only,22.540000,5323.400000
+debug_scale1,Debug,1,2,protocol deserialize only,18.150000,6611.570000
+debug_scale1,Debug,1,2,simulation_tick (serial),406.810000,86.040000
+debug_scale1,Debug,1,2,atomic_tick (4 threads),660.520000,45.420000
+debug_scale1,Debug,1,2,simulation_tick baseline,385.990000,77.720000
+debug_scale1,Debug,1,2,atomic_tick (1 thread),739.160000,27.060000
+debug_scale1,Debug,1,2,atomic_tick (2 threads),616.370000,32.450000
+debug_scale1,Debug,1,2,atomic_tick (4 threads),408.390000,48.970000
+debug_scale1,Debug,1,2,threadpool submit+execute,8.210000,6090876.140000
+debug_scale1,Debug,1,2,threadpool tiny tasks,11.500000,4348960.520000
+debug_scale1,Debug,1,2,threadpool batched tasks,1.670000,29958064.610000
+debug_scale2,Debug,2,1,name+color generation,25.490000,3922953.250000
+debug_scale2,Debug,2,1,world create/init/destroy,55.250000,6515.720000
+debug_scale2,Debug,2,1,protocol serialize+deserialize,65.400000,3669.670000
+debug_scale2,Debug,2,1,protocol serialize only,45.200000,5309.260000
+debug_scale2,Debug,2,1,protocol deserialize only,35.680000,6726.650000
+debug_scale2,Debug,2,1,simulation_tick (serial),1221.130000,57.320000
+debug_scale2,Debug,2,1,atomic_tick (4 threads),1719.080000,34.900000
+debug_scale2,Debug,2,1,simulation_tick baseline,1117.610000,53.690000
+debug_scale2,Debug,2,1,atomic_tick (1 thread),2718.060000,14.720000
+debug_scale2,Debug,2,1,atomic_tick (2 threads),1633.400000,24.490000
+debug_scale2,Debug,2,1,atomic_tick (4 threads),895.680000,44.660000
+debug_scale2,Debug,2,1,threadpool submit+execute,17.320000,5772338.830000
+debug_scale2,Debug,2,1,threadpool tiny tasks,18.650000,5362217.770000
+debug_scale2,Debug,2,1,threadpool batched tasks,2.490000,40176780.350000
+debug_scale2,Debug,2,2,name+color generation,26.300000,3802281.340000
+debug_scale2,Debug,2,2,world create/init/destroy,56.750000,6343.170000
+debug_scale2,Debug,2,2,protocol serialize+deserialize,66.640000,3601.220000
+debug_scale2,Debug,2,2,protocol serialize only,45.560000,5268.010000
+debug_scale2,Debug,2,2,protocol deserialize only,36.090000,6649.670000
+debug_scale2,Debug,2,2,simulation_tick (serial),1218.810000,57.430000
+debug_scale2,Debug,2,2,atomic_tick (4 threads),1730.160000,34.680000
+debug_scale2,Debug,2,2,simulation_tick baseline,1133.910000,52.910000
+debug_scale2,Debug,2,2,atomic_tick (1 thread),2937.280000,13.620000
+debug_scale2,Debug,2,2,atomic_tick (2 threads),1597.150000,25.040000
+debug_scale2,Debug,2,2,atomic_tick (4 threads),986.460000,40.550000
+debug_scale2,Debug,2,2,threadpool submit+execute,18.520000,5400734.560000
+debug_scale2,Debug,2,2,threadpool tiny tasks,17.390000,5750431.170000
+debug_scale2,Debug,2,2,threadpool batched tasks,4.020000,24888003.200000
+release_scale1,Release,1,1,name+color generation,14.400000,3471981.110000
+release_scale1,Release,1,1,world create/init/destroy,10.240000,17578.120000
+release_scale1,Release,1,1,protocol serialize+deserialize,10.300000,11650.490000
+release_scale1,Release,1,1,protocol serialize only,4.440000,27027.030000
+release_scale1,Release,1,1,protocol deserialize only,5.610000,21382.750000
+release_scale1,Release,1,1,simulation_tick (serial),115.000000,304.340000
+release_scale1,Release,1,1,atomic_tick (4 threads),164.490000,182.390000
+release_scale1,Release,1,1,simulation_tick baseline,108.290000,277.050000
+release_scale1,Release,1,1,atomic_tick (1 thread),207.760000,96.260000
+release_scale1,Release,1,1,atomic_tick (2 threads),136.570000,146.440000
+release_scale1,Release,1,1,atomic_tick (4 threads),83.250000,240.250000
+release_scale1,Release,1,1,threadpool submit+execute,8.610000,5807200.840000
+release_scale1,Release,1,1,threadpool tiny tasks,8.560000,5841121.530000
+release_scale1,Release,1,1,threadpool batched tasks,1.580000,31665611.220000
+release_scale1,Release,1,2,name+color generation,9.050000,5523641.160000
+release_scale1,Release,1,2,world create/init/destroy,7.230000,24882.500000
+release_scale1,Release,1,2,protocol serialize+deserialize,5.880000,20408.160000
+release_scale1,Release,1,2,protocol serialize only,3.420000,35036.500000
+release_scale1,Release,1,2,protocol deserialize only,3.900000,30785.020000
+release_scale1,Release,1,2,simulation_tick (serial),111.490000,313.930000
+release_scale1,Release,1,2,atomic_tick (4 threads),174.140000,172.280000
+release_scale1,Release,1,2,simulation_tick baseline,108.010000,277.740000
+release_scale1,Release,1,2,atomic_tick (1 thread),176.760000,113.150000
+release_scale1,Release,1,2,atomic_tick (2 threads),139.380000,143.500000
+release_scale1,Release,1,2,atomic_tick (4 threads),83.760000,238.780000
+release_scale1,Release,1,2,threadpool submit+execute,7.880000,6345983.230000
+release_scale1,Release,1,2,threadpool tiny tasks,8.270000,6044487.550000
+release_scale1,Release,1,2,threadpool batched tasks,1.930000,25960538.390000
+release_scale2,Release,2,1,name+color generation,17.580000,5687311.550000
+release_scale2,Release,2,1,world create/init/destroy,13.630000,26416.200000
+release_scale2,Release,2,1,protocol serialize+deserialize,12.460000,19258.550000
+release_scale2,Release,2,1,protocol serialize only,7.130000,33665.310000
+release_scale2,Release,2,1,protocol deserialize only,8.370000,28684.120000
+release_scale2,Release,2,1,simulation_tick (serial),299.640000,233.610000
+release_scale2,Release,2,1,atomic_tick (4 threads),472.940000,126.870000
+release_scale2,Release,2,1,simulation_tick baseline,287.480000,208.710000
+release_scale2,Release,2,1,atomic_tick (1 thread),609.250000,65.650000
+release_scale2,Release,2,1,atomic_tick (2 threads),383.370000,104.340000
+release_scale2,Release,2,1,atomic_tick (4 threads),241.390000,165.700000
+release_scale2,Release,2,1,threadpool submit+execute,16.880000,5922767.010000
+release_scale2,Release,2,1,threadpool tiny tasks,16.120000,6204243.870000
+release_scale2,Release,2,1,threadpool batched tasks,4.280000,23380874.720000
+release_scale2,Release,2,2,name+color generation,17.870000,5596910.470000
+release_scale2,Release,2,2,world create/init/destroy,14.750000,24411.750000
+release_scale2,Release,2,2,protocol serialize+deserialize,12.610000,19032.510000
+release_scale2,Release,2,2,protocol serialize only,7.090000,33869.600000
+release_scale2,Release,2,2,protocol deserialize only,8.260000,29048.660000
+release_scale2,Release,2,2,simulation_tick (serial),315.100000,222.150000
+release_scale2,Release,2,2,atomic_tick (4 threads),454.910000,131.900000
+release_scale2,Release,2,2,simulation_tick baseline,285.240000,210.350000
+release_scale2,Release,2,2,atomic_tick (1 thread),650.740000,61.470000
+release_scale2,Release,2,2,atomic_tick (2 threads),381.810000,104.760000
+release_scale2,Release,2,2,atomic_tick (4 threads),240.690000,166.190000
+release_scale2,Release,2,2,threadpool submit+execute,17.220000,5807875.500000
+release_scale2,Release,2,2,threadpool tiny tasks,16.500000,6061340.890000
+release_scale2,Release,2,2,threadpool batched tasks,3.220000,31094531.200000
