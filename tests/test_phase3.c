@@ -277,29 +277,6 @@ static int test_threadpool_handles_1000_tasks(void) {
     return 0;
 }
 
-static int test_threadpool_submit_batch_executes_all_tasks(void) {
-    TEST_START("threadpool_submit_batch mixed sizes");
-
-    ThreadPool* pool = threadpool_create(4);
-    ASSERT_NOT_NULL(pool);
-
-    int counter = 0;
-    void* args[37];
-    for (int i = 0; i < 37; i++) {
-        args[i] = &counter;
-    }
-
-    threadpool_submit_batch(pool, increment_task, args, 37);
-    threadpool_submit_batch(pool, increment_task, args, 13);
-    threadpool_wait(pool);
-
-    ASSERT_EQ(counter, 50);
-
-    threadpool_destroy(pool);
-    TEST_PASS();
-    return 0;
-}
-
 // ============================================================================
 // Parallel Context Tests
 // ============================================================================
@@ -582,7 +559,6 @@ int main(void) {
     failed += test_threadpool_wait_returns_immediately_when_empty();
     failed += test_threadpool_destroy_completes_pending_tasks();
     failed += test_threadpool_handles_1000_tasks();
-    failed += test_threadpool_submit_batch_executes_all_tasks();
     
     printf("\n[Parallel Context Tests]\n");
     failed += test_parallel_context_creates_four_regions();

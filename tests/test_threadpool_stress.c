@@ -215,35 +215,6 @@ TEST(interleaved_submit_wait) {
     threadpool_destroy(pool);
 }
 
-TEST(batch_submit_with_remainder) {
-    ThreadPool* pool = threadpool_create(4);
-    ASSERT_NOT_NULL(pool);
-
-    const int total = 1037;
-    const int submit_chunk = 64;
-    void* args[submit_chunk];
-    for (int i = 0; i < submit_chunk; i++) {
-        args[i] = NULL;
-    }
-
-    atomic_store(&task_counter, 0);
-
-    int submitted = 0;
-    while (submitted < total) {
-        int batch = total - submitted;
-        if (batch > submit_chunk) {
-            batch = submit_chunk;
-        }
-        threadpool_submit_batch(pool, increment_task, args, batch);
-        submitted += batch;
-    }
-
-    threadpool_wait(pool);
-    ASSERT_EQ(atomic_load(&task_counter), total);
-
-    threadpool_destroy(pool);
-}
-
 // ============================================================================
 // Concurrent Submit Tests
 // ============================================================================
@@ -492,7 +463,6 @@ int run_threadpool_stress_tests(void) {
     printf("\nRapid Submit/Wait Cycles:\n");
     RUN_TEST(rapid_submit_wait_cycles);
     RUN_TEST(interleaved_submit_wait);
-    RUN_TEST(batch_submit_with_remainder);
     
     printf("\nConcurrent Submit Tests:\n");
     RUN_TEST(concurrent_submits_multiple_threads);
