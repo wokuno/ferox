@@ -17,7 +17,7 @@ typedef enum MessageType {
     MSG_CONNECT,        // Client -> Server: request connection
     MSG_DISCONNECT,     // Client -> Server: disconnect
     MSG_WORLD_STATE,    // Server -> Client: full world state
-    MSG_WORLD_DELTA,    // Server -> Client: changes since last update
+    MSG_WORLD_DELTA,    // Server -> Client: reserved for future delta updates
     MSG_COLONY_INFO,    // Server -> Client: detailed colony info
     MSG_COMMAND,        // Client -> Server: user command
     MSG_ACK,            // Acknowledgment

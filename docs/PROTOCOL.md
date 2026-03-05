@@ -65,7 +65,7 @@ typedef enum MessageType {
     MSG_CONNECT     = 0,  // Client -> Server: connection request
     MSG_DISCONNECT  = 1,  // Client -> Server: graceful disconnect
     MSG_WORLD_STATE = 2,  // Server -> Client: full world state
-    MSG_WORLD_DELTA = 3,  // Server -> Client: incremental update
+    MSG_WORLD_DELTA = 3,  // Server -> Client: reserved for future incremental update support
     MSG_COLONY_INFO = 4,  // Server -> Client: detailed colony info
     MSG_COMMAND     = 5,  // Client -> Server: user command
     MSG_ACK         = 6,  // Bidirectional: acknowledgment
@@ -260,10 +260,10 @@ int proto_world_alloc_grid(proto_world* world, int width, int height);
 
 ### MSG_WORLD_DELTA (Type 3)
 
-Incremental update containing only changed cells. (Reserved for future optimization)
+Reserved for future incremental updates.
 
 **Direction:** Server → Client  
-**Status:** Not yet implemented
+**Status:** Not yet implemented. Current server builds emit full `MSG_WORLD_STATE` snapshots only.
 
 ---
 

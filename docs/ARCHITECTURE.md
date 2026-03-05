@@ -4,8 +4,8 @@ This document describes the technical architecture of the Ferox bacterial colony
 
 ## Current Implementation Notes
 
-- The server currently broadcasts full `MSG_WORLD_STATE` snapshots each tick; `MSG_WORLD_DELTA` exists in protocol definitions but is not emitted by `server.c`.
-- Command handling is implemented for pause/resume/speed/reset/select; `CMD_SPAWN_COLONY` is currently logged but not applied to world state.
+- The server currently broadcasts full `MSG_WORLD_STATE` snapshots each tick; `MSG_WORLD_DELTA` remains reserved for future protocol work and is not emitted by `server.c`.
+- Command handling is implemented for pause/resume/speed/reset/select/spawn.
 - TUI and GUI share protocol/state parity for core controls, but GUI has extra interaction features (mouse selection, zoom, grid/info toggles) and TUI alone has `--demo`.
 - `scripts/run.sh` normalizes client/server startup around port `8765` and only auto-kills existing listeners when they are `ferox_server` processes.
 

@@ -184,6 +184,35 @@ int test_server_handles_pause_resume_commands(void) {
     return 0;
 }
 
+int test_server_handles_spawn_colony_command(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+
+    net_socket* mock_socket = (net_socket*)calloc(1, sizeof(net_socket));
+    mock_socket->fd = -1;
+    mock_socket->connected = true;
+    client_session* client = server_add_client(server, mock_socket);
+    TEST_ASSERT(client != NULL, "Client should be added");
+
+    size_t before_count = server->world->colony_count;
+    CommandSpawnColony spawn_cmd = { .x = 10.0f, .y = 12.0f };
+    strncpy(spawn_cmd.name, "Issue75", MAX_COLONY_NAME - 1);
+    spawn_cmd.name[MAX_COLONY_NAME - 1] = '\0';
+
+    server_handle_command(server, client, CMD_SPAWN_COLONY, &spawn_cmd);
+
+    TEST_ASSERT(server->world->colony_count == before_count + 1, "Colony count should increase");
+    Cell* cell = world_get_cell(server->world, 10, 12);
+    TEST_ASSERT(cell != NULL, "Spawn cell should exist");
+    TEST_ASSERT(cell->colony_id != 0, "Spawned cell should be occupied");
+    TEST_ASSERT(atomic_load(&grid_current(&server->atomic_world->grid)[12 * server->world->width + 10].colony_id) == cell->colony_id,
+                "Atomic world should be resynced after spawn");
+
+    server_remove_client(server, client);
+    server_destroy(server);
+    return 0;
+}
+
 // Test: Server port assignment
 int test_server_assigns_unique_ports(void) {
     // Create server on port 0 (auto-assign)
@@ -369,6 +398,7 @@ int main(void) {
     // Command handling tests
     printf("\n--- Command Handling Tests ---\n");
     RUN_TEST(test_server_handles_pause_resume_commands);
+    RUN_TEST(test_server_handles_spawn_colony_command);
     
     // World tests
     printf("\n--- World Tests ---\n");

@@ -5,7 +5,9 @@
 
 #include "server.h"
 #include "simulation.h"
+#include "genetics.h"
 #include "parallel.h"
+#include "../shared/names.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +25,7 @@
 static void* accept_thread_func(void* arg);
 static void* simulation_thread_func(void* arg);
 static bool server_rebuild_world_state(Server* server, int width, int height, int initial_colonies);
+static bool server_spawn_colony(Server* server, const CommandSpawnColony* spawn);
 
 // Helper to get current time in milliseconds
 static long get_time_ms(void) {
@@ -468,42 +471,56 @@ void server_broadcast_world_state(Server* server) {
         return;
     }
     
-    // Broadcast to all clients
+    // Snapshot clients under lock so socket I/O does not block client-list mutation.
+    client_session** snapshot = NULL;
+    int snapshot_count = 0;
+    pthread_mutex_lock(&server->clients_mutex);
+    if (server->client_count > 0) {
+        snapshot = (client_session**)calloc((size_t)server->client_count, sizeof(client_session*));
+        if (snapshot) {
+            client_session* client = server->clients;
+            while (client && snapshot_count < server->client_count) {
+                snapshot[snapshot_count++] = client;
+                client = client->next;
+            }
+        }
+    }
+    pthread_mutex_unlock(&server->clients_mutex);
+
+    for (int i = 0; i < snapshot_count; i++) {
+        client_session* client = snapshot[i];
+        if (!client || !client->active || !client->socket || !client->socket->connected) continue;
+        if (protocol_send_message(client->socket->fd, MSG_WORLD_STATE, buffer, len) < 0) {
+            printf("Client %u disconnected\n", client->id);
+            client->active = false;
+        }
+    }
+
     pthread_mutex_lock(&server->clients_mutex);
     client_session* client = server->clients;
     client_session* prev = NULL;
-    
     while (client) {
         client_session* next = client->next;
-        
-        if (client->active && client->socket && client->socket->connected) {
-            int result = protocol_send_message(client->socket->fd, MSG_WORLD_STATE, buffer, len);
-            if (result < 0) {
-                // Client disconnected
-                printf("Client %u disconnected\n", client->id);
-                client->active = false;
-                
-                // Remove from list
-                if (prev) {
-                    prev->next = next;
-                } else {
-                    server->clients = next;
-                }
-                
-                net_socket_close(client->socket);
-                free(client);
-                server->client_count--;
-                
-                client = next;
-                continue;
+        if (!client->active || !client->socket || !client->socket->connected) {
+            if (prev) {
+                prev->next = next;
+            } else {
+                server->clients = next;
             }
+            if (client->socket) {
+                net_socket_close(client->socket);
+            }
+            free(client);
+            server->client_count--;
+            client = next;
+            continue;
         }
-        
         prev = client;
         client = next;
     }
     pthread_mutex_unlock(&server->clients_mutex);
     
+    free(snapshot);
     free(buffer);
     proto_world_free(&proto_world);
 }
@@ -596,13 +613,62 @@ void server_handle_command(Server* server, client_session* client, CommandType c
         case CMD_SPAWN_COLONY:
             if (data) {
                 CommandSpawnColony* spawn = (CommandSpawnColony*)data;
-                // Create a simple colony at the specified position
-                // This would need proper implementation using world_add_colony
-                printf("Spawn colony request at (%.1f, %.1f) by client %u\n", 
-                       spawn->x, spawn->y, client->id);
+                if (server_spawn_colony(server, spawn)) {
+                    printf("Spawned colony at (%.1f, %.1f) for client %u\n",
+                           spawn->x, spawn->y, client->id);
+                } else {
+                    printf("Spawn colony request rejected at (%.1f, %.1f) by client %u\n",
+                           spawn->x, spawn->y, client->id);
+                }
             }
             break;
     }
+}
+
+static bool server_spawn_colony(Server* server, const CommandSpawnColony* spawn) {
+    if (!server || !server->world || !spawn) return false;
+
+    int x = (int)spawn->x;
+    int y = (int)spawn->y;
+    Cell* cell = world_get_cell(server->world, x, y);
+    if (!cell || cell->colony_id != 0) return false;
+
+    Colony colony;
+    memset(&colony, 0, sizeof(colony));
+    colony.genome = genome_create_random();
+    colony.color = colony.genome.body_color;
+    colony.cell_count = 1;
+    colony.max_cell_count = 1;
+    colony.active = true;
+    colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
+    colony.wobble_phase = (float)(rand() % 628) / 100.0f;
+    colony.shape_evolution = (float)(rand() % 1000) / 1000.0f;
+    colony.state = COLONY_STATE_NORMAL;
+
+    if (spawn->name[0] != '\0') {
+        strncpy(colony.name, spawn->name, sizeof(colony.name) - 1);
+        colony.name[sizeof(colony.name) - 1] = '\0';
+    } else {
+        generate_scientific_name(colony.name, sizeof(colony.name));
+    }
+
+    uint32_t id = world_add_colony(server->world, colony);
+    if (id == 0) return false;
+
+    cell->colony_id = id;
+    cell->age = 0;
+    cell->is_border = true;
+
+    Colony* added = world_get_colony(server->world, id);
+    if (added) {
+        added->cell_count = 1;
+        added->max_cell_count = 1;
+    }
+
+    if (server->atomic_world) {
+        atomic_world_sync_from_world(server->atomic_world);
+    }
+    return true;
 }
 
 client_session* server_add_client(Server* server, net_socket* socket) {
