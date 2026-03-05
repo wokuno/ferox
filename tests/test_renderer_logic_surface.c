@@ -29,6 +29,17 @@ static void free_renderer(Renderer* r) {
     r->frame_buffer = NULL;
 }
 
+static int count_substring(const char* haystack, const char* needle) {
+    int count = 0;
+    const char* p = haystack;
+    size_t nlen = strlen(needle);
+    while ((p = strstr(p, needle)) != NULL) {
+        count++;
+        p += nlen;
+    }
+    return count;
+}
+
 static proto_world make_world(uint32_t width, uint32_t height) {
     proto_world world;
     memset(&world, 0, sizeof(world));
@@ -155,8 +166,13 @@ static void test_draw_world_grid_border_detection_and_highlight(void) {
     renderer_draw_world_grid(&renderer, &world);
     renderer.frame_buffer[renderer.buffer_used] = '\0';
 
-    assert(count_substring(renderer.frame_buffer, CELL_BORDER) > 0);
-    assert(count_substring(renderer.frame_buffer, CELL_COLONY) > 0);
+    int border_count = count_substring(renderer.frame_buffer, CELL_BORDER);
+    int colony_count = count_substring(renderer.frame_buffer, CELL_COLONY);
+    (void)border_count;
+    (void)colony_count;
+
+    assert(border_count > 0);
+    assert(colony_count > 0);
     assert(strstr(renderer.frame_buffer, "38;2;105;125;145m") != NULL);
 
     free(world.grid);
