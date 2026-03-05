@@ -218,3 +218,17 @@ Final issue state plan:
 - Close issue `#73` manually, because the scent-source fix landed via merged PR `#80` but the issue was not auto-closed.
 - Close issue `#70` manually, because the failing assertions described there are now passing on current `main`.
 - Close PR `#77` manually as superseded by newer upstream atomic RNG changes already present on `main`.
+
+## Protected Main Follow-up
+
+Status: In progress
+
+Context:
+- A local fast-forward of `main` was pushed directly to `origin/main`.
+- `origin/main` is protected against force-push, so the history cannot be rewritten back to `698e3fb`.
+- The feature history has been preserved on `feat/perf-eval-coverage-summary`.
+
+Recovery plan:
+- Create a revert branch from `origin/main` that undoes the 8 accidentally pushed commits via normal commits.
+- Open and merge a revert PR so GitHub history returns to the pre-push tree without rewriting protected history.
+- Open a second PR from the preserved feature branch content so CI can run and the changes can be merged through the normal PR path.
