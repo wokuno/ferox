@@ -99,6 +99,22 @@ static inline float deterministic_float(
     return (float)(mix_u32(mixed) & 0x00FFFFFFu) / 16777216.0f;
 }
 
+static void atomic_region_layout(const AtomicWorld* aworld, int* regions_x, int* regions_y) {
+    if (aworld->thread_count <= 1) {
+        *regions_x = 1;
+        *regions_y = 1;
+    } else if (aworld->thread_count == 2) {
+        *regions_x = 2;
+        *regions_y = 1;
+    } else if (aworld->thread_count <= 4) {
+        *regions_x = aworld->thread_count;
+        *regions_y = 1;
+    } else {
+        *regions_x = 4;
+        *regions_y = 4;
+    }
+}
+
 static inline float monod_saturation(float substrate, float half_saturation) {
     if (substrate <= 0.0f) return 0.0f;
     if (half_saturation <= 0.0f) return 1.0f;
@@ -550,8 +566,10 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
                 ((uint32_t)world->height * 0xc2b2ae35u));
     
     // Preallocate region work items
-    int regions_per_side = thread_count > 4 ? 4 : 2;
-    aworld->region_work_count = regions_per_side * regions_per_side;
+    int regions_x = 1;
+    int regions_y = 1;
+    atomic_region_layout(aworld, &regions_x, &regions_y);
+    aworld->region_work_count = regions_x * regions_y;
     aworld->region_work = (AtomicRegionWork*)calloc(aworld->region_work_count, sizeof(AtomicRegionWork));
     if (!aworld->region_work) {
         free(aworld->colony_stats);
@@ -832,11 +850,11 @@ void atomic_age_region(AtomicRegionWork* work) {
 // Parallel Phases
 // ============================================================================
 
-static void submit_region_tasks(AtomicWorld* aworld, void (*task_func)(void*)) {
-    int regions_per_side = aworld->thread_count > 4 ? 4 : 2;
-    int regions_x = regions_per_side;
-    int regions_y = regions_per_side;
-    
+static int prepare_region_tasks(AtomicWorld* aworld) {
+    int regions_x = 1;
+    int regions_y = 1;
+    atomic_region_layout(aworld, &regions_x, &regions_y);
+
     int region_width = aworld->grid.width / regions_x;
     int region_height = aworld->grid.height / regions_y;
     
@@ -853,9 +871,23 @@ static void submit_region_tasks(AtomicWorld* aworld, void (*task_func)(void*)) {
             work->end_y = (ry == regions_y - 1) ? aworld->grid.height : (ry + 1) * region_height;
             work->thread_id = task_idx % aworld->thread_count;
             task_idx++;
-            
-            threadpool_submit(aworld->pool, task_func, work);
         }
+    }
+    return task_idx;
+}
+
+static void submit_region_tasks(AtomicWorld* aworld, void (*task_func)(void*)) {
+    int task_count = prepare_region_tasks(aworld);
+
+    if (aworld->thread_count == 1) {
+        for (int i = 0; i < task_count; i++) {
+            task_func(&aworld->region_work[i]);
+        }
+        return;
+    }
+
+    for (int i = 0; i < task_count; i++) {
+        threadpool_submit(aworld->pool, task_func, &aworld->region_work[i]);
     }
 }
 

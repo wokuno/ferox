@@ -14,7 +14,37 @@ FEROX_PERF_SCALE=5 ./scripts/test.sh perf
 
 `FEROX_PERF_SCALE` increases loop counts in `test_performance_eval.c` so timings are more stable.
 
-## Current Baseline (macOS arm64, 3 runs, `FEROX_PERF_SCALE=5`)
+## Current Baseline (macOS arm64, scenario runs on 2026-03-05)
+
+Fresh scenario runs were executed with:
+
+```bash
+python3 scripts/perf_scenarios.py --build-types Debug Release --scales 1 2 --repeats 2
+```
+
+Key observations from `artifacts/perf/20260305-133809/`:
+
+- Release:
+  - atomic/serial ratio: **1.52x**
+  - tiny/batched threadpool ratio: **4.07x**
+- Debug:
+  - atomic/serial ratio: **1.64x**
+  - tiny/batched threadpool ratio: **4.96x**
+
+Selected medians:
+
+- `debug_scale2` `atomic_tick (1 thread)`: **2715.78 ms**
+- `debug_scale2` `atomic_tick (2 threads)`: **1658.02 ms**
+- `debug_scale2` `atomic_tick (4 threads)`: **1379.82 ms**
+- `debug_scale2` `simulation_tick (serial)`: **1232.58 ms**
+
+Interpretation:
+
+- The atomic path is still structurally slower than serial for the current grid sizes.
+- Small-task scheduling overhead remains a first-order cost.
+- One near-term improvement is to avoid oversharding the atomic region decomposition for 1-thread and 2-thread runs.
+
+## Previous Baseline (macOS arm64, 3 runs, `FEROX_PERF_SCALE=5`)
 
 Average values from repeated runs:
 
