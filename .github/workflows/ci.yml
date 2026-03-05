@@ -414,57 +414,6 @@ jobs:
             sed -n '1,20p' coverage-summary.txt;
           } >> "$GITHUB_STEP_SUMMARY"
 
-  coverage-macos:
-    runs-on: macos-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-
-      - name: Install dependencies
-        run: |
-          brew install cmake sdl2
-
-      - name: Verify uv
-        run: |
-          if ! command -v uv >/dev/null 2>&1; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-            export PATH="$HOME/.local/bin:$PATH"
-          fi
-          uv --version
-
-      - name: Configure coverage build
-        run: |
-          cmake -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
-
-      - name: Build
-        run: |
-          cmake --build build-coverage -j$(sysctl -n hw.ncpu)
-
-      - name: Run tests for coverage
-        run: |
-          cd build-coverage
-          ctest --output-on-failure --timeout 600 -C Debug -E "(PerformanceEvalTests|AllTests)"
-
-      - name: Generate coverage summary
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --print-summary --txt > coverage-summary.txt
-          uvx gcovr --root . --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file --xml-pretty --output coverage.xml
-          cat coverage-summary.txt
-
-      - name: Add coverage to job summary
-        run: |
-          {
-            echo "### Coverage Summary (macOS)";
-            echo "";
-            sed -n '1,20p' coverage-summary.txt;
-          } >> "$GITHUB_STEP_SUMMARY"
-
   pr-test-summary:
     if: always() && github.event_name == 'pull_request'
     needs: [build-and-test-macos, coverage-macos]

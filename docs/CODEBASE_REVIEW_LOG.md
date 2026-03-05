@@ -227,3 +227,5 @@ Progress:
 - PR `#81` reverted the accidental direct push to protected `main` without rewriting history.
 - `reapply/perf-eval-coverage-summary` was created from the reverted `main`.
 - This branch restores the feature content by reverting the revert commit, so the next PR can run through the normal CI and merge flow.
+- PR `#83` initially had no checks because the branch workflow contained a duplicate `coverage-macos` job definition, which GitHub rejected at dispatch time.
+- The duplicate job was removed on the reapply branch so CI can attach and run normally.
