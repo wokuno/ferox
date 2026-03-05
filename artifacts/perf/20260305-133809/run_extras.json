@@ -1,0 +1,58 @@
+[
+  {
+    "scenario": "debug_scale1",
+    "build_type": "Debug",
+    "scale": 1,
+    "repeat": 1,
+    "returncode": 0,
+    "extras": {
+      "protocol_throughput_mb_s": 86.22,
+      "atomic_serial_time_ratio": 1.74,
+      "speedup_2thread": 1.54,
+      "speedup_4thread": 2.56,
+      "tiny_batched_ratio": 4.12
+    }
+  },
+  {
+    "scenario": "debug_scale1",
+    "build_type": "Debug",
+    "scale": 1,
+    "repeat": 2,
+    "returncode": 0,
+    "extras": {
+      "protocol_throughput_mb_s": 90.3,
+      "atomic_serial_time_ratio": 1.64,
+      "speedup_2thread": 1.99,
+      "speedup_4thread": 2.57,
+      "tiny_batched_ratio": 4.73
+    }
+  },
+  {
+    "scenario": "debug_scale2",
+    "build_type": "Debug",
+    "scale": 2,
+    "repeat": 1,
+    "returncode": 0,
+    "extras": {
+      "protocol_throughput_mb_s": 93.38,
+      "atomic_serial_time_ratio": 1.5,
+      "speedup_2thread": 1.58,
+      "speedup_4thread": 2.64,
+      "tiny_batched_ratio": 5.34
+    }
+  },
+  {
+    "scenario": "debug_scale2",
+    "build_type": "Debug",
+    "scale": 2,
+    "repeat": 2,
+    "returncode": 0,
+    "extras": {
+      "protocol_throughput_mb_s": 92.08,
+      "atomic_serial_time_ratio": 1.67,
+      "speedup_2thread": 1.7,
+      "speedup_4thread": 2.74,
+      "tiny_batched_ratio": 5.66
+    }
+  }
+]

@@ -20,6 +20,13 @@ ctest --output-on-failure -R PerformanceEvalTests -V
 When comparing branches, use the same `FEROX_PERF_SCALE`, machine class, and run count.
 For regression checks, run at least 3 times and compare medians instead of single-run minima.
 
+## CI/Coverage Caveats
+
+- The coverage workflow excludes `PerformanceEvalTests` and `AllTests` (`ctest -E "(PerformanceEvalTests|AllTests)"`).
+- Coverage builds use `-DENABLE_COVERAGE=ON`, which changes timing characteristics.
+- Performance thresholds in `test_performance_eval.c` are intentionally loose for host variance and instrumentation overhead.
+- For comparative performance work, run `./scripts/test.sh perf` on a stable local machine with the same `FEROX_PERF_SCALE`.
+
 ## Current Baseline (macOS arm64, scenario runs on 2026-03-05)
 
 Fresh scenario runs were executed with:
