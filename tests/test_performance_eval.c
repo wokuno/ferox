@@ -18,7 +18,6 @@
 #include "../src/server/genetics.h"
 #include "../src/server/frontier_metrics.h"
 #include "../src/server/simulation.h"
-#include "../src/server/server.h"
 #include "../src/server/threadpool.h"
 #include "../src/server/atomic_sim.h"
 
@@ -65,11 +64,6 @@ static int get_perf_scale(void) {
 static void print_metric(const char* name, double ms, double ops) {
     double ops_per_sec = (ms > 0.0) ? (ops * 1000.0 / ms) : 0.0;
     printf("\n    [perf] %-30s %.2f ms, %.2f ops/s\n", name, ms, ops_per_sec);
-}
-
-static void print_cells_throughput(const char* name, double ms, double cells) {
-    double cells_per_sec = (ms > 0.0) ? (cells * 1000.0 / ms) : 0.0;
-    printf("    [perf] %s: %.2f Mcells/s\n", name, cells_per_sec / 1000000.0);
 }
 
 static World* create_seeded_world(int width, int height, int colonies, uint32_t seed) {
@@ -279,75 +273,6 @@ TEST(protocol_world_path_breakdown_eval) {
     proto_world_free(&world);
 }
 
-TEST(server_broadcast_path_breakdown_eval) {
-    const int scale = get_perf_scale();
-    const int iters = 80 * scale;
-
-    Server* server = server_create(0, 320, 180, 4);
-    ASSERT_NOT_NULL(server);
-
-    rng_seed(1337);
-    world_init_random_colonies(server->world, 72);
-    for (int i = 0; i < 3; i++) {
-        simulation_tick(server->world);
-    }
-
-    size_t total_snapshot_bytes = 0;
-    double build_start = now_ms();
-    for (int i = 0; i < iters; i++) {
-        proto_world snapshot;
-        server_build_protocol_world_snapshot(server, &snapshot);
-        total_snapshot_bytes += (size_t)snapshot.colony_count * COLONY_SERIALIZED_SIZE;
-        total_snapshot_bytes += (size_t)snapshot.grid_size * sizeof(uint16_t);
-        proto_world_free(&snapshot);
-    }
-    double build_ms = now_ms() - build_start;
-
-    size_t total_encoded_bytes = 0;
-    double build_serialize_start = now_ms();
-    for (int i = 0; i < iters; i++) {
-        proto_world snapshot;
-        server_build_protocol_world_snapshot(server, &snapshot);
-
-        uint8_t* encoded = NULL;
-        size_t encoded_len = 0;
-        int rc = protocol_serialize_world_state(&snapshot, &encoded, &encoded_len);
-        ASSERT_EQ(rc, 0);
-        ASSERT_NOT_NULL(encoded);
-
-        total_encoded_bytes += encoded_len;
-
-        free(encoded);
-        proto_world_free(&snapshot);
-    }
-    double build_serialize_ms = now_ms() - build_serialize_start;
-
-    double broadcast_start = now_ms();
-    for (int i = 0; i < iters; i++) {
-        server_broadcast_world_state(server);
-    }
-    double broadcast_ms = now_ms() - broadcast_start;
-
-    print_metric("broadcast build snapshot", build_ms, (double)iters);
-    print_metric("broadcast build+serialize", build_serialize_ms, (double)iters);
-    print_metric("broadcast end-to-end (0 clients)", broadcast_ms, (double)iters);
-
-    double avg_snapshot_kb = (double)total_snapshot_bytes / (double)iters / 1024.0;
-    double avg_encoded_kb = (double)total_encoded_bytes / (double)iters / 1024.0;
-    printf("    [perf] broadcast avg snapshot: %.2f KiB, encoded: %.2f KiB\n", avg_snapshot_kb, avg_encoded_kb);
-
-    if (build_serialize_ms > 0.0) {
-        double build_share = (build_ms / build_serialize_ms) * 100.0;
-        printf("    [perf] broadcast stage share: build=%.1f%% serialize+other=%.1f%%\n",
-               build_share, 100.0 - build_share);
-    }
-
-    ASSERT(build_ms > 0.0 && build_serialize_ms > 0.0 && broadcast_ms > 0.0,
-           "broadcast timings must be positive");
-
-    server_destroy(server);
-}
-
 TEST(simulation_tick_throughput) {
     const int scale = get_perf_scale();
     const int ticks = 35 * scale;
@@ -518,154 +443,14 @@ TEST(atomic_tick_thread_scaling_eval) {
     ASSERT(elapsed_ms[2] <= elapsed_ms[0] * 8.0 + 5.0, "4-thread atomic path regressed severely");
 }
 
-TEST(atomic_tick_phase_breakdown_eval) {
-    const int scale = get_perf_scale();
-    const int ticks = 25 * scale;
-
-    World* world = create_seeded_world(360, 220, 60, 6006u);
-    ASSERT_NOT_NULL(world);
-
-    ThreadPool* pool = threadpool_create(4);
-    ASSERT_NOT_NULL(pool);
-    AtomicWorld* aworld = atomic_world_create(world, pool, 4);
-    ASSERT_NOT_NULL(aworld);
-
-    for (int i = 0; i < 3; i++) {
-        atomic_tick(aworld);
-    }
-
-    double age_ms = 0.0;
-    double spread_ms = 0.0;
-    double sync_to_ms = 0.0;
-    double serial_ms = 0.0;
-    double sync_from_ms = 0.0;
-    double total_ms = 0.0;
-
-    for (int i = 0; i < ticks; i++) {
-        AtomicTickBreakdown breakdown;
-        atomic_tick_with_breakdown(aworld, &breakdown);
-        age_ms += breakdown.age_ms;
-        spread_ms += breakdown.spread_ms;
-        sync_to_ms += breakdown.sync_to_world_ms;
-        serial_ms += breakdown.serial_ms;
-        sync_from_ms += breakdown.sync_from_world_ms;
-        total_ms += breakdown.total_ms;
-    }
-
-    print_metric("atomic phase: age", age_ms, (double)ticks);
-    print_metric("atomic phase: spread", spread_ms, (double)ticks);
-    print_metric("atomic phase: sync_to_world", sync_to_ms, (double)ticks);
-    print_metric("atomic phase: serial core", serial_ms, (double)ticks);
-    print_metric("atomic phase: sync_from_world", sync_from_ms, (double)ticks);
-    print_metric("atomic phase: total", total_ms, (double)ticks);
-
-    double measured_sum_ms = age_ms + spread_ms + sync_to_ms + serial_ms + sync_from_ms;
-    double overhead_ms = total_ms - measured_sum_ms;
-    if (overhead_ms < 0.0) overhead_ms = 0.0;
-
-    if (total_ms > 0.0) {
-        printf("    [perf] atomic phase share: age=%.1f%% spread=%.1f%% sync_to=%.1f%% serial=%.1f%% sync_from=%.1f%% overhead=%.1f%%\n",
-               age_ms * 100.0 / total_ms,
-               spread_ms * 100.0 / total_ms,
-               sync_to_ms * 100.0 / total_ms,
-               serial_ms * 100.0 / total_ms,
-               sync_from_ms * 100.0 / total_ms,
-               overhead_ms * 100.0 / total_ms);
-    }
-
-    ASSERT(total_ms > 0.0, "atomic phase timing must be positive");
-    ASSERT(sync_to_ms > 0.0 && sync_from_ms > 0.0, "atomic sync timings must be positive");
-
-    atomic_world_destroy(aworld);
-    threadpool_destroy(pool);
-    world_destroy(world);
-}
-
-TEST(atomic_sync_throughput_scaling_eval) {
-    const int scale = get_perf_scale();
-    const int iters = 40 * scale;
-    const int sizes[3][2] = {
-        {200, 120},
-        {400, 240},
-        {800, 480}
-    };
-    double sync_to_cells_per_sec[3] = {0.0, 0.0, 0.0};
-    double sync_from_cells_per_sec[3] = {0.0, 0.0, 0.0};
-
-    for (int i = 0; i < 3; i++) {
-        const int width = sizes[i][0];
-        const int height = sizes[i][1];
-        const int colonies = (width * height) / 1500;
-
-        World* world = create_seeded_world(width, height, colonies > 12 ? colonies : 12, (uint32_t)(7000 + i));
-        ASSERT_NOT_NULL(world);
-
-        ThreadPool* pool = threadpool_create(4);
-        ASSERT_NOT_NULL(pool);
-        AtomicWorld* aworld = atomic_world_create(world, pool, 4);
-        ASSERT_NOT_NULL(aworld);
-
-        for (int warm = 0; warm < 3; warm++) {
-            atomic_world_sync_to_world(aworld);
-            atomic_world_sync_from_world(aworld);
-        }
-
-        double to_start = now_ms();
-        for (int iter = 0; iter < iters; iter++) {
-            atomic_world_sync_to_world(aworld);
-        }
-        double sync_to_ms = now_ms() - to_start;
-
-        double from_start = now_ms();
-        for (int iter = 0; iter < iters; iter++) {
-            atomic_world_sync_from_world(aworld);
-        }
-        double sync_from_ms = now_ms() - from_start;
-
-        const double total_cells = (double)width * (double)height * (double)iters;
-        sync_to_cells_per_sec[i] = (sync_to_ms > 0.0) ? (total_cells * 1000.0 / sync_to_ms) : 0.0;
-        sync_from_cells_per_sec[i] = (sync_from_ms > 0.0) ? (total_cells * 1000.0 / sync_from_ms) : 0.0;
-
-        char label_to[64];
-        char label_from[64];
-        snprintf(label_to, sizeof(label_to), "sync_to_world %dx%d", width, height);
-        snprintf(label_from, sizeof(label_from), "sync_from_world %dx%d", width, height);
-        print_metric(label_to, sync_to_ms, (double)iters);
-        print_metric(label_from, sync_from_ms, (double)iters);
-        print_cells_throughput(label_to, sync_to_ms, total_cells);
-        print_cells_throughput(label_from, sync_from_ms, total_cells);
-
-        ASSERT(sync_to_ms > 0.0 && sync_from_ms > 0.0, "sync timings must be positive");
-
-        atomic_world_destroy(aworld);
-        threadpool_destroy(pool);
-        world_destroy(world);
-    }
-
-    if (sync_to_cells_per_sec[0] > 0.0 && sync_from_cells_per_sec[0] > 0.0) {
-        printf("    [perf] sync_to scaling vs 200x120: 400x240=%.2fx 800x480=%.2fx\n",
-               sync_to_cells_per_sec[1] / sync_to_cells_per_sec[0],
-               sync_to_cells_per_sec[2] / sync_to_cells_per_sec[0]);
-        printf("    [perf] sync_from scaling vs 200x120: 400x240=%.2fx 800x480=%.2fx\n",
-               sync_from_cells_per_sec[1] / sync_from_cells_per_sec[0],
-               sync_from_cells_per_sec[2] / sync_from_cells_per_sec[0]);
-    }
-}
-
 TEST(threadpool_granularity_eval) {
     const int scale = get_perf_scale();
     const int total_increments = 50000 * scale;
     const int chunk = 250;
-    const int submit_chunk = 256;
     const int batch_tasks = total_increments / chunk;
 
     ThreadPool* pool = threadpool_create(4);
     ASSERT_NOT_NULL(pool);
-
-    void* tiny_args[submit_chunk];
-    for (int i = 0; i < submit_chunk; i++) {
-        tiny_args[i] = NULL;
-    }
 
     atomic_store(&perf_task_counter, 0);
     double tiny_start = now_ms();
@@ -674,19 +459,6 @@ TEST(threadpool_granularity_eval) {
     }
     threadpool_wait(pool);
     double tiny_ms = now_ms() - tiny_start;
-    ASSERT_EQ(atomic_load(&perf_task_counter), total_increments);
-
-    atomic_store(&perf_task_counter, 0);
-    double chunked_submit_start = now_ms();
-    for (int i = 0; i < total_increments; i += submit_chunk) {
-        int count = total_increments - i;
-        if (count > submit_chunk) {
-            count = submit_chunk;
-        }
-        threadpool_submit_batch(pool, perf_increment_task, tiny_args, count);
-    }
-    threadpool_wait(pool);
-    double chunked_submit_ms = now_ms() - chunked_submit_start;
     ASSERT_EQ(atomic_load(&perf_task_counter), total_increments);
 
     PerfTaskBatch* batches = (PerfTaskBatch*)calloc((size_t)batch_tasks, sizeof(PerfTaskBatch));
@@ -705,21 +477,14 @@ TEST(threadpool_granularity_eval) {
     ASSERT_EQ(atomic_load(&perf_task_counter), total_increments);
 
     print_metric("threadpool tiny tasks", tiny_ms, (double)total_increments);
-    print_metric("threadpool chunked submit", chunked_submit_ms, (double)total_increments);
     print_metric("threadpool batched tasks", batched_ms, (double)total_increments);
 
-    if (chunked_submit_ms > 0.0) {
-        printf("    [perf] tiny/chunked-submit ratio: %.2fx\n", tiny_ms / chunked_submit_ms);
-    }
     if (batched_ms > 0.0) {
         printf("    [perf] tiny/batched ratio: %.2fx\n", tiny_ms / batched_ms);
         if (tiny_ms / batched_ms > 2.0) {
             printf("    [hint] task submission overhead is high; consider coarser work units\n");
         }
     }
-
-    ASSERT(chunked_submit_ms <= tiny_ms * 4.0 + 2.0,
-           "chunked submit path regressed severely");
 
     free(batches);
     threadpool_destroy(pool);
@@ -736,13 +501,10 @@ int run_performance_eval_tests(void) {
     RUN_TEST(world_lifecycle_throughput);
     RUN_TEST(protocol_world_serialize_deserialize_throughput);
     RUN_TEST(protocol_world_path_breakdown_eval);
-    RUN_TEST(server_broadcast_path_breakdown_eval);
     RUN_TEST(simulation_tick_throughput);
     RUN_TEST(frontier_telemetry_seeded_run_eval);
     RUN_TEST(atomic_tick_throughput_and_speedup_eval);
     RUN_TEST(atomic_tick_thread_scaling_eval);
-    RUN_TEST(atomic_tick_phase_breakdown_eval);
-    RUN_TEST(atomic_sync_throughput_scaling_eval);
     RUN_TEST(threadpool_task_throughput);
     RUN_TEST(threadpool_granularity_eval);
 

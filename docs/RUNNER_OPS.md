@@ -1,14 +1,13 @@
 # Self-Hosted Runner Operations
 
-This document describes how to operate the self-hosted GitHub Actions runner fleet used by `ferox` safely.
+This document describes how to operate the `ferox` self-hosted GitHub Actions runner safely.
 
 ## Runner Profile
 
-- Workflow targeting labels: `self-hosted`, `Linux`, `X64`, `ferox`, `rocky10`
-- Custom labels required on each runner: `ferox`, `rocky10`
-- Runner selection is label-based; runner `name` can vary across hosts.
-- Typical runner path: `/home/plover/actions-runner-ferox`
-- Typical service user: `plover`
+- Hostname: `ferox`
+- Labels: `self-hosted`, `Linux`, `X64`, `ferox`, `rocky10`
+- Runner path: `/home/plover/actions-runner-ferox`
+- Service user: `plover`
 
 ## Safety Model
 
@@ -23,7 +22,7 @@ This document describes how to operate the self-hosted GitHub Actions runner fle
 ### 1) Check runner process on host
 
 ```bash
-ssh <runner-host> "pgrep -af Runner.Listener || true"
+ssh plover@23.150.68.200 "pgrep -af Runner.Listener || true"
 ```
 
 ### 2) Check runner status from GitHub
@@ -45,7 +44,7 @@ Re-register the runner when rotating credentials or rebuilding the host.
 
 ```bash
 TOKEN=$(gh api repos/wokuno/ferox/actions/runners/registration-token -X POST --jq .token)
-ssh <runner-host> "cd /home/plover/actions-runner-ferox && ./config.sh --unattended --url https://github.com/wokuno/ferox --token $TOKEN --name <runner-name> --labels ferox,rocky10 --work _work --replace"
+ssh plover@23.150.68.200 "cd /home/plover/actions-runner-ferox && ./config.sh --unattended --url https://github.com/wokuno/ferox --token $TOKEN --name ferox --labels ferox --work _work --replace"
 ```
 
 After rotation, verify runner status in GitHub and run a manual workflow dispatch.
@@ -55,7 +54,7 @@ After rotation, verify runner status in GitHub and run a manual workflow dispatc
 If jobs are stuck in queued state:
 
 ```bash
-ssh <runner-host> "pkill -f Runner.Listener || true; cd /home/plover/actions-runner-ferox && nohup ./run.sh > runner.log 2>&1 < /dev/null &"
+ssh plover@23.150.68.200 "pkill -f Runner.Listener || true; cd /home/plover/actions-runner-ferox && nohup ./run.sh > runner.log 2>&1 < /dev/null &"
 ```
 
 Then verify registration and dispatch a test workflow.

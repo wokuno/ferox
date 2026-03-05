@@ -27,39 +27,6 @@ static void* simulation_thread_func(void* arg);
 static bool server_rebuild_world_state(Server* server, int width, int height, int initial_colonies);
 static bool server_spawn_colony(Server* server, const CommandSpawnColony* spawn);
 
-typedef struct {
-    uint32_t colony_id;
-    uint16_t proto_idx;
-} colony_proto_index;
-
-static int compare_colony_proto_index(const void* a, const void* b) {
-    const colony_proto_index* ia = (const colony_proto_index*)a;
-    const colony_proto_index* ib = (const colony_proto_index*)b;
-    if (ia->colony_id < ib->colony_id) return -1;
-    if (ia->colony_id > ib->colony_id) return 1;
-    return 0;
-}
-
-static int32_t find_proto_index_for_colony(const colony_proto_index* lookup, uint32_t count, uint32_t colony_id) {
-    uint32_t lo = 0;
-    uint32_t hi = count;
-
-    while (lo < hi) {
-        uint32_t mid = lo + (hi - lo) / 2;
-        uint32_t mid_id = lookup[mid].colony_id;
-        if (mid_id == colony_id) {
-            return (int32_t)lookup[mid].proto_idx;
-        }
-        if (mid_id < colony_id) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-
-    return -1;
-}
-
 // Helper to get current time in milliseconds
 static long get_time_ms(void) {
     struct timespec ts;
@@ -371,41 +338,55 @@ static bool server_rebuild_world_state(Server* server, int width, int height, in
 }
 
 // Convert internal World/Colony to protocol proto_world for serialization
-void server_build_protocol_world_snapshot(Server* server, proto_world* out_world) {
-    if (!out_world) return;
-    proto_world_init(out_world);
-    if (!server || !server->world) return;
+static void build_protocol_world(Server* server, proto_world* proto_world) {
+    proto_world_init(proto_world);
     World* world = server->world;
+    
+    proto_world->width = (uint32_t)world->width;
+    proto_world->height = (uint32_t)world->height;
+    proto_world->tick = (uint32_t)world->tick;
+    proto_world->paused = server->paused;
+    proto_world->speed_multiplier = server->speed_multiplier;
+    
+    // Build grid data from world cells
+    uint32_t grid_size = proto_world->width * proto_world->height;
+    if (grid_size > 0 && grid_size <= MAX_GRID_SIZE) {
+        proto_world_alloc_grid(proto_world, proto_world->width, proto_world->height);
+        if (proto_world->grid) {
+            for (uint32_t i = 0; i < grid_size; i++) {
+                proto_world->grid[i] = (uint16_t)world->cells[i].colony_id;
+            }
+        }
+    }
 
-    out_world->width = (uint32_t)world->width;
-    out_world->height = (uint32_t)world->height;
-    out_world->tick = (uint32_t)world->tick;
-    out_world->paused = server->paused;
-    out_world->speed_multiplier = server->speed_multiplier;
-
-    const uint32_t width = out_world->width;
-    const uint32_t height = out_world->height;
-    const size_t grid_size = (size_t)width * (size_t)height;
-
-    // Build protocol colony list and id->protocol index mapping.
+    int32_t* world_idx_to_proto = NULL;
+    if (world->colony_count > 0) {
+        world_idx_to_proto = (int32_t*)malloc(world->colony_count * sizeof(int32_t));
+        if (world_idx_to_proto) {
+            for (size_t i = 0; i < world->colony_count; i++) {
+                world_idx_to_proto[i] = -1;
+            }
+        }
+    }
+    
+    // Build protocol colony list and world-index mapping.
     uint32_t count = 0;
-    colony_proto_index colony_lookup[MAX_COLONIES];
-
     for (size_t i = 0; i < world->colony_count && count < MAX_COLONIES; i++) {
         if (world->colonies[i].active) {
-            proto_colony* proto_colony = &out_world->colonies[count];
-
+            proto_colony* proto_colony = &proto_world->colonies[count];
+            
             // Map fields from internal Colony (types.h) to protocol proto_colony
             proto_colony->id = world->colonies[i].id;
             strncpy(proto_colony->name, world->colonies[i].name, MAX_COLONY_NAME - 1);
             proto_colony->name[MAX_COLONY_NAME - 1] = '\0';
 
-            colony_lookup[count].colony_id = proto_colony->id;
-            colony_lookup[count].proto_idx = (uint16_t)count;
+            if (world_idx_to_proto) {
+                world_idx_to_proto[i] = (int32_t)count;
+            }
 
             proto_colony->x = world->colonies[i].centroid_x;
             proto_colony->y = world->colonies[i].centroid_y;
-
+            
             proto_colony->population = (uint32_t)world->colonies[i].cell_count;
             proto_colony->max_population = (uint32_t)world->colonies[i].max_cell_count;
             proto_colony->radius = (float)world->colonies[i].cell_count / 3.14159f;
@@ -427,61 +408,52 @@ void server_build_protocol_world_snapshot(Server* server, proto_world* out_world
             proto_colony->metabolism = world->colonies[i].genome.metabolism;
             proto_colony->toxin_production = world->colonies[i].genome.toxin_production;
             proto_colony->spread_rate = world->colonies[i].genome.spread_rate;
-
+            
             count++;
         }
     }
 
-    bool has_sorted_lookup = false;
-    if (count > 0) {
-        qsort(colony_lookup, count, sizeof(colony_lookup[0]), compare_colony_proto_index);
-        has_sorted_lookup = true;
-    }
+    if (count > 0 && world_idx_to_proto) {
+        double* sum_x = (double*)calloc(count, sizeof(double));
+        double* sum_y = (double*)calloc(count, sizeof(double));
+        uint32_t* pop = (uint32_t*)calloc(count, sizeof(uint32_t));
 
-    if (grid_size > 0 && grid_size <= MAX_GRID_SIZE) {
-        proto_world_alloc_grid(out_world, width, height);
-    }
-
-    if (grid_size > 0 && has_sorted_lookup) {
-        double sum_x[MAX_COLONIES] = {0};
-        double sum_y[MAX_COLONIES] = {0};
-        uint32_t pop[MAX_COLONIES] = {0};
-
-        for (uint32_t y = 0; y < height; y++) {
-            size_t row_start = (size_t)y * (size_t)width;
-            for (uint32_t x = 0; x < width; x++) {
-                size_t idx = row_start + (size_t)x;
-                uint32_t colony_id = world->cells[idx].colony_id;
-
-                if (out_world->grid) {
-                    out_world->grid[idx] = (uint16_t)colony_id;
-                }
-
+        if (sum_x && sum_y && pop) {
+            for (uint32_t i = 0; i < grid_size; i++) {
+                uint32_t colony_id = world->cells[i].colony_id;
                 if (colony_id == 0) continue;
 
-                int32_t proto_idx = find_proto_index_for_colony(colony_lookup, count, colony_id);
+                Colony* colony = world_get_colony(world, colony_id);
+                if (!colony) continue;
+
+                size_t world_idx = (size_t)(colony - world->colonies);
+                if (world_idx >= world->colony_count) continue;
+
+                int32_t proto_idx = world_idx_to_proto[world_idx];
                 if (proto_idx < 0) continue;
 
                 uint32_t pidx = (uint32_t)proto_idx;
                 pop[pidx]++;
-                sum_x[pidx] += (double)x;
-                sum_y[pidx] += (double)y;
+                sum_x[pidx] += (double)(i % proto_world->width);
+                sum_y[pidx] += (double)(i / proto_world->width);
+            }
+
+            for (uint32_t i = 0; i < count; i++) {
+                if (pop[i] > 0) {
+                    proto_world->colonies[i].x = (float)(sum_x[i] / (double)pop[i]);
+                    proto_world->colonies[i].y = (float)(sum_y[i] / (double)pop[i]);
+                }
             }
         }
 
-        for (uint32_t i = 0; i < count; i++) {
-            if (pop[i] > 0) {
-                out_world->colonies[i].x = (float)(sum_x[i] / (double)pop[i]);
-                out_world->colonies[i].y = (float)(sum_y[i] / (double)pop[i]);
-            }
-        }
-    } else if (out_world->grid) {
-        for (size_t i = 0; i < grid_size; i++) {
-            out_world->grid[i] = (uint16_t)world->cells[i].colony_id;
-        }
+        free(pop);
+        free(sum_y);
+        free(sum_x);
     }
 
-    out_world->colony_count = count;
+    free(world_idx_to_proto);
+
+    proto_world->colony_count = count;
 }
 
 void server_broadcast_world_state(Server* server) {
@@ -489,7 +461,7 @@ void server_broadcast_world_state(Server* server) {
     
     // Build protocol world state
     proto_world proto_world;
-    server_build_protocol_world_snapshot(server, &proto_world);
+    build_protocol_world(server, &proto_world);
     
     // Serialize
     uint8_t* buffer = NULL;
