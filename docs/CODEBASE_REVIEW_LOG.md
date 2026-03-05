@@ -244,3 +244,11 @@ Progress:
 - Because Release builds compile out `assert`, the helper now also uses `(void)bytes;` so the parameter remains intentionally referenced in all build modes.
 - CI for PR `#84` showed that `count_substring()` is still used by the border/highlight renderer test, so that helper was restored.
 - Release builds also compile out the renderer assertions, so the border/colony counts are now computed into locals and explicitly referenced before assertion checks.
+
+## Preview Workflow Fix
+
+Status: In progress
+
+Progress:
+- The `Update Preview GIF` workflow failed in `Commit updated preview` after checking out a detached `head_sha`.
+- The push refspec now uses `HEAD:refs/heads/<branch>` so Git can push back to branch names containing slashes from a detached checkout.
