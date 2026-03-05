@@ -1436,6 +1436,33 @@ TEST(rand_thread_safety_issue) {
     world_destroy(world);
 }
 
+TEST(atomic_region_work_uses_unique_rng_slots) {
+    World* world = world_create(40, 40);
+    ASSERT_NOT_NULL(world);
+    rng_seed(424242);
+    world_init_random_colonies(world, 6);
+
+    ThreadPool* pool = threadpool_create(4);
+    ASSERT_NOT_NULL(pool);
+    AtomicWorld* aworld = atomic_world_create(world, pool, 4);
+    ASSERT_NOT_NULL(aworld);
+
+    ASSERT_NOT_NULL(aworld->task_seeds);
+    ASSERT_TRUE(aworld->region_work_count > 0);
+
+    atomic_age(aworld);
+    atomic_barrier(aworld);
+
+    for (int i = 0; i < aworld->region_work_count; i++) {
+        ASSERT_EQ(aworld->region_work[i].rng_slot, i);
+        ASSERT_TRUE(aworld->region_work[i].rng_slot < aworld->region_work_count);
+    }
+
+    atomic_world_destroy(aworld);
+    threadpool_destroy(pool);
+    world_destroy(world);
+}
+
 TEST(cell_count_concurrent_consistency) {
     World* world = world_create(60, 60);
     ASSERT_NOT_NULL(world);
@@ -1708,6 +1735,7 @@ int run_simulation_logic_tests(void) {
     printf("\nMulti-threaded Stress Tests:\n");
     RUN_TEST(atomic_tick_concurrent_stability);
     RUN_TEST(rand_thread_safety_issue);
+    RUN_TEST(atomic_region_work_uses_unique_rng_slots);
     RUN_TEST(cell_count_concurrent_consistency);
     
     printf("\nVisual Stability Tests:\n");

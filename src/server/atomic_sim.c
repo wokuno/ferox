@@ -428,9 +428,12 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
         return NULL;
     }
     
-    // Allocate per-thread RNG seeds
-    aworld->thread_seeds = (uint32_t*)malloc(thread_count * sizeof(uint32_t));
-    if (!aworld->thread_seeds) {
+    // Allocate per-region RNG seeds so concurrently executing tasks never
+    // share mutable RNG state.
+    int regions_per_side = thread_count > 4 ? 4 : 2;
+    aworld->region_work_count = regions_per_side * regions_per_side;
+    aworld->task_seeds = (uint32_t*)malloc((size_t)aworld->region_work_count * sizeof(uint32_t));
+    if (!aworld->task_seeds) {
         free(aworld->colony_stats);
         free(aworld->grid.buffers[0]);
         free(aworld->grid.buffers[1]);
@@ -438,17 +441,15 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
         return NULL;
     }
     
-    // Initialize thread seeds with different values
-    for (int i = 0; i < thread_count; i++) {
-        aworld->thread_seeds[i] = (uint32_t)(12345 + i * 7919);  // Prime offset
+    // Initialize deterministic task seeds with different values.
+    for (int i = 0; i < aworld->region_work_count; i++) {
+        aworld->task_seeds[i] = (uint32_t)(12345 + i * 7919);  // Prime offset
     }
     
     // Preallocate region work items
-    int regions_per_side = thread_count > 4 ? 4 : 2;
-    aworld->region_work_count = regions_per_side * regions_per_side;
     aworld->region_work = (AtomicRegionWork*)calloc(aworld->region_work_count, sizeof(AtomicRegionWork));
     if (!aworld->region_work) {
-        free(aworld->thread_seeds);
+        free(aworld->task_seeds);
         free(aworld->colony_stats);
         free(aworld->grid.buffers[0]);
         free(aworld->grid.buffers[1]);
@@ -466,7 +467,7 @@ void atomic_world_destroy(AtomicWorld* aworld) {
     if (!aworld) return;
     
     free(aworld->region_work);
-    free(aworld->thread_seeds);
+    free(aworld->task_seeds);
     free(aworld->colony_stats);
     free(aworld->grid.buffers[0]);
     free(aworld->grid.buffers[1]);
@@ -614,7 +615,7 @@ void atomic_spread_region(AtomicRegionWork* work) {
     const int width = grid->width;
     
     // Thread-local RNG
-    uint32_t rng_state = aworld->thread_seeds[work->thread_id];
+    uint32_t rng_state = aworld->task_seeds[work->rng_slot];
     
     // Process each cell in region
     for (int y = work->start_y; y < work->end_y; y++) {
@@ -689,7 +690,7 @@ void atomic_spread_region(AtomicRegionWork* work) {
     }
     
     // Save RNG state back (for reproducibility)
-    aworld->thread_seeds[work->thread_id] = rng_state;
+    aworld->task_seeds[work->rng_slot] = rng_state;
 }
 
 void atomic_age_region(AtomicRegionWork* work) {
@@ -731,7 +732,7 @@ static void submit_region_tasks(AtomicWorld* aworld, void (*task_func)(void*)) {
             work->start_y = ry * region_height;
             work->end_x = (rx == regions_x - 1) ? aworld->grid.width : (rx + 1) * region_width;
             work->end_y = (ry == regions_y - 1) ? aworld->grid.height : (ry + 1) * region_height;
-            work->thread_id = task_idx % aworld->thread_count;
+            work->rng_slot = task_idx;
             task_idx++;
             
             threadpool_submit(aworld->pool, task_func, work);
