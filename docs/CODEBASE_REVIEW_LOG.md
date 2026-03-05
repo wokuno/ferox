@@ -231,3 +231,16 @@ Progress:
 - The duplicate job was removed on the reapply branch so CI can attach and run normally.
 - PR `#83` then failed the macOS build because `prepare_region_tasks()` still referenced `submit_args` after that array had been moved into `submit_region_tasks()`.
 - The stale `submit_args[task_idx] = work;` line was removed so the branch now compiles again.
+
+## Warning Cleanup
+
+Status: In progress
+
+Progress:
+- Current `./scripts/build.sh` emits test-only warnings from `tests/test_client_input_surface.c` and `tests/test_renderer_logic_surface.c`.
+- The warning cleanup branch removes unused local variables in the stdin helper test and drops an unused `count_substring()` helper from the renderer surface test.
+- The warning cleanup branch removes unused local variables in the stdin helper test.
+- A follow-up build still warned on the zero-length path for `bytes`; the helper now asserts `bytes != NULL || len == 0` so the parameter is semantically used and the contract is explicit.
+- Because Release builds compile out `assert`, the helper now also uses `(void)bytes;` so the parameter remains intentionally referenced in all build modes.
+- CI for PR `#84` showed that `count_substring()` is still used by the border/highlight renderer test, so that helper was restored.
+- Release builds also compile out the renderer assertions, so the border/colony counts are now computed into locals and explicitly referenced before assertion checks.

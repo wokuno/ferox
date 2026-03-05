@@ -166,8 +166,13 @@ static void test_draw_world_grid_border_detection_and_highlight(void) {
     renderer_draw_world_grid(&renderer, &world);
     renderer.frame_buffer[renderer.buffer_used] = '\0';
 
-    assert(count_substring(renderer.frame_buffer, CELL_BORDER) > 0);
-    assert(count_substring(renderer.frame_buffer, CELL_COLONY) > 0);
+    int border_count = count_substring(renderer.frame_buffer, CELL_BORDER);
+    int colony_count = count_substring(renderer.frame_buffer, CELL_COLONY);
+    (void)border_count;
+    (void)colony_count;
+
+    assert(border_count > 0);
+    assert(colony_count > 0);
     assert(strstr(renderer.frame_buffer, "38;2;105;125;145m") != NULL);
 
     free(world.grid);
