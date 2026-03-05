@@ -218,3 +218,12 @@ Final issue state plan:
 - Close issue `#73` manually, because the scent-source fix landed via merged PR `#80` but the issue was not auto-closed.
 - Close issue `#70` manually, because the failing assertions described there are now passing on current `main`.
 - Close PR `#77` manually as superseded by newer upstream atomic RNG changes already present on `main`.
+
+## Protected Main Recovery
+
+Status: In progress
+
+Progress:
+- PR `#81` reverted the accidental direct push to protected `main` without rewriting history.
+- `reapply/perf-eval-coverage-summary` was created from the reverted `main`.
+- This branch restores the feature content by reverting the revert commit, so the next PR can run through the normal CI and merge flow.
