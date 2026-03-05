@@ -260,4 +260,5 @@ Status: In progress
 Progress:
 - Preview GIF updates are now restricted to `main`.
 - The workflow only runs after successful `CI` runs triggered by `push` events on `main`, or manual dispatches launched from `main`.
-- The target-branch resolution step now rejects non-`main` branches explicitly.
+- Manual dispatch remains allowed on any branch.
+- The target-branch resolution step now rejects non-`main` branches only for automatic `workflow_run` executions.

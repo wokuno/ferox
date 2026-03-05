@@ -9,7 +9,7 @@ on:
 jobs:
   refresh-preview:
     if: >
-      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') ||
+      github.event_name == 'workflow_dispatch' ||
       (
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
@@ -37,7 +37,7 @@ jobs:
             exit 1
           fi
 
-          if [ "$BRANCH" != "main" ]; then
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] && [ "$BRANCH" != "main" ]; then
             echo "Preview refresh is restricted to main; got branch '$BRANCH'"
             exit 1
           fi
