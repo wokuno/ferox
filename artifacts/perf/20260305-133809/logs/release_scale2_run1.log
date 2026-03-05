@@ -1,0 +1,95 @@
+UpdateCTestConfiguration  from :/Users/wokuno/Desktop/ferox/build-perf/release/DartConfiguration.tcl
+Test project /Users/wokuno/Desktop/ferox/build-perf/release
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 16
+    Start 16: SimdEvalTests
+
+16: Test command: /Users/wokuno/Desktop/ferox/build-perf/release/tests/test_simd_eval
+16: Working Directory: /Users/wokuno/Desktop/ferox/build-perf/release/tests
+16: Test timeout computed to be: 120
+16: 
+16: === SIMD Eval Tests ===
+16: 
+16:   Running simd_decay_toxins_matches_scalar_reference... PASSED
+16:   Running simd_produce_toxins_decay_matches_scalar_on_empty_world... PASSED
+16:   Running simd_update_scents_clamps_signal_range... PASSED
+16:   Running simd_decay_toxins_performance_eval... 
+16:     [perf] decay_toxins: optimized=2.61ms scalar=3.11ms ratio=0.84x
+16: PASSED
+16: 
+16: --- SIMD Eval Results ---
+16: Passed: 4
+16: Failed: 0
+1/2 Test #16: SimdEvalTests ....................   Passed    0.01 sec
+test 17
+    Start 17: PerformanceEvalTests
+
+17: Test command: /Users/wokuno/Desktop/ferox/build-perf/release/tests/test_performance_eval
+17: Working Directory: /Users/wokuno/Desktop/ferox/build-perf/release/tests
+17: Test timeout computed to be: 180
+17: 
+17: === Performance Eval Tests ===
+17:     (Set FEROX_PERF_SCALE=2..20 for heavier benchmark loops)
+17: 
+17:   Running shared_name_color_generation_throughput... 
+17:     [perf] name+color generation          17.78 ms, 5623664.38 ops/s
+17: PASSED
+17:   Running world_lifecycle_throughput... 
+17:     [perf] world create/init/destroy      13.74 ms, 26195.15 ops/s
+17: PASSED
+17:   Running protocol_world_serialize_deserialize_throughput... 
+17:     [perf] protocol serialize+deserialize 12.11 ms, 19813.42 ops/s
+17:     [perf] protocol throughput: 498.65 MB/s
+17: PASSED
+17:   Running protocol_world_path_breakdown_eval... 
+17:     [perf] protocol serialize only        6.91 ms, 34722.22 ops/s
+17: 
+17:     [perf] protocol deserialize only      8.09 ms, 29651.59 ops/s
+17:     [perf] protocol size per frame: 34054 bytes
+17:     [hint] serialize/deserialize costs are balanced
+17: PASSED
+17:   Running simulation_tick_throughput... 
+17:     [perf] simulation_tick (serial)       304.05 ms, 230.22 ops/s
+17: PASSED
+17:   Running atomic_tick_throughput_and_speedup_eval... 
+17:     [perf] atomic_tick (4 threads)        450.50 ms, 133.19 ops/s
+17: 
+17:     [perf] simulation_tick baseline       295.17 ms, 203.27 ops/s
+17:     [perf] atomic/serial time ratio: 1.53x
+17: PASSED
+17:   Running atomic_tick_thread_scaling_eval... 
+17:     [perf] atomic_tick (1 thread)         656.25 ms, 60.95 ops/s
+17: 
+17:     [perf] atomic_tick (2 threads)        374.97 ms, 106.68 ops/s
+17: 
+17:     [perf] atomic_tick (4 threads)        228.34 ms, 175.18 ops/s
+17:     [perf] speedup vs 1-thread: 2-thread=1.75x 4-thread=2.87x
+17: PASSED
+17:   Running threadpool_task_throughput... 
+17:     [perf] threadpool submit+execute      16.81 ms, 5948486.10 ops/s
+17: PASSED
+17:   Running threadpool_granularity_eval... 
+17:     [perf] threadpool tiny tasks          16.69 ms, 5991252.78 ops/s
+17: 
+17:     [perf] threadpool batched tasks       3.75 ms, 26695141.54 ops/s
+17:     [perf] tiny/batched ratio: 4.46x
+17:     [hint] task submission overhead is high; consider coarser work units
+17: PASSED
+17: 
+17: --- Performance Eval Results ---
+17: Passed: 9
+17: Failed: 0
+2/2 Test #17: PerformanceEvalTests .............   Passed    2.46 sec
+
+The following tests passed:
+	SimdEvalTests
+	PerformanceEvalTests
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   2.48 sec

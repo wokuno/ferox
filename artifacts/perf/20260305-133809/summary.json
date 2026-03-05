@@ -1,0 +1,210 @@
+[
+  {
+    "scenario": "debug_scale1",
+    "metric": "atomic_tick (1 thread)",
+    "samples": 2,
+    "median_ms": 873.61,
+    "mean_ms": 873.61,
+    "median_ops_per_sec": 22.92
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "atomic_tick (2 threads)",
+    "samples": 2,
+    "median_ms": 501.505,
+    "mean_ms": 501.505,
+    "median_ops_per_sec": 40.22
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "atomic_tick (4 threads)",
+    "samples": 4,
+    "median_ms": 499.955,
+    "mean_ms": 505.675,
+    "median_ops_per_sec": 51.56
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "name+color generation",
+    "samples": 2,
+    "median_ms": 13.31,
+    "mean_ms": 13.31,
+    "median_ops_per_sec": 3759012.47
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "protocol deserialize only",
+    "samples": 2,
+    "median_ms": 18.545,
+    "mean_ms": 18.545,
+    "median_ops_per_sec": 6472.69
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "protocol serialize only",
+    "samples": 2,
+    "median_ms": 24.105,
+    "mean_ms": 24.105,
+    "median_ops_per_sec": 4981.525
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "protocol serialize+deserialize",
+    "samples": 2,
+    "median_ms": 34.235,
+    "mean_ms": 34.235,
+    "median_ops_per_sec": 3506.96
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "simulation_tick (serial)",
+    "samples": 2,
+    "median_ms": 418.95,
+    "mean_ms": 418.95,
+    "median_ops_per_sec": 83.545
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "simulation_tick baseline",
+    "samples": 2,
+    "median_ms": 397.64,
+    "mean_ms": 397.64,
+    "median_ops_per_sec": 75.445
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "threadpool batched tasks",
+    "samples": 2,
+    "median_ms": 2.155,
+    "mean_ms": 2.155,
+    "median_ops_per_sec": 23468700.04
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "threadpool submit+execute",
+    "samples": 2,
+    "median_ms": 9.72,
+    "mean_ms": 9.72,
+    "median_ops_per_sec": 5203215.19
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "threadpool tiny tasks",
+    "samples": 2,
+    "median_ms": 9.455,
+    "mean_ms": 9.455,
+    "median_ops_per_sec": 5292348.915
+  },
+  {
+    "scenario": "debug_scale1",
+    "metric": "world create/init/destroy",
+    "samples": 2,
+    "median_ms": 30.595,
+    "mean_ms": 30.595,
+    "median_ops_per_sec": 5907.93
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "atomic_tick (1 thread)",
+    "samples": 2,
+    "median_ms": 2715.78,
+    "mean_ms": 2715.78,
+    "median_ops_per_sec": 14.74
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "atomic_tick (2 threads)",
+    "samples": 2,
+    "median_ms": 1658.02,
+    "mean_ms": 1658.02,
+    "median_ops_per_sec": 24.13
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "atomic_tick (4 threads)",
+    "samples": 4,
+    "median_ms": 1379.82,
+    "mean_ms": 1417.1525,
+    "median_ops_per_sec": 36.92
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "name+color generation",
+    "samples": 2,
+    "median_ms": 25.415,
+    "mean_ms": 25.415,
+    "median_ops_per_sec": 3934771.155
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "protocol deserialize only",
+    "samples": 2,
+    "median_ms": 36.015,
+    "mean_ms": 36.015,
+    "median_ops_per_sec": 6664.515
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "protocol serialize only",
+    "samples": 2,
+    "median_ms": 45.315,
+    "mean_ms": 45.315,
+    "median_ops_per_sec": 5296.665
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "protocol serialize+deserialize",
+    "samples": 2,
+    "median_ms": 65.14,
+    "mean_ms": 65.14,
+    "median_ops_per_sec": 3684.58
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "simulation_tick (serial)",
+    "samples": 2,
+    "median_ms": 1232.58,
+    "mean_ms": 1232.58,
+    "median_ops_per_sec": 56.805
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "simulation_tick baseline",
+    "samples": 2,
+    "median_ms": 1149.395,
+    "mean_ms": 1149.395,
+    "median_ops_per_sec": 52.21
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "threadpool batched tasks",
+    "samples": 2,
+    "median_ms": 3.17,
+    "mean_ms": 3.17,
+    "median_ops_per_sec": 31612386.315
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "threadpool submit+execute",
+    "samples": 2,
+    "median_ms": 16.7,
+    "mean_ms": 16.7,
+    "median_ops_per_sec": 5989684.415
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "threadpool tiny tasks",
+    "samples": 2,
+    "median_ms": 17.395,
+    "mean_ms": 17.395,
+    "median_ops_per_sec": 5750237.99
+  },
+  {
+    "scenario": "debug_scale2",
+    "metric": "world create/init/destroy",
+    "samples": 2,
+    "median_ms": 55.43,
+    "mean_ms": 55.43,
+    "median_ops_per_sec": 6496.45
+  }
+]
