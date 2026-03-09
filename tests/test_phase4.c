@@ -76,7 +76,7 @@ int test_protocol_header_rejects_invalid_magic(void) {
 
 // Test: Colony serialization/deserialization roundtrip
 int test_protocol_colony_serialization_roundtrip(void) {
-    proto_colony original = {
+    ProtoColony original = {
         .id = 1234,
         .x = 100.5f,
         .y = 200.75f,
@@ -94,7 +94,7 @@ int test_protocol_colony_serialization_roundtrip(void) {
     int serialized = protocol_serialize_colony(&original, buffer);
     TEST_ASSERT(serialized > 0, "Serialize should return positive size");
     
-    proto_colony decoded;
+    ProtoColony decoded;
     int deserialized = protocol_deserialize_colony(buffer, &decoded);
     TEST_ASSERT(deserialized > 0, "Deserialize should return positive size");
     TEST_ASSERT_EQ(serialized, deserialized, "Serialized and deserialized sizes should match");
@@ -114,9 +114,9 @@ int test_protocol_colony_serialization_roundtrip(void) {
     return 0;
 }
 
-// Test: proto_world state serialization/deserialization roundtrip
+// Test: ProtoWorld state serialization/deserialization roundtrip
 int test_protocol_world_state_roundtrip(void) {
-    proto_world original;
+    ProtoWorld original;
     memset(&original, 0, sizeof(original));
     original.width = 1920;
     original.height = 1080;
@@ -158,7 +158,7 @@ int test_protocol_world_state_roundtrip(void) {
     TEST_ASSERT(buffer != NULL, "Buffer should be allocated");
     TEST_ASSERT(len > 0, "Length should be positive");
     
-    proto_world decoded;
+    ProtoWorld decoded;
     memset(&decoded, 0, sizeof(decoded));
     result = protocol_deserialize_world_state(buffer, len, &decoded);
     TEST_ASSERT(result == 0, "Deserialize should succeed");
@@ -188,7 +188,7 @@ int test_protocol_command_serialization_roundtrip(void) {
     TEST_ASSERT(size > 0, "Serialize pause command should succeed");
     
     CommandType cmd;
-    int result = protocol_deserialize_command(buffer, (size_t)size, &cmd, NULL);
+    int result = protocol_deserialize_command(buffer, &cmd, NULL);
     TEST_ASSERT(result > 0, "Deserialize pause command should succeed");
     TEST_ASSERT_EQ(cmd, CMD_PAUSE, "Command type should be PAUSE");
     
@@ -198,7 +198,7 @@ int test_protocol_command_serialization_roundtrip(void) {
     TEST_ASSERT(size > 0, "Serialize select command should succeed");
     
     CommandSelectColony decoded_select;
-    result = protocol_deserialize_command(buffer, (size_t)size, &cmd, &decoded_select);
+    result = protocol_deserialize_command(buffer, &cmd, &decoded_select);
     TEST_ASSERT(result > 0, "Deserialize select command should succeed");
     TEST_ASSERT_EQ(cmd, CMD_SELECT_COLONY, "Command type should be SELECT_COLONY");
     TEST_ASSERT_EQ(decoded_select.colony_id, 42, "Colony ID should match");
@@ -210,7 +210,7 @@ int test_protocol_command_serialization_roundtrip(void) {
     TEST_ASSERT(size > 0, "Serialize spawn command should succeed");
     
     CommandSpawnColony decoded_spawn;
-    result = protocol_deserialize_command(buffer, (size_t)size, &cmd, &decoded_spawn);
+    result = protocol_deserialize_command(buffer, &cmd, &decoded_spawn);
     TEST_ASSERT(result > 0, "Deserialize spawn command should succeed");
     TEST_ASSERT_EQ(cmd, CMD_SPAWN_COLONY, "Command type should be SPAWN_COLONY");
     TEST_ASSERT_FLOAT_EQ(decoded_spawn.x, 123.5f, "Spawn X should match");
@@ -223,7 +223,7 @@ int test_protocol_command_serialization_roundtrip(void) {
 // Test: Server creation on available port
 int test_net_server_creates_on_available_port(void) {
     // Create server on port 0 (let OS assign)
-    net_server* server = net_server_create(0);
+    NetServer* server = net_server_create(0);
     TEST_ASSERT(server != NULL, "Server should be created");
     TEST_ASSERT(server->listening, "Server should be listening");
     TEST_ASSERT(server->port > 0, "Server should have assigned port");
@@ -251,7 +251,7 @@ typedef struct {
 static void* server_thread_func(void* arg) {
     ThreadData* data = (ThreadData*)arg;
     
-    net_server* server = net_server_create(data->port);
+    NetServer* server = net_server_create(data->port);
     if (!server) {
         snprintf(data->error, sizeof(data->error), "Failed to create server");
         data->result = 1;
@@ -260,7 +260,7 @@ static void* server_thread_func(void* arg) {
     data->port = server->port;  // Update with actual port
     
     // Accept connection (blocking)
-    net_socket* client = net_server_accept(server);
+    NetSocket* client = net_server_accept(server);
     if (!client) {
         snprintf(data->error, sizeof(data->error), "Failed to accept");
         net_server_destroy(server);
@@ -300,7 +300,7 @@ int test_net_client_connects_to_local_server(void) {
     ThreadData thread_data = { .port = 0, .result = -1 };
     
     // Create server first to get port
-    net_server* temp_server = net_server_create(0);
+    NetServer* temp_server = net_server_create(0);
     TEST_ASSERT(temp_server != NULL, "Temp server should be created");
     thread_data.port = temp_server->port;
     net_server_destroy(temp_server);
@@ -314,7 +314,7 @@ int test_net_client_connects_to_local_server(void) {
     usleep(100000);  // 100ms
     
     // Connect client
-    net_socket* client = net_client_connect("127.0.0.1", thread_data.port);
+    NetSocket* client = net_client_connect("127.0.0.1", thread_data.port);
     TEST_ASSERT(client != NULL, "Client should connect");
     TEST_ASSERT(client->connected, "Client should be connected");
     
@@ -334,7 +334,7 @@ int test_net_send_recv_preserves_data_integrity(void) {
     ThreadData thread_data = { .port = 0, .result = -1 };
     
     // Create server first to get port
-    net_server* temp_server = net_server_create(0);
+    NetServer* temp_server = net_server_create(0);
     TEST_ASSERT(temp_server != NULL, "Temp server should be created");
     thread_data.port = temp_server->port;
     net_server_destroy(temp_server);
@@ -348,7 +348,7 @@ int test_net_send_recv_preserves_data_integrity(void) {
     usleep(100000);  // 100ms
     
     // Connect client
-    net_socket* client = net_client_connect("127.0.0.1", thread_data.port);
+    NetSocket* client = net_client_connect("127.0.0.1", thread_data.port);
     TEST_ASSERT(client != NULL, "Client should connect");
     
     // Send test data
@@ -374,7 +374,7 @@ int test_net_send_recv_preserves_data_integrity(void) {
 // Test: net_has_data function
 int test_net_has_data_detects_available_data(void) {
     // Create a socket pair using server/client
-    net_server* server = net_server_create(0);
+    NetServer* server = net_server_create(0);
     TEST_ASSERT(server != NULL, "Server should be created");
     
     // Simple inline accept in forked process
@@ -382,7 +382,7 @@ int test_net_has_data_detects_available_data(void) {
     if (pid == 0) {
         // Child: connect and send data
         usleep(50000);  // 50ms delay
-        net_socket* client = net_client_connect("127.0.0.1", server->port);
+        NetSocket* client = net_client_connect("127.0.0.1", server->port);
         if (client) {
             uint8_t data = 0x42;
             net_send(client, &data, 1);
@@ -393,7 +393,7 @@ int test_net_has_data_detects_available_data(void) {
     }
     
     // Parent: accept and check has_data
-    net_socket* conn = net_server_accept(server);
+    NetSocket* conn = net_server_accept(server);
     TEST_ASSERT(conn != NULL, "Should accept connection");
     
     // Wait for data
@@ -422,13 +422,13 @@ int test_net_has_data_detects_available_data(void) {
 
 // Test: Socket options
 int test_net_socket_options_do_not_crash(void) {
-    net_server* server = net_server_create(0);
+    NetServer* server = net_server_create(0);
     TEST_ASSERT(server != NULL, "Server should be created");
     
     pid_t pid = fork();
     if (pid == 0) {
         usleep(50000);
-        net_socket* client = net_client_connect("127.0.0.1", server->port);
+        NetSocket* client = net_client_connect("127.0.0.1", server->port);
         if (client) {
             // Test setting options
             net_set_nonblocking(client, true);
@@ -440,7 +440,7 @@ int test_net_socket_options_do_not_crash(void) {
         exit(0);
     }
     
-    net_socket* conn = net_server_accept(server);
+    NetSocket* conn = net_server_accept(server);
     TEST_ASSERT(conn != NULL, "Should accept connection");
     
     // These should not crash
@@ -466,7 +466,7 @@ int test_protocol_and_network_handle_null_safely(void) {
     TEST_ASSERT(protocol_serialize_colony(NULL, NULL) < 0, "Should fail with NULL");
     TEST_ASSERT(protocol_deserialize_colony(NULL, NULL) < 0, "Should fail with NULL");
     TEST_ASSERT(protocol_serialize_command(CMD_PAUSE, NULL, NULL) < 0, "Should fail with NULL buffer");
-    TEST_ASSERT(protocol_deserialize_command(NULL, 0, NULL, NULL) < 0, "Should fail with NULL");
+    TEST_ASSERT(protocol_deserialize_command(NULL, NULL, NULL) < 0, "Should fail with NULL");
     TEST_ASSERT(protocol_serialize_world_state(NULL, NULL, NULL) < 0, "Should fail with NULL");
     TEST_ASSERT(protocol_deserialize_world_state(NULL, 0, NULL) < 0, "Should fail with NULL");
     

@@ -16,6 +16,14 @@
 #include <stddef.h>
 #include <stdatomic.h>
 
+#ifndef FEROX_CACHELINE_SIZE
+#if defined(__APPLE__) && defined(__aarch64__)
+#define FEROX_CACHELINE_SIZE 128
+#else
+#define FEROX_CACHELINE_SIZE 64
+#endif
+#endif
+
 // ============================================================================
 // Atomic Cell - Lock-free cell with atomic colony ownership
 // ============================================================================
@@ -46,10 +54,16 @@ typedef struct {
  * Each colony has its own stats block to avoid false sharing.
  */
 typedef struct {
-    _Atomic int64_t cell_count;      // Current population (can go negative temporarily during CAS)
+    _Alignas(FEROX_CACHELINE_SIZE) _Atomic int64_t cell_count; // Current population (can go negative temporarily during CAS)
     _Atomic int64_t max_cell_count;  // Historical max (updated with atomic max)
     _Atomic uint64_t generation;     // Mutation generation counter
+    uint8_t cacheline_padding[FEROX_CACHELINE_SIZE - (sizeof(_Atomic int64_t) * 2) - sizeof(_Atomic uint64_t)];
 } AtomicColonyStats;
+
+_Static_assert(FEROX_CACHELINE_SIZE >= (int)((sizeof(_Atomic int64_t) * 2) + sizeof(_Atomic uint64_t)),
+               "FEROX_CACHELINE_SIZE too small for AtomicColonyStats");
+_Static_assert(sizeof(AtomicColonyStats) == FEROX_CACHELINE_SIZE,
+               "AtomicColonyStats should be one cacheline");
 
 // ============================================================================
 // Double-Buffered Grid - For GPU-style read-write separation

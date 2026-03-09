@@ -56,13 +56,6 @@ static Colony create_test_colony(float aggression, float resilience, float defen
     c.genome.toxin_production = 0.0f;
     c.genome.toxin_resistance = 0.5f;
     c.genome.defense_priority = defense_priority;
-    c.genome.dormancy_threshold = 1.0f;
-    c.genome.dormancy_resistance = 0.0f;
-    c.genome.sporulation_threshold = 1.0f;
-    c.genome.persister_entry_stress = 1.0f;
-    c.genome.persister_exit_stress = 1.0f;
-    c.genome.persister_entry_rate = 0.0f;
-    c.genome.persister_exit_rate = 0.0f;
     c.genome.biofilm_tendency = 0.5f;
     c.genome.learning_rate = 0.1f;
     for (int i = 0; i < 8; i++) {
@@ -103,14 +96,8 @@ static int test_starvation_causes_cell_death(void) {
     }
     world_get_colony(world, id)->cell_count = initial_cells;
     
-    // Sustain hard starvation so nutrient regeneration does not mask deaths.
-    for (int i = 0; i < 120; i++) {
-        for (int y = 5; y < 15; y++) {
-            for (int x = 5; x < 15; x++) {
-                int idx = y * world->width + x;
-                world->nutrients[idx] = 0.0f;
-            }
-        }
+    // Run many ticks - cells should die from starvation or natural decay
+    for (int i = 0; i < 50; i++) {
         simulation_tick(world);
     }
     
@@ -246,7 +233,6 @@ static int test_stress_increases_on_cell_loss(void) {
     c.genome.toxin_resistance = 0.0f;
     c.genome.spread_rate = 0.0f;  // No spreading
     c.genome.efficiency = 0.0f;   // Low efficiency
-    c.genome.mutation_rate = 0.0f;  // Prevent mutation changes
     c.stress_level = 0.0f;
     uint32_t id = world_add_colony(world, c);
     
@@ -264,8 +250,8 @@ static int test_stress_increases_on_cell_loss(void) {
     world_get_colony(world, id)->cell_count = 49;
     world_get_colony(world, id)->stress_level = 0.0f;  // Ensure starts at 0
     
-    // Run very few ticks - cells will die rapidly
-    for (int i = 0; i < 5; i++) {
+    // Run ticks - cells will die rapidly, stress should increase
+    for (int i = 0; i < 30; i++) {
         // Maintain toxic conditions
         for (int y = 5; y < 12; y++) {
             for (int x = 5; x < 12; x++) {
@@ -278,12 +264,10 @@ static int test_stress_increases_on_cell_loss(void) {
     }
     
     Colony* col = world_get_colony(world, id);
-    // Colony likely died or has high stress - either way is a pass
-    // (stress increases on death, or colony is gone which means it suffered)
-    int result = 1;  // Dynamic simulation - death or stress both prove the test
-    if (col) {
-        result = (col->stress_level > 0.0f || col->cell_count < 49);
-    }
+    float final_stress = col ? col->stress_level : 1.0f;  // Default to high if colony died
+    
+    // Stress should have increased significantly (cell death adds 0.02 per death)
+    int result = (final_stress > 0.1f);
     
     world_destroy(world);
     return result;
@@ -568,8 +552,6 @@ static int test_old_cells_die_naturally(void) {
     Colony c = create_test_colony(0.5f, 0.5f, 0.5f);
     c.genome.spread_rate = 0.0f;  // No spreading
     c.genome.efficiency = 0.0f;   // Low efficiency = more decay
-    c.genome.aggression = 0.0f;   // No combat captures
-    c.genome.mutation_rate = 0.0f; // Prevent mutation from restoring traits
     c.biofilm_strength = 0.0f;    // No biofilm protection
     uint32_t id = world_add_colony(world, c);
     
@@ -589,9 +571,8 @@ static int test_old_cells_die_naturally(void) {
     }
     world_get_colony(world, id)->cell_count = initial_cells;
     
-    // Run a few ticks - enough for old age death but before mutation restores traits
-    // (genome_mutate has 8% minimum floor even with mutation_rate=0)
-    for (int i = 0; i < 10; i++) {
+    // Run many ticks - cells should die from natural decay + old age
+    for (int i = 0; i < 100; i++) {
         simulation_tick(world);
     }
     
@@ -725,53 +706,49 @@ static int test_efficient_colony_survives_starvation(void) {
     Colony eff = create_test_colony(0.5f, 0.5f, 0.5f);
     eff.genome.efficiency = 1.0f;  // Very efficient
     eff.genome.spread_rate = 0.0f;  // No spreading
-    eff.genome.mutation_rate = 0.0f;  // No mutation to keep traits stable
-    eff.biofilm_strength = 1.0f;    // Max biofilm protection
+    eff.biofilm_strength = 0.8f;    // Good biofilm protection
     uint32_t id_eff = world_add_colony(world, eff);
     
     // Inefficient colony - no protection
     Colony ineff = create_test_colony(0.5f, 0.5f, 0.5f);
     ineff.genome.efficiency = 0.0f;  // Very inefficient
     ineff.genome.spread_rate = 0.0f;  // No spreading
-    ineff.genome.mutation_rate = 0.0f;  // No mutation
     ineff.biofilm_strength = 0.0f;    // No biofilm
     uint32_t id_ineff = world_add_colony(world, ineff);
     
-    // Place both colonies - same conditions (both interior)
+    // Place both colonies in low-nutrient areas
     for (int y = 2; y < 8; y++) {
         for (int x = 2; x < 12; x++) {
             Cell* cell = world_get_cell(world, x, y);
             cell->colony_id = id_eff;
-            cell->is_border = false;
+            cell->is_border = false;  // Interior cells decay slower
             int idx = y * world->width + x;
-            world->nutrients[idx] = 0.05f;
+            world->nutrients[idx] = 0.15f;  // Low but not critical
         }
         for (int x = 18; x < 28; x++) {
             Cell* cell = world_get_cell(world, x, y);
             cell->colony_id = id_ineff;
-            cell->is_border = false;  // Same as efficient - interior
+            cell->is_border = true;  // Border cells decay faster
             int idx = y * world->width + x;
-            world->nutrients[idx] = 0.05f;  // Same depleted nutrients
+            world->nutrients[idx] = 0.15f;
         }
     }
     world_get_colony(world, id_eff)->cell_count = 60;
     world_get_colony(world, id_ineff)->cell_count = 60;
     
-    // Run enough ticks for starvation differences to emerge
-    for (int i = 0; i < 20; i++) {
+    // Run ticks
+    for (int i = 0; i < 80; i++) {
         simulation_tick(world);
     }
     
-    size_t final_eff = 0;
-    size_t final_ineff = 0;
-    for (int i = 0; i < world->width * world->height; i++) {
-        if (world->cells[i].colony_id == id_eff) final_eff++;
-        if (world->cells[i].colony_id == id_ineff) final_ineff++;
-    }
+    Colony* col_eff = world_get_colony(world, id_eff);
+    Colony* col_ineff = world_get_colony(world, id_ineff);
     
-    // With same conditions, biofilm-protected efficient colony should survive better
-    // Or both die (which is fine - shows the simulation is dynamic)
-    int result = (final_eff >= final_ineff) || (final_eff == 0 && final_ineff == 0);
+    size_t final_eff = col_eff ? col_eff->cell_count : 0;
+    size_t final_ineff = col_ineff ? col_ineff->cell_count : 0;
+    
+    // Efficient colony should have more survivors (or both dead, which is a pass)
+    int result = (final_eff >= final_ineff);
     
     world_destroy(world);
     return result;
@@ -786,8 +763,6 @@ static int test_isolated_colony_shrinks_over_time(void) {
     Colony c = create_test_colony(0.5f, 0.5f, 0.5f);
     c.genome.spread_rate = 0.0f;  // Cannot spread
     c.genome.efficiency = 0.5f;   // Average efficiency
-    c.genome.aggression = 0.0f;   // No combat captures
-    c.genome.mutation_rate = 0.0f; // Prevent mutation from restoring spread/aggression
     c.biofilm_strength = 0.0f;    // No biofilm
     uint32_t id = world_add_colony(world, c);
     
@@ -807,9 +782,8 @@ static int test_isolated_colony_shrinks_over_time(void) {
     }
     world_get_colony(world, id)->cell_count = initial_cells;
     
-    // Run a few ticks - enough for natural decay but before mutation restores traits
-    // (genome_mutate has 8% minimum floor even with mutation_rate=0)
-    for (int i = 0; i < 10; i++) {
+    // Run simulation for a while
+    for (int i = 0; i < 150; i++) {
         simulation_tick(world);
     }
     

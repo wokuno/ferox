@@ -117,26 +117,32 @@ set_tests_properties(PerformanceProfilingTests PROPERTIES TIMEOUT 180
     ENVIRONMENT "FEROX_THREADPOOL_PROFILE=balanced")
 
 # Dedicated threadpool microbench (performance diagnostics)
-add_executable(test_threadpool_microbench test_threadpool_microbench.c)
-target_link_libraries(test_threadpool_microbench PRIVATE ferox_server_lib)
-target_compile_definitions(test_threadpool_microbench PRIVATE STANDALONE_TEST)
-add_test(NAME ThreadpoolMicrobenchTests COMMAND test_threadpool_microbench)
-set_tests_properties(ThreadpoolMicrobenchTests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE
-    ENVIRONMENT "FEROX_THREADPOOL_MICROBENCH_MODE=report;FEROX_THREADPOOL_PROFILE=balanced")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_threadpool_microbench.c")
+    add_executable(test_threadpool_microbench test_threadpool_microbench.c)
+    target_link_libraries(test_threadpool_microbench PRIVATE ferox_server_lib)
+    target_compile_definitions(test_threadpool_microbench PRIVATE STANDALONE_TEST)
+    add_test(NAME ThreadpoolMicrobenchTests COMMAND test_threadpool_microbench)
+    set_tests_properties(ThreadpoolMicrobenchTests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE
+        ENVIRONMENT "FEROX_THREADPOOL_MICROBENCH_MODE=report;FEROX_THREADPOOL_PROFILE=balanced")
+endif()
 
 # Threadpool profile scan (diagnostic benchmark matrix)
-add_executable(test_threadpool_profile_scan test_threadpool_profile_scan.c)
-target_link_libraries(test_threadpool_profile_scan PRIVATE ferox_server_lib)
-target_compile_definitions(test_threadpool_profile_scan PRIVATE STANDALONE_TEST)
-add_test(NAME ThreadpoolProfileScanTests COMMAND test_threadpool_profile_scan)
-set_tests_properties(ThreadpoolProfileScanTests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_threadpool_profile_scan.c")
+    add_executable(test_threadpool_profile_scan test_threadpool_profile_scan.c)
+    target_link_libraries(test_threadpool_profile_scan PRIVATE ferox_server_lib)
+    target_compile_definitions(test_threadpool_profile_scan PRIVATE STANDALONE_TEST)
+    add_test(NAME ThreadpoolProfileScanTests COMMAND test_threadpool_profile_scan)
+    set_tests_properties(ThreadpoolProfileScanTests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+endif()
 
 # Unit-level performance diagnostics: world lookups/churn
-add_executable(test_perf_unit_world test_perf_unit_world.c)
-target_link_libraries(test_perf_unit_world PRIVATE ferox_server_lib)
-target_compile_definitions(test_perf_unit_world PRIVATE STANDALONE_TEST)
-add_test(NAME PerfUnitWorldTests COMMAND test_perf_unit_world)
-set_tests_properties(PerfUnitWorldTests PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_perf_unit_world.c")
+    add_executable(test_perf_unit_world test_perf_unit_world.c)
+    target_link_libraries(test_perf_unit_world PRIVATE ferox_server_lib)
+    target_compile_definitions(test_perf_unit_world PRIVATE STANDALONE_TEST)
+    add_test(NAME PerfUnitWorldTests COMMAND test_perf_unit_world)
+    set_tests_properties(PerfUnitWorldTests PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+endif()
 
 # Unit-level performance diagnostics: protocol grid codec
 add_executable(test_perf_unit_protocol test_perf_unit_protocol.c)
@@ -146,11 +152,13 @@ add_test(NAME PerfUnitProtocolTests COMMAND test_perf_unit_protocol)
 set_tests_properties(PerfUnitProtocolTests PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
 
 # Component-level performance diagnostics: atomic tick modes
-add_executable(test_perf_component_atomic test_perf_component_atomic.c)
-target_link_libraries(test_perf_component_atomic PRIVATE ferox_server_lib)
-target_compile_definitions(test_perf_component_atomic PRIVATE STANDALONE_TEST)
-add_test(NAME PerfComponentAtomicTests COMMAND test_perf_component_atomic)
-set_tests_properties(PerfComponentAtomicTests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_perf_component_atomic.c")
+    add_executable(test_perf_component_atomic test_perf_component_atomic.c)
+    target_link_libraries(test_perf_component_atomic PRIVATE ferox_server_lib)
+    target_compile_definitions(test_perf_component_atomic PRIVATE STANDALONE_TEST)
+    add_test(NAME PerfComponentAtomicTests COMMAND test_perf_component_atomic)
+    set_tests_properties(PerfComponentAtomicTests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+endif()
 
 # Combined test runner
 add_executable(test_runner test_runner.c

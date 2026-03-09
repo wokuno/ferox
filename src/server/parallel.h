@@ -21,6 +21,15 @@ typedef struct Region {
     int end_x, end_y;
 } Region;
 
+struct ParallelContext;
+
+// Precomputed task argument for region processing
+typedef struct RegionTask {
+    struct ParallelContext* ctx;
+    Region* region;
+    int region_index;
+} RegionTask;
+
 // Parallel update context
 typedef struct ParallelContext {
     ThreadPool* pool;
@@ -32,6 +41,12 @@ typedef struct ParallelContext {
     
     // Pending buffers for spread phase (one per region)
     PendingBuffer** pending_buffers;
+
+    // Precomputed per-region task arguments (reused every tick)
+    RegionTask* region_tasks;
+
+    // Reusable submission argument vector for threadpool_submit_batch
+    void** submit_args;
 } ParallelContext;
 
 /**
