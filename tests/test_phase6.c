@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <assert.h>
 
 #include "../src/client/renderer.h"
@@ -348,6 +349,101 @@ static int test_client_world_state_can_be_updated(void) {
     return 1;
 }
 
+static int test_client_handles_colony_detail_messages(void) {
+    Client* c = client_create();
+    if (!c) return 0;
+
+    c->selected_colony = 7;
+
+    ProtoColonyDetail detail;
+    memset(&detail, 0, sizeof(detail));
+    detail.base.id = 7;
+    strcpy(detail.base.name, "Alpha");
+    detail.base.alive = true;
+    detail.state = 2;
+    detail.flags = COLONY_DETAIL_FLAG_DORMANT;
+    detail.behavior_mode = PROTO_COLONY_BEHAVIOR_MODE_FORTIFYING;
+    detail.focus_direction = 4;
+    detail.dominant_sensor = PROTO_COLONY_SENSOR_ALARM;
+    detail.dominant_drive = PROTO_COLONY_DRIVE_CAUTION;
+    detail.secondary_sensor = PROTO_COLONY_SENSOR_PRESSURE;
+    detail.secondary_drive = PROTO_COLONY_DRIVE_PRESERVATION;
+    detail.sensor_link_sensor = PROTO_COLONY_SENSOR_ALARM;
+    detail.sensor_link_drive = PROTO_COLONY_DRIVE_CAUTION;
+    detail.action_link_drive = PROTO_COLONY_DRIVE_CAUTION;
+    detail.action_link_action = PROTO_COLONY_ACTION_DEFEND;
+    detail.secondary_sensor_link_sensor = PROTO_COLONY_SENSOR_PRESSURE;
+    detail.secondary_sensor_link_drive = PROTO_COLONY_DRIVE_PRESERVATION;
+    detail.secondary_action_link_drive = PROTO_COLONY_DRIVE_PRESERVATION;
+    detail.secondary_action_link_action = PROTO_COLONY_ACTION_DORMANCY;
+    detail.dominant_sensor_value = 0.88f;
+    detail.dominant_drive_value = 0.73f;
+    detail.secondary_sensor_value = 0.64f;
+    detail.secondary_drive_value = 0.61f;
+    detail.sensor_link_value = 0.69f;
+    detail.action_link_value = 0.74f;
+    detail.secondary_sensor_link_value = 0.51f;
+    detail.secondary_action_link_value = 0.57f;
+    detail.action_defend = 0.7f;
+    detail.action_transfer = 0.4f;
+    detail.action_dormancy = 0.6f;
+    detail.action_motility = 0.2f;
+    detail.stress_level = 0.8f;
+    detail.trait_learning = 0.6f;
+
+    uint8_t buffer[COLONY_DETAIL_SERIALIZED_SIZE];
+    int len = protocol_serialize_colony_detail(&detail, buffer);
+    if (len != COLONY_DETAIL_SERIALIZED_SIZE) {
+        client_destroy(c);
+        return 0;
+    }
+
+    client_handle_message(c, MSG_COLONY_INFO, buffer, (size_t)len);
+    if (!c->has_selected_detail) {
+        client_destroy(c);
+        return 0;
+    }
+    if (c->selected_detail.base.id != 7 || c->selected_detail.state != 2) {
+        client_destroy(c);
+        return 0;
+    }
+    if (c->selected_detail.behavior_mode != PROTO_COLONY_BEHAVIOR_MODE_FORTIFYING) {
+        client_destroy(c);
+        return 0;
+    }
+    if (c->selected_detail.dominant_sensor != PROTO_COLONY_SENSOR_ALARM ||
+        c->selected_detail.dominant_drive != PROTO_COLONY_DRIVE_CAUTION) {
+        client_destroy(c);
+        return 0;
+    }
+    if (c->selected_detail.secondary_sensor != PROTO_COLONY_SENSOR_PRESSURE ||
+        c->selected_detail.secondary_drive != PROTO_COLONY_DRIVE_PRESERVATION) {
+        client_destroy(c);
+        return 0;
+    }
+    if (c->selected_detail.action_link_action != PROTO_COLONY_ACTION_DEFEND ||
+        c->selected_detail.sensor_link_drive != PROTO_COLONY_DRIVE_CAUTION) {
+        client_destroy(c);
+        return 0;
+    }
+    if (c->selected_detail.secondary_action_link_action != PROTO_COLONY_ACTION_DORMANCY ||
+        c->selected_detail.secondary_sensor_link_drive != PROTO_COLONY_DRIVE_PRESERVATION) {
+        client_destroy(c);
+        return 0;
+    }
+    if (fabsf(c->selected_detail.action_dormancy - 0.6f) > 0.0001f) {
+        client_destroy(c);
+        return 0;
+    }
+    if ((c->selected_detail.flags & COLONY_DETAIL_FLAG_DORMANT) == 0) {
+        client_destroy(c);
+        return 0;
+    }
+
+    client_destroy(c);
+    return 1;
+}
+
 int main(void) {
     printf("Phase 6 Tests: Client Implementation\n");
     printf("=====================================\n\n");
@@ -367,6 +463,7 @@ int main(void) {
     TEST(client_selects_next_alive_colony);
     TEST(client_get_selected_returns_correct_colony);
     TEST(client_world_state_can_be_updated);
+    TEST(client_handles_colony_detail_messages);
     
     printf("\nInput Tests:\n");
     TEST(input_is_not_initialized_by_default);

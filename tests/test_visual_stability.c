@@ -221,44 +221,37 @@ TEST(small_scale_centroid_moves_smoothly) {
     rng_seed(101);
     world_init_random_colonies(world, 3);
     
-    // Run 10 ticks (very few due to aggressive decay), track centroid jumps
+    // Run 50 ticks, track centroid jumps
     Point prev_centroids[10] = {0};
-    int valid_measurements = 0;
-    int large_jumps = 0;
+    int max_centroid_jump = 0;
     
     for (size_t i = 0; i < world->colony_count && i < 10; i++) {
         prev_centroids[i] = calc_centroid(world, world->colonies[i].id);
     }
     
-    for (int tick = 0; tick < 10; tick++) {
+    for (int tick = 0; tick < 50; tick++) {
         simulation_tick(world);
         
         for (size_t i = 0; i < world->colony_count && i < 10; i++) {
             Colony* col = &world->colonies[i];
-            if (col->active && col->cell_count > 3) {  // Only track colonies with enough cells
+            if (col->active) {
                 Point curr = calc_centroid(world, col->id);
                 
                 float dx = fabsf(curr.x - prev_centroids[i].x);
                 float dy = fabsf(curr.y - prev_centroids[i].y);
                 int jump = (int)dx + (int)dy;  // Manhattan distance
                 
-                valid_measurements++;
-                // In dynamic simulation, some large jumps are expected due to cell death
-                // Track but don't fail on individual jumps
-                if (jump > 5) {
-                    large_jumps++;
+                if (jump > max_centroid_jump) {
+                    max_centroid_jump = jump;
                 }
+                
+                // Strategic combat, richer signaling, and dynamic dormancy can now
+                // shift small colonies more aggressively than the original model.
+                ASSERT(jump <= 8, "Centroid jumped > 8 cells");
                 
                 prev_centroids[i] = curr;
             }
         }
-    }
-    
-    // Most measurements should show smooth movement
-    // Allow up to 30% large jumps in dynamic simulation
-    if (valid_measurements > 0) {
-        float large_jump_ratio = (float)large_jumps / (float)valid_measurements;
-        ASSERT(large_jump_ratio < 0.5f, "Too many large centroid jumps");
     }
     
     world_destroy(world);
@@ -688,17 +681,26 @@ TEST(rapid_update_radius_changes_smoothly) {
         simulation_tick(world);
         
         for (size_t i = 0; i < world->colony_count && i < 100; i++) {
-            if (world->colonies[i].active && world->colonies[i].cell_count > 5) {
+            if (world->colonies[i].active) {
                 Point curr_centroid = calc_centroid(world, world->colonies[i].id);
                 float curr_radius = calc_radius(world, world->colonies[i].id);
                 
-                // Only check smoothness if this is the same colony we were tracking AND has valid previous data
-                if (world->colonies[i].id == prev_ids[i] && prev_radii[i] > 0.5f) {
-                    // Just verify values are reasonable, don't enforce smoothness
-                    // The aggressive simulation can cause large changes due to speciation
-                    ASSERT(curr_centroid.x >= 0 && curr_centroid.x < world->width, "centroid x in bounds");
-                    ASSERT(curr_centroid.y >= 0 && curr_centroid.y < world->height, "centroid y in bounds");
-                    ASSERT(curr_radius >= 0 && curr_radius < world->width, "radius in bounds");
+                // Only check smoothness if this is the same colony we were tracking
+                if (world->colonies[i].id == prev_ids[i]) {
+                    float dx = fabsf(curr_centroid.x - prev_centroids[i * 2]);
+                    float dy = fabsf(curr_centroid.y - prev_centroids[i * 2 + 1]);
+                    
+                    // The richer behavior graph, combat flow, and atomic-path
+                    // maintenance can now produce materially larger territory
+                    // swings between rapid client updates than the original model.
+                    ASSERT_LT(dx + dy, 24.0f);
+                    
+                    // Radius should stay within bounds but allow significant changes
+                    if (prev_radii[i] > 0.0f) {
+                        float pct_change = fabsf(curr_radius - prev_radii[i]) / prev_radii[i];
+                        // During rapid growth/division, radius can change significantly
+                        ASSERT_LE(pct_change, 10.0f);  // Allow up to 10x change
+                    }
                 }
                 
                 prev_centroids[i * 2] = curr_centroid.x;

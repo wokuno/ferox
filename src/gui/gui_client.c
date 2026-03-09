@@ -34,8 +34,8 @@ GuiClient* gui_client_create(void) {
     // Initialize local world
     proto_world_init(&client->local_world);
     client->local_world.speed_multiplier = 1.0f;
-    client->local_world.width = 100;
-    client->local_world.height = 100;
+    client->local_world.width = 400;
+    client->local_world.height = 200;
     
     return client;
 }
@@ -107,10 +107,24 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
     
     switch (type) {
         case MSG_WORLD_STATE:
-        case MSG_WORLD_DELTA:
             gui_client_update_world(client, payload, len);
             break;
+        case MSG_WORLD_DELTA:
+            gui_client_apply_world_delta(client, payload, len);
+            break;
         case MSG_COLONY_INFO:
+            if (payload && len >= COLONY_DETAIL_SERIALIZED_SIZE) {
+                ProtoColonyDetail detail;
+                if (protocol_deserialize_colony_detail(payload, &detail) >= 0) {
+                    client->selected_detail = detail;
+                    client->has_selected_detail = detail.base.alive;
+                    if (!detail.base.alive && client->selected_colony == detail.base.id) {
+                        client->selected_colony = 0;
+                        client->renderer->selected_colony = 0;
+                    }
+                }
+            }
+            break;
         case MSG_ACK:
         case MSG_ERROR:
         default:
@@ -120,19 +134,80 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
 
 void gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len) {
     if (!client || !data) return;
-
-    // Free previous world data to prevent memory leaks
+    
+    // Free old grid before deserializing new one
     proto_world_free(&client->local_world);
-
+    client->pending_grid_active = false;
+    client->pending_grid_tick = 0;
+    client->pending_grid_next_index = 0;
+    if (client->has_selected_detail && client->selected_detail.base.id != client->selected_colony) {
+        client->has_selected_detail = false;
+    }
+    
     if (protocol_deserialize_world_state(data, len, &client->local_world) < 0) {
         return;
     }
+}
+
+void gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t len) {
+    if (!client || !data) return;
+
+    ProtoWorldDeltaGridChunk chunk;
+    proto_world_delta_grid_chunk_init(&chunk);
+    if (protocol_deserialize_world_delta_grid_chunk(data, len, &chunk) < 0) {
+        proto_world_delta_grid_chunk_free(&chunk);
+        return;
+    }
+
+    if (client->local_world.tick != chunk.tick ||
+        client->local_world.width != chunk.width ||
+        client->local_world.height != chunk.height) {
+        proto_world_delta_grid_chunk_free(&chunk);
+        return;
+    }
+
+    if (!client->pending_grid_active ||
+        client->pending_grid_tick != chunk.tick ||
+        client->local_world.grid_size != chunk.total_cells ||
+        chunk.start_index == 0) {
+        proto_world_free(&client->local_world);
+        client->local_world.width = chunk.width;
+        client->local_world.height = chunk.height;
+        proto_world_alloc_grid(&client->local_world, chunk.width, chunk.height);
+        if (!client->local_world.grid) {
+            proto_world_delta_grid_chunk_free(&chunk);
+            return;
+        }
+        client->local_world.has_grid = false;
+        client->pending_grid_active = true;
+        client->pending_grid_tick = chunk.tick;
+        client->pending_grid_next_index = 0;
+    }
+
+    if (chunk.start_index != client->pending_grid_next_index ||
+        !client->local_world.grid ||
+        chunk.start_index + chunk.cell_count > client->local_world.grid_size) {
+        proto_world_delta_grid_chunk_free(&chunk);
+        return;
+    }
+
+    memcpy(&client->local_world.grid[chunk.start_index], chunk.cells,
+           (size_t)chunk.cell_count * sizeof(uint16_t));
+    client->pending_grid_next_index = chunk.start_index + chunk.cell_count;
+
+    if (chunk.final_chunk || client->pending_grid_next_index >= client->local_world.grid_size) {
+        client->local_world.has_grid = true;
+        client->pending_grid_active = false;
+    }
+
+    proto_world_delta_grid_chunk_free(&chunk);
 }
 
 void gui_client_select_next_colony(GuiClient* client) {
     if (!client || client->local_world.colony_count == 0) {
         client->selected_colony = 0;
         client->selected_index = 0;
+        client->has_selected_detail = false;
         return;
     }
     
@@ -149,8 +224,11 @@ void gui_client_select_next_colony(GuiClient* client) {
         if (client->local_world.colonies[check_index].alive) {
             client->selected_index = check_index;
             client->selected_colony = client->local_world.colonies[check_index].id;
+            if (!client->has_selected_detail || client->selected_detail.base.id != client->selected_colony) {
+                client->has_selected_detail = false;
+            }
             
-            const proto_colony* colony = &client->local_world.colonies[check_index];
+            const ProtoColony* colony = &client->local_world.colonies[check_index];
             gui_renderer_center_on(client->renderer, colony->x, colony->y);
             client->renderer->selected_colony = client->selected_colony;
             return;
@@ -158,12 +236,14 @@ void gui_client_select_next_colony(GuiClient* client) {
     }
     
     client->selected_colony = 0;
+    client->has_selected_detail = false;
 }
 
 void gui_client_select_prev_colony(GuiClient* client) {
     if (!client || client->local_world.colony_count == 0) {
         client->selected_colony = 0;
         client->selected_index = 0;
+        client->has_selected_detail = false;
         return;
     }
     
@@ -176,8 +256,11 @@ void gui_client_select_prev_colony(GuiClient* client) {
         if (client->local_world.colonies[check_index].alive) {
             client->selected_index = check_index;
             client->selected_colony = client->local_world.colonies[check_index].id;
+            if (!client->has_selected_detail || client->selected_detail.base.id != client->selected_colony) {
+                client->has_selected_detail = false;
+            }
             
-            const proto_colony* colony = &client->local_world.colonies[check_index];
+            const ProtoColony* colony = &client->local_world.colonies[check_index];
             gui_renderer_center_on(client->renderer, colony->x, colony->y);
             client->renderer->selected_colony = client->selected_colony;
             return;
@@ -185,13 +268,14 @@ void gui_client_select_prev_colony(GuiClient* client) {
     }
     
     client->selected_colony = 0;
+    client->has_selected_detail = false;
 }
 
 void gui_client_deselect_colony(GuiClient* client) {
     if (!client) return;
     client->selected_colony = 0;
-    if (client->renderer)
-        client->renderer->selected_colony = 0;
+    client->has_selected_detail = false;
+    client->renderer->selected_colony = 0;
 }
 
 void gui_client_select_colony_at(GuiClient* client, float world_x, float world_y) {
@@ -199,7 +283,7 @@ void gui_client_select_colony_at(GuiClient* client, float world_x, float world_y
     
     // Find colony under cursor
     for (uint32_t i = 0; i < client->local_world.colony_count; i++) {
-        const proto_colony* colony = &client->local_world.colonies[i];
+        const ProtoColony* colony = &client->local_world.colonies[i];
         if (!colony->alive) continue;
         
         float dx = world_x - colony->x;
@@ -210,6 +294,7 @@ void gui_client_select_colony_at(GuiClient* client, float world_x, float world_y
         if (dist <= colony->radius * 1.5f) {
             client->selected_colony = colony->id;
             client->selected_index = i;
+            client->has_selected_detail = false;
             client->renderer->selected_colony = colony->id;
             
             CommandSelectColony cmd = { .colony_id = colony->id };
@@ -222,7 +307,7 @@ void gui_client_select_colony_at(GuiClient* client, float world_x, float world_y
     gui_client_deselect_colony(client);
 }
 
-const proto_colony* gui_client_get_selected_colony(GuiClient* client) {
+const ProtoColony* gui_client_get_selected_colony(GuiClient* client) {
     if (!client || client->selected_colony == 0) return NULL;
     
     for (uint32_t i = 0; i < client->local_world.colony_count; i++) {
@@ -253,8 +338,8 @@ static void gui_client_process_input(GuiClient* client, GuiInputState* input) {
         case GUI_INPUT_SPEED_UP:
             gui_client_send_command(client, CMD_SPEED_UP, NULL);
             client->local_world.speed_multiplier *= 1.5f;
-            if (client->local_world.speed_multiplier > 100.0f) {
-                client->local_world.speed_multiplier = 100.0f;
+            if (client->local_world.speed_multiplier > 10.0f) {
+                client->local_world.speed_multiplier = 10.0f;
             }
             break;
             
@@ -313,32 +398,20 @@ static void gui_client_process_input(GuiClient* client, GuiInputState* input) {
             break;
             
         case GUI_INPUT_PAN_UP:
-        {
-            float z = client->renderer->zoom > 0.001f ? client->renderer->zoom : 1.0f;
-            gui_renderer_pan(client->renderer, 0, -PAN_SPEED / z);
+            gui_renderer_pan(client->renderer, 0, -PAN_SPEED / client->renderer->zoom);
             break;
-        }
             
         case GUI_INPUT_PAN_DOWN:
-        {
-            float z = client->renderer->zoom > 0.001f ? client->renderer->zoom : 1.0f;
-            gui_renderer_pan(client->renderer, 0, PAN_SPEED / z);
+            gui_renderer_pan(client->renderer, 0, PAN_SPEED / client->renderer->zoom);
             break;
-        }
             
         case GUI_INPUT_PAN_LEFT:
-        {
-            float z = client->renderer->zoom > 0.001f ? client->renderer->zoom : 1.0f;
-            gui_renderer_pan(client->renderer, -PAN_SPEED / z, 0);
+            gui_renderer_pan(client->renderer, -PAN_SPEED / client->renderer->zoom, 0);
             break;
-        }
             
         case GUI_INPUT_PAN_RIGHT:
-        {
-            float z = client->renderer->zoom > 0.001f ? client->renderer->zoom : 1.0f;
-            gui_renderer_pan(client->renderer, PAN_SPEED / z, 0);
+            gui_renderer_pan(client->renderer, PAN_SPEED / client->renderer->zoom, 0);
             break;
-        }
             
         case GUI_INPUT_CLICK:
             {
@@ -362,10 +435,9 @@ static void gui_client_process_input(GuiClient* client, GuiInputState* input) {
     
     // Handle mouse drag for panning (independent of action)
     if (input->mouse_right_down || input->mouse_middle_down) {
-        float z = client->renderer->zoom > 0.001f ? client->renderer->zoom : 1.0f;
         gui_renderer_pan(client->renderer,
-                         -input->mouse_dx / z,
-                         -input->mouse_dy / z);
+                         -input->mouse_dx / client->renderer->zoom,
+                         -input->mouse_dy / client->renderer->zoom);
     }
 }
 
@@ -405,8 +477,11 @@ static void gui_client_render(GuiClient* client) {
     gui_renderer_draw_world(client->renderer, &client->local_world);
     
     // Draw colony info panel
-    const proto_colony* selected = gui_client_get_selected_colony(client);
-    gui_renderer_draw_colony_info(client->renderer, selected);
+    const ProtoColony* selected = gui_client_get_selected_colony(client);
+    const ProtoColonyDetail* detail = (client->has_selected_detail && selected && client->selected_detail.base.id == selected->id)
+        ? &client->selected_detail
+        : NULL;
+    gui_renderer_draw_colony_info(client->renderer, selected, detail);
     
     // Draw status bar
     int alive_count = 0;

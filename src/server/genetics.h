@@ -18,4 +18,7 @@ Genome genome_merge(const Genome* a, size_t count_a, const Genome* b, size_t cou
 // Check if two genomes are compatible for recombination
 bool genome_compatible(const Genome* a, const Genome* b, float threshold);
 
+// Horizontal gene transfer - transfer some traits from donor to recipient
+void genome_transfer_genes(Genome* recipient, const Genome* donor, float transfer_strength);
+
 #endif // FEROX_GENETICS_H

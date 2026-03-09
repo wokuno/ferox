@@ -4,7 +4,6 @@
 #include <signal.h>
 #include <unistd.h>
 #include <math.h>
-#include <errno.h>
 
 #include "client.h"
 #include "input.h"
@@ -57,7 +56,7 @@ static void print_usage(const char* program) {
     fprintf(stderr, "  R            Reset simulation\n");
 }
 
-static void init_colony_wobble(proto_colony* colony) {
+static void init_colony_wobble(ProtoColony* colony) {
     // Generate unique shape seed for procedural shape generation
     colony->shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
     colony->wobble_phase = (float)(rand() % 628) / 100.0f;  // Random phase 0-2*PI
@@ -90,37 +89,37 @@ static void run_demo_mode(void) {
     g_client->local_world.colony_count = 30;
     
     // Demo colonies - spread across larger world
-    proto_colony demo_colonies[] = {
-        {1, "Bacillus feroxii", 40.0f, 30.0f, 8.0f, 150, 150, 0.5f, 255, 100, 100, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {2, "Streptococcus viridis", 120.0f, 50.0f, 12.0f, 300, 300, 0.7f, 100, 255, 100, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {3, "Lactobacillus azurae", 70.0f, 100.0f, 6.0f, 80, 80, 0.3f, 100, 100, 255, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {4, "Clostridium aureum", 180.0f, 70.0f, 10.0f, 200, 200, 0.6f, 255, 255, 100, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {5, "Enterococcus roseus", 240.0f, 120.0f, 5.0f, 50, 50, 0.2f, 255, 100, 255, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {6, "Pseudomonas cyanea", 300.0f, 40.0f, 9.0f, 180, 180, 0.55f, 50, 200, 255, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {7, "Staphylococcus amber", 340.0f, 140.0f, 7.0f, 120, 120, 0.4f, 255, 180, 50, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {8, "Escherichia verdant", 90.0f, 160.0f, 11.0f, 250, 250, 0.65f, 50, 255, 50, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {9, "Salmonella crimson", 160.0f, 130.0f, 6.0f, 90, 90, 0.35f, 200, 50, 50, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {10, "Klebsiella indigo", 260.0f, 90.0f, 8.0f, 160, 160, 0.5f, 100, 50, 200, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {11, "Proteus teal", 30.0f, 110.0f, 5.0f, 60, 60, 0.25f, 50, 200, 180, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {12, "Serratia coral", 370.0f, 80.0f, 7.0f, 110, 110, 0.45f, 255, 130, 100, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {13, "Acinetobacter olive", 200.0f, 170.0f, 9.0f, 170, 170, 0.5f, 150, 180, 50, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {14, "Moraxella violet", 110.0f, 20.0f, 6.0f, 85, 85, 0.3f, 180, 100, 220, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {15, "Neisseria gold", 280.0f, 150.0f, 10.0f, 210, 210, 0.6f, 255, 215, 0, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {16, "Vibrio azure", 50.0f, 180.0f, 7.0f, 130, 130, 0.45f, 80, 150, 255, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {17, "Rickettsia ruby", 320.0f, 25.0f, 8.0f, 140, 140, 0.5f, 220, 50, 80, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {18, "Bordetella mint", 150.0f, 180.0f, 6.0f, 100, 100, 0.35f, 100, 220, 150, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {19, "Legionella peach", 380.0f, 170.0f, 9.0f, 190, 190, 0.55f, 255, 180, 150, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {20, "Brucella slate", 220.0f, 35.0f, 7.0f, 115, 115, 0.4f, 100, 120, 140, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {21, "Francisella lime", 60.0f, 60.0f, 5.0f, 70, 70, 0.25f, 180, 255, 100, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {22, "Coxiella bronze", 350.0f, 100.0f, 8.0f, 155, 155, 0.5f, 200, 150, 80, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {23, "Bartonella plum", 130.0f, 85.0f, 6.0f, 95, 95, 0.35f, 150, 80, 180, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {24, "Ehrlichia sage", 270.0f, 185.0f, 10.0f, 200, 200, 0.6f, 140, 180, 140, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {25, "Anaplasma rose", 15.0f, 150.0f, 7.0f, 125, 125, 0.45f, 255, 150, 180, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {26, "Orientia ocean", 190.0f, 15.0f, 8.0f, 145, 145, 0.5f, 50, 120, 200, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {27, "Neorickettsia sun", 310.0f, 60.0f, 6.0f, 85, 85, 0.3f, 255, 220, 100, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {28, "Wolbachia forest", 85.0f, 140.0f, 9.0f, 175, 175, 0.55f, 60, 140, 80, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {29, "Chlamydia sky", 360.0f, 130.0f, 7.0f, 120, 120, 0.4f, 135, 200, 235, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
-        {30, "Spiroplasma ember", 240.0f, 55.0f, 8.0f, 150, 150, 0.5f, 255, 100, 50, true, 0, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
+    ProtoColony demo_colonies[] = {
+        {1, "Bacillus feroxii", 40.0f, 30.0f, 8.0f, 150, 150, 0.5f, 255, 100, 100, true, 0, 0.0f},
+        {2, "Streptococcus viridis", 120.0f, 50.0f, 12.0f, 300, 300, 0.7f, 100, 255, 100, true, 0, 0.0f},
+        {3, "Lactobacillus azurae", 70.0f, 100.0f, 6.0f, 80, 80, 0.3f, 100, 100, 255, true, 0, 0.0f},
+        {4, "Clostridium aureum", 180.0f, 70.0f, 10.0f, 200, 200, 0.6f, 255, 255, 100, true, 0, 0.0f},
+        {5, "Enterococcus roseus", 240.0f, 120.0f, 5.0f, 50, 50, 0.2f, 255, 100, 255, true, 0, 0.0f},
+        {6, "Pseudomonas cyanea", 300.0f, 40.0f, 9.0f, 180, 180, 0.55f, 50, 200, 255, true, 0, 0.0f},
+        {7, "Staphylococcus amber", 340.0f, 140.0f, 7.0f, 120, 120, 0.4f, 255, 180, 50, true, 0, 0.0f},
+        {8, "Escherichia verdant", 90.0f, 160.0f, 11.0f, 250, 250, 0.65f, 50, 255, 50, true, 0, 0.0f},
+        {9, "Salmonella crimson", 160.0f, 130.0f, 6.0f, 90, 90, 0.35f, 200, 50, 50, true, 0, 0.0f},
+        {10, "Klebsiella indigo", 260.0f, 90.0f, 8.0f, 160, 160, 0.5f, 100, 50, 200, true, 0, 0.0f},
+        {11, "Proteus teal", 30.0f, 110.0f, 5.0f, 60, 60, 0.25f, 50, 200, 180, true, 0, 0.0f},
+        {12, "Serratia coral", 370.0f, 80.0f, 7.0f, 110, 110, 0.45f, 255, 130, 100, true, 0, 0.0f},
+        {13, "Acinetobacter olive", 200.0f, 170.0f, 9.0f, 170, 170, 0.5f, 150, 180, 50, true, 0, 0.0f},
+        {14, "Moraxella violet", 110.0f, 20.0f, 6.0f, 85, 85, 0.3f, 180, 100, 220, true, 0, 0.0f},
+        {15, "Neisseria gold", 280.0f, 150.0f, 10.0f, 210, 210, 0.6f, 255, 215, 0, true, 0, 0.0f},
+        {16, "Vibrio azure", 50.0f, 180.0f, 7.0f, 130, 130, 0.45f, 80, 150, 255, true, 0, 0.0f},
+        {17, "Rickettsia ruby", 320.0f, 25.0f, 8.0f, 140, 140, 0.5f, 220, 50, 80, true, 0, 0.0f},
+        {18, "Bordetella mint", 150.0f, 180.0f, 6.0f, 100, 100, 0.35f, 100, 220, 150, true, 0, 0.0f},
+        {19, "Legionella peach", 380.0f, 170.0f, 9.0f, 190, 190, 0.55f, 255, 180, 150, true, 0, 0.0f},
+        {20, "Brucella slate", 220.0f, 35.0f, 7.0f, 115, 115, 0.4f, 100, 120, 140, true, 0, 0.0f},
+        {21, "Francisella lime", 60.0f, 60.0f, 5.0f, 70, 70, 0.25f, 180, 255, 100, true, 0, 0.0f},
+        {22, "Coxiella bronze", 350.0f, 100.0f, 8.0f, 155, 155, 0.5f, 200, 150, 80, true, 0, 0.0f},
+        {23, "Bartonella plum", 130.0f, 85.0f, 6.0f, 95, 95, 0.35f, 150, 80, 180, true, 0, 0.0f},
+        {24, "Ehrlichia sage", 270.0f, 185.0f, 10.0f, 200, 200, 0.6f, 140, 180, 140, true, 0, 0.0f},
+        {25, "Anaplasma rose", 15.0f, 150.0f, 7.0f, 125, 125, 0.45f, 255, 150, 180, true, 0, 0.0f},
+        {26, "Orientia ocean", 190.0f, 15.0f, 8.0f, 145, 145, 0.5f, 50, 120, 200, true, 0, 0.0f},
+        {27, "Neorickettsia sun", 310.0f, 60.0f, 6.0f, 85, 85, 0.3f, 255, 220, 100, true, 0, 0.0f},
+        {28, "Wolbachia forest", 85.0f, 140.0f, 9.0f, 175, 175, 0.55f, 60, 140, 80, true, 0, 0.0f},
+        {29, "Chlamydia sky", 360.0f, 130.0f, 7.0f, 120, 120, 0.4f, 135, 200, 235, true, 0, 0.0f},
+        {30, "Spiroplasma ember", 240.0f, 55.0f, 8.0f, 150, 150, 0.5f, 255, 100, 50, true, 0, 0.0f},
     };
     memcpy(g_client->local_world.colonies, demo_colonies, sizeof(demo_colonies));
     
@@ -146,8 +145,8 @@ static void run_demo_mode(void) {
                 break;
             case INPUT_SPEED_UP:
                 g_client->local_world.speed_multiplier *= 1.5f;
-                if (g_client->local_world.speed_multiplier > 100.0f)
-                    g_client->local_world.speed_multiplier = 100.0f;
+                if (g_client->local_world.speed_multiplier > 10.0f)
+                    g_client->local_world.speed_multiplier = 10.0f;
                 break;
             case INPUT_SLOW_DOWN:
                 g_client->local_world.speed_multiplier /= 1.5f;
@@ -187,7 +186,7 @@ static void run_demo_mode(void) {
                 
                 // Grow colonies and update wobble
                 for (uint32_t i = 0; i < g_client->local_world.colony_count; i++) {
-                    proto_colony* c = &g_client->local_world.colonies[i];
+                    ProtoColony* c = &g_client->local_world.colonies[i];
                     if (c->alive) {
                         c->radius += c->growth_rate * 0.05f * g_client->local_world.speed_multiplier;
                         c->population = (uint32_t)(c->radius * c->radius * 3.14159f);
@@ -220,8 +219,8 @@ static void run_demo_mode(void) {
                             (int)g_client->local_world.height);
         renderer_draw_world(g_client->renderer, &g_client->local_world);
         
-        const proto_colony* selected = client_get_selected_colony(g_client);
-        renderer_draw_colony_info(g_client->renderer, selected);
+        const ProtoColony* selected = client_get_selected_colony(g_client);
+        renderer_draw_colony_info(g_client->renderer, selected, NULL);
         
         int alive = 0;
         for (uint32_t i = 0; i < g_client->local_world.colony_count; i++) {
@@ -238,19 +237,6 @@ static void run_demo_mode(void) {
         
         usleep(33333);  // ~30 FPS
     }
-}
-
-static bool parse_port_arg(const char* arg, uint16_t* out_port) {
-    if (!arg || !out_port) return false;
-
-    errno = 0;
-    char* end = NULL;
-    long parsed = strtol(arg, &end, 10);
-    if (errno != 0 || end == arg || *end != '\0') return false;
-    if (parsed < 0 || parsed > 65535) return false;
-
-    *out_port = (uint16_t)parsed;
-    return true;
 }
 
 int main(int argc, char* argv[]) {
@@ -274,11 +260,7 @@ int main(int argc, char* argv[]) {
                 fprintf(stderr, "Error: %s requires an argument\n", argv[i]);
                 return 1;
             }
-            const char* port_arg = argv[++i];
-            if (!parse_port_arg(port_arg, &port)) {
-                fprintf(stderr, "Error: invalid port '%s'\n", port_arg);
-                return 1;
-            }
+            port = (uint16_t)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--demo") == 0) {
             demo_mode = true;
         } else {

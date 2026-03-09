@@ -454,11 +454,14 @@ Colonies track stress levels that affect behavior:
 
 | State | Trigger | Effect |
 |-------|---------|--------|
-| Normal | stress < 0.5 | Standard combat behavior |
-| Stressed | stress 0.5-0.7 | Non-defensive colonies crumble faster |
-| Dormant | stress > sporulation_threshold | Stop attacking, become resistant |
+| Normal | low stress, good nutrients | Standard growth and signaling |
+| Stressed | elevated alarm/toxin/pressure | Reactive borders, stronger alarms, unstable growth |
+| Dormant | sustained stress + poor nutrients | Strongly reduced spread, lower consumption, higher resistance |
 
 Defensive colonies under high stress stop attacking (tactical retreat).
+The active atomic runtime now refreshes signaling, toxin, biofilm, drift, and
+state dynamics every tick, then runs combat and gene transfer during serial
+maintenance.
 
 ## Phase 3: Mutation
 
@@ -897,8 +900,18 @@ Stress increases from:
 - **Nutrient scarcity** - (1 - local_nutrients) × nutrient_sensitivity
 - **Overcrowding** - density × (1 - density_tolerance)
 - **Combat losses** - lost cells from enemy attacks
+- **Alarm pressure** - local alarm gradients and hostile border contact
 
-Stress decreases when conditions improve.
+Stress decreases when conditions improve, friendly signals stabilize territory,
+and dormancy resistance helps colonies recover from sustained pressure.
+
+### Active Behavior Layers
+
+- **Signals** reinforce friendly territory and bias spread toward same-colony trails.
+- **Alarm signals** trigger retreat or reinforcement behavior depending on colony temperament.
+- **Biofilm** builds from investment plus pressure and dampens decay/spread volatility.
+- **Motility drift** biases directional spread without moving cells directly.
+- **Horizontal gene transfer** can occur across hostile borders during maintenance updates.
 
 ## Environmental Layers
 

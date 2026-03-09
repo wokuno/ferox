@@ -10,6 +10,14 @@ Every bacterial colony in Ferox has a **genome** - a set of genetic parameters t
 
 The genetic system functions as a **neural-network-like decision model** where genome traits act as weights that transform environmental inputs into behavioral outputs. Each colony's genome encodes a unique "personality" that determines how it responds to its environment.
 
+Current implementation note:
+
+- Ferox now stores an explicit fixed-topology behavior graph in the genome using
+  sensor gains, drive biases, drive weights, action biases, and action weights.
+- The runtime evaluates that graph once per colony, not per cell.
+- Legacy `hidden_weights[8]` still exist for compatibility, but the live colony
+  controller now uses the explicit graph tables.
+
 ### System Architecture Diagram
 
 ```
@@ -432,6 +440,13 @@ typedef struct {
 ```
 
 ## Gene Descriptions
+
+Runtime note:
+
+- `signal_emission` / `signal_sensitivity` now drive active territory and alarm gradients.
+- `gene_transfer_rate` now affects contact-driven horizontal gene transfer.
+- `dormancy_resistance`, `motility`, and `motility_direction` now contribute to
+  active colony state and directional drift on the atomic runtime path.
 
 ### Spread Weights (8 floats, 0-1)
 

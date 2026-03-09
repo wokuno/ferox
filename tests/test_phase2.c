@@ -81,6 +81,19 @@ static Genome create_test_genome(float spread, float mutation, float aggr, float
     for (int i = 0; i < 8; i++) g.hidden_weights[i] = spread * 2.0f - 1.0f;  // Scale to -1 to 1 range
     g.learning_rate = spread;
     g.memory_factor = spread;
+    for (int i = 0; i < COLONY_SENSOR_COUNT; i++) g.behavior_sensor_gains[i] = spread;
+    for (int drive = 0; drive < COLONY_DRIVE_COUNT; drive++) {
+        g.behavior_drive_biases[drive] = spread * 2.0f - 1.0f;
+        for (int sensor = 0; sensor < COLONY_SENSOR_COUNT; sensor++) {
+            g.behavior_drive_weights[drive][sensor] = spread * 2.0f - 1.0f;
+        }
+    }
+    for (int action = 0; action < COLONY_ACTION_COUNT; action++) {
+        g.behavior_action_biases[action] = spread * 2.0f - 1.0f;
+        for (int drive = 0; drive < COLONY_DRIVE_COUNT; drive++) {
+            g.behavior_action_weights[action][drive] = spread * 2.0f - 1.0f;
+        }
+    }
     // Environmental sensing (missing fields)
     g.toxin_sensitivity = spread;
     g.quorum_threshold = spread;

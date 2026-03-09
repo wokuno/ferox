@@ -65,7 +65,7 @@ typedef enum MessageType {
     MSG_CONNECT     = 0,  // Client -> Server: connection request
     MSG_DISCONNECT  = 1,  // Client -> Server: graceful disconnect
     MSG_WORLD_STATE = 2,  // Server -> Client: full world state
-    MSG_WORLD_DELTA = 3,  // Server -> Client: reserved for future incremental update support
+    MSG_WORLD_DELTA = 3,  // Server -> Client: incremental update
     MSG_COLONY_INFO = 4,  // Server -> Client: detailed colony info
     MSG_COMMAND     = 5,  // Client -> Server: user command
     MSG_ACK         = 6,  // Bidirectional: acknowledgment
@@ -202,10 +202,10 @@ Complete world state broadcast. Sent after each simulation tick.
 
 > **Note:** The `shape_seed` and `wobble_phase` fields have been removed. Colony shapes are now rendered directly from actual cell positions transmitted via the grid data, providing much more accurate territory visualization.
 
-### C Structure (proto_colony)
+### C Structure (ProtoColony)
 
 ```c
-typedef struct proto_colony {
+typedef struct ProtoColony {
     uint32_t id;
     char name[MAX_COLONY_NAME];
     float x, y;
@@ -222,48 +222,66 @@ typedef struct proto_colony {
     uint8_t max_tracked;             // Max neighbor colonies to track (1-4)
     float social_factor;             // -1 to +1: repulsion to attraction
     float merge_affinity;            // 0-0.3: bonus to merge compatibility
-} proto_colony;
+} ProtoColony;
 ```
 
-### C Structure (proto_world)
+### C Structure (ProtoWorld)
 
 ```c
-typedef struct proto_world {
+typedef struct ProtoWorld {
     int width;
     int height;
     uint64_t tick;
     bool paused;
     float speed_multiplier;
-    proto_colony* colonies;
+    ProtoColony* colonies;
     size_t colony_count;
     
     // Grid data for cell-based rendering
     uint32_t* grid;                  // colony_id for each cell (width * height)
     size_t grid_size;                // Size in bytes of uncompressed grid
-} proto_world;
+} ProtoWorld;
 ```
 
 ### Memory Management Functions
 
 ```c
-// Initialize proto_world with default values
-void proto_world_init(proto_world* world);
+// Initialize ProtoWorld with default values
+void proto_world_init(ProtoWorld* world);
 
-// Free allocated memory in proto_world
-void proto_world_free(proto_world* world);
+// Free allocated memory in ProtoWorld
+void proto_world_free(ProtoWorld* world);
 
 // Allocate grid array for given dimensions
-int proto_world_alloc_grid(proto_world* world, int width, int height);
+int proto_world_alloc_grid(ProtoWorld* world, int width, int height);
 ```
 
 ---
 
 ### MSG_WORLD_DELTA (Type 3)
 
-Reserved for future incremental updates.
+Incremental update used for large-world grid transport.
 
 **Direction:** Server → Client  
-**Status:** Not yet implemented. Current server builds emit full `MSG_WORLD_STATE` snapshots only.
+
+Current payload kind:
+
+```c
+typedef struct ProtoWorldDeltaGridChunk {
+    uint32_t tick;
+    uint32_t width;
+    uint32_t height;
+    uint32_t total_cells;
+    uint32_t start_index;
+    uint32_t cell_count;
+    bool final_chunk;
+    uint16_t* cells;
+} ProtoWorldDeltaGridChunk;
+```
+
+Each chunk contains raw `uint16_t colony_id` values for a contiguous grid slice.
+Clients assemble chunks in order and mark the grid available once the final
+chunk for that tick arrives.
 
 ---
 
@@ -273,7 +291,77 @@ Detailed information about a specific colony, sent when client selects a colony.
 
 **Direction:** Server → Client
 
-**Payload:** Same as colony data structure in MSG_WORLD_STATE, but may include additional genome details in future versions.
+Current payload:
+
+```c
+typedef struct ProtoColonyDetail {
+    ProtoColony base;
+    uint32_t tick;
+    uint32_t age;
+    uint32_t parent_id;
+    uint8_t state;
+    uint8_t flags;
+    uint16_t reserved;
+    float stress_level;
+    float biofilm_strength;
+    float signal_strength;
+    float drift_x;
+    float drift_y;
+    uint8_t behavior_mode;
+    int8_t focus_direction;
+    uint16_t behavior_reserved;
+    uint8_t dominant_sensor;
+    uint8_t dominant_drive;
+    uint8_t secondary_sensor;
+    uint8_t secondary_drive;
+    uint8_t sensor_link_sensor;
+    uint8_t sensor_link_drive;
+    uint8_t action_link_drive;
+    uint8_t action_link_action;
+    uint8_t secondary_sensor_link_sensor;
+    uint8_t secondary_sensor_link_drive;
+    uint8_t secondary_action_link_drive;
+    uint8_t secondary_action_link_action;
+    float dominant_sensor_value;
+    float dominant_drive_value;
+    float secondary_sensor_value;
+    float secondary_drive_value;
+    float sensor_link_value;
+    float action_link_value;
+    float secondary_sensor_link_value;
+    float secondary_action_link_value;
+    float action_expand;
+    float action_attack;
+    float action_defend;
+    float action_signal;
+    float action_transfer;
+    float action_dormancy;
+    float action_motility;
+    float trait_expansion;
+    float trait_aggression;
+    float trait_resilience;
+    float trait_cooperation;
+    float trait_efficiency;
+    float trait_learning;
+} ProtoColonyDetail;
+```
+
+This detail payload is sent on demand for the currently selected colony and is
+also refreshed during world broadcasts while that colony remains selected.
+
+The current selected-colony sheet exposes:
+
+- lifecycle state (`Normal`, `Stressed`, `Dormant`)
+- behavior mode and focus direction
+- strongest and second-strongest current sensors and drives with strength values
+- strongest live sensor -> drive link and drive -> action link
+- second-ranked live sensor -> drive link and drive -> action link
+- action outputs for expand, attack, defend, signal, transfer, dormancy, and motility
+- stress, biofilm, signal, and drift
+- age and parent id
+- current action outputs for expand, attack, defend, and signal
+- character summaries for expansion, aggression, resilience, cooperation,
+  efficiency, and learning
 
 ---
 
@@ -594,10 +682,10 @@ int protocol_deserialize_header(const uint8_t* buffer, MessageHeader* header);
 ### World State
 
 ```c
-int protocol_serialize_world_state(const proto_world* world, 
+int protocol_serialize_world_state(const ProtoWorld* world, 
                                    uint8_t** buffer, size_t* len);
 int protocol_deserialize_world_state(const uint8_t* buffer, 
-                                     size_t len, proto_world* world);
+                                     size_t len, ProtoWorld* world);
 ```
 
 ### Commands
@@ -630,17 +718,17 @@ int protocol_deserialize_grid_rle(const uint8_t* buffer, size_t len,
                                   uint32_t* grid, int width, int height);
 ```
 
-### proto_world Management
+### ProtoWorld Management
 
 ```c
-// Initialize proto_world structure
-void proto_world_init(proto_world* world);
+// Initialize ProtoWorld structure
+void proto_world_init(ProtoWorld* world);
 
-// Free proto_world allocated memory
-void proto_world_free(proto_world* world);
+// Free ProtoWorld allocated memory
+void proto_world_free(ProtoWorld* world);
 
-// Allocate grid array in proto_world
-int proto_world_alloc_grid(proto_world* world, int width, int height);
+// Allocate grid array in ProtoWorld
+int proto_world_alloc_grid(ProtoWorld* world, int width, int height);
 ```
 
 ## Wire Examples

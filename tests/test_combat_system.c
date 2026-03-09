@@ -433,6 +433,67 @@ static int test_aggressive_colony_wins_territory(void) {
     return result;
 }
 
+// Test: Defensive graph posture can prevent colonies from initiating attacks
+static int test_behavior_graph_can_deescalate_combat(void) {
+    rng_seed(1015);
+    World* world = world_create(20, 10);
+    if (!world) return 0;
+
+    Colony a = create_test_colony(0.5f, 0.5f, 1.0f);
+    Colony b = create_test_colony(0.5f, 0.5f, 1.0f);
+    uint32_t id_a = world_add_colony(world, a);
+    uint32_t id_b = world_add_colony(world, b);
+
+    for (int y = 2; y < 8; y++) {
+        for (int x = 4; x < 10; x++) {
+            Cell* cell = world_get_cell(world, x, y);
+            cell->colony_id = id_a;
+            cell->is_border = (x == 9);
+            int idx = y * world->width + x;
+            world->nutrients[idx] = 1.0f;
+        }
+        for (int x = 10; x < 16; x++) {
+            Cell* cell = world_get_cell(world, x, y);
+            cell->colony_id = id_b;
+            cell->is_border = (x == 10);
+            int idx = y * world->width + x;
+            world->nutrients[idx] = 1.0f;
+        }
+    }
+
+    Colony* col_a = world_get_colony(world, id_a);
+    Colony* col_b = world_get_colony(world, id_b);
+    col_a->cell_count = 36;
+    col_b->cell_count = 36;
+    col_a->behavior_actions[COLONY_ACTION_ATTACK] = 0.0f;
+    col_a->behavior_actions[COLONY_ACTION_DEFEND] = 1.0f;
+    col_a->behavior_mode = COLONY_BEHAVIOR_MODE_FORTIFYING;
+    col_b->behavior_actions[COLONY_ACTION_ATTACK] = 0.0f;
+    col_b->behavior_actions[COLONY_ACTION_DEFEND] = 1.0f;
+    col_b->behavior_mode = COLONY_BEHAVIOR_MODE_FORTIFYING;
+
+    simulation_resolve_combat(world);
+
+    int unchanged = 1;
+    for (int y = 2; y < 8 && unchanged; y++) {
+        for (int x = 4; x < 10; x++) {
+            if (world_get_cell(world, x, y)->colony_id != id_a) {
+                unchanged = 0;
+                break;
+            }
+        }
+        for (int x = 10; x < 16 && unchanged; x++) {
+            if (world_get_cell(world, x, y)->colony_id != id_b) {
+                unchanged = 0;
+                break;
+            }
+        }
+    }
+
+    world_destroy(world);
+    return unchanged;
+}
+
 // Test: Learning system updates success_history
 static int test_learning_system_updates_history(void) {
     rng_seed(1007);  // Reproducible seed
@@ -841,6 +902,7 @@ int main(void) {
     printf("\nCombat Resolution:\n");
     TEST(combat_occurs_at_borders);
     TEST(aggressive_colony_wins_territory);
+    TEST(behavior_graph_can_deescalate_combat);
     
     printf("\nLearning System:\n");
     TEST(learning_system_updates_history);

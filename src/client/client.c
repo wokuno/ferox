@@ -28,7 +28,7 @@ Client* client_create(void) {
     client->selected_index = 0;
     
     // Initialize local world
-    proto_world_init(&client->local_world);
+    memset(&client->local_world, 0, sizeof(ProtoWorld));
     client->local_world.speed_multiplier = 1.0f;
     
     return client;
@@ -44,6 +44,8 @@ void client_destroy(Client* client) {
     if (client->renderer) {
         renderer_destroy(client->renderer);
     }
+
+    proto_world_free(&client->local_world);
     
     free(client);
 }
@@ -76,10 +78,7 @@ void client_disconnect(Client* client) {
     
     // Send disconnect message (best effort)
     if (client->socket) {
-        int result = protocol_send_message(client->socket->fd, MSG_DISCONNECT, NULL, 0);
-        if (result < 0) {
-            fprintf(stderr, "Warning: Failed to send disconnect message\n");
-        }
+        protocol_send_message(client->socket->fd, MSG_DISCONNECT, NULL, 0);
         net_socket_close(client->socket);
         client->socket = NULL;
     }
@@ -94,9 +93,7 @@ void client_send_command(Client* client, CommandType cmd, void* data) {
     int len = protocol_serialize_command(cmd, data, buffer);
     if (len < 0) return;
     
-    if (protocol_send_message(client->socket->fd, MSG_COMMAND, buffer, (size_t)len) < 0) {
-        fprintf(stderr, "Warning: Failed to send command\n");
-    }
+    protocol_send_message(client->socket->fd, MSG_COMMAND, buffer, (size_t)len);
 }
 
 void client_handle_message(Client* client, MessageType type, const uint8_t* payload, size_t len) {
@@ -108,12 +105,20 @@ void client_handle_message(Client* client, MessageType type, const uint8_t* payl
             break;
             
         case MSG_WORLD_DELTA:
-            // For now, treat deltas like full world state
-            client_update_world(client, payload, len);
+            client_apply_world_delta(client, payload, len);
             break;
             
         case MSG_COLONY_INFO:
-            // Could update specific colony info
+            if (payload && len >= COLONY_DETAIL_SERIALIZED_SIZE) {
+                ProtoColonyDetail detail;
+                if (protocol_deserialize_colony_detail(payload, &detail) >= 0) {
+                    client->selected_detail = detail;
+                    client->has_selected_detail = detail.base.alive;
+                    if (!detail.base.alive && client->selected_colony == detail.base.id) {
+                        client->selected_colony = 0;
+                    }
+                }
+            }
             break;
             
         case MSG_ACK:
@@ -131,11 +136,73 @@ void client_handle_message(Client* client, MessageType type, const uint8_t* payl
 
 void client_update_world(Client* client, const uint8_t* data, size_t len) {
     if (!client || !data) return;
+
+    proto_world_free(&client->local_world);
+    client->pending_grid_active = false;
+    client->pending_grid_tick = 0;
+    client->pending_grid_next_index = 0;
+    if (client->has_selected_detail && client->selected_detail.base.id != client->selected_colony) {
+        client->has_selected_detail = false;
+    }
     
     if (protocol_deserialize_world_state(data, len, &client->local_world) < 0) {
         // Failed to deserialize
         return;
     }
+}
+
+void client_apply_world_delta(Client* client, const uint8_t* data, size_t len) {
+    if (!client || !data) return;
+
+    ProtoWorldDeltaGridChunk chunk;
+    proto_world_delta_grid_chunk_init(&chunk);
+    if (protocol_deserialize_world_delta_grid_chunk(data, len, &chunk) < 0) {
+        proto_world_delta_grid_chunk_free(&chunk);
+        return;
+    }
+
+    if (client->local_world.tick != chunk.tick ||
+        client->local_world.width != chunk.width ||
+        client->local_world.height != chunk.height) {
+        proto_world_delta_grid_chunk_free(&chunk);
+        return;
+    }
+
+    if (!client->pending_grid_active ||
+        client->pending_grid_tick != chunk.tick ||
+        client->local_world.grid_size != chunk.total_cells ||
+        chunk.start_index == 0) {
+        proto_world_free(&client->local_world);
+        client->local_world.width = chunk.width;
+        client->local_world.height = chunk.height;
+        proto_world_alloc_grid(&client->local_world, chunk.width, chunk.height);
+        if (!client->local_world.grid) {
+            proto_world_delta_grid_chunk_free(&chunk);
+            return;
+        }
+        client->local_world.has_grid = false;
+        client->pending_grid_active = true;
+        client->pending_grid_tick = chunk.tick;
+        client->pending_grid_next_index = 0;
+    }
+
+    if (chunk.start_index != client->pending_grid_next_index ||
+        !client->local_world.grid ||
+        chunk.start_index + chunk.cell_count > client->local_world.grid_size) {
+        proto_world_delta_grid_chunk_free(&chunk);
+        return;
+    }
+
+    memcpy(&client->local_world.grid[chunk.start_index], chunk.cells,
+           (size_t)chunk.cell_count * sizeof(uint16_t));
+    client->pending_grid_next_index = chunk.start_index + chunk.cell_count;
+
+    if (chunk.final_chunk || client->pending_grid_next_index >= client->local_world.grid_size) {
+        client->local_world.has_grid = true;
+        client->pending_grid_active = false;
+    }
+
+    proto_world_delta_grid_chunk_free(&chunk);
 }
 
 void client_select_next_colony(Client* client) {
@@ -144,6 +211,7 @@ void client_select_next_colony(Client* client) {
     if (client->local_world.colony_count == 0) {
         client->selected_colony = 0;
         client->selected_index = 0;
+        client->has_selected_detail = false;
         return;
     }
     
@@ -162,9 +230,12 @@ void client_select_next_colony(Client* client) {
         if (client->local_world.colonies[check_index].alive) {
             client->selected_index = check_index;
             client->selected_colony = client->local_world.colonies[check_index].id;
+            if (!client->has_selected_detail || client->selected_detail.base.id != client->selected_colony) {
+                client->has_selected_detail = false;
+            }
             
             // Center view on selected colony
-            const proto_colony* colony = &client->local_world.colonies[check_index];
+            const ProtoColony* colony = &client->local_world.colonies[check_index];
             renderer_center_on(client->renderer, (int)colony->x, (int)colony->y);
             return;
         }
@@ -172,14 +243,16 @@ void client_select_next_colony(Client* client) {
     
     // No alive colonies
     client->selected_colony = 0;
+    client->has_selected_detail = false;
 }
 
 void client_deselect_colony(Client* client) {
     if (!client) return;
     client->selected_colony = 0;
+    client->has_selected_detail = false;
 }
 
-const proto_colony* client_get_selected_colony(Client* client) {
+const ProtoColony* client_get_selected_colony(Client* client) {
     if (!client || client->selected_colony == 0) return NULL;
     
     for (uint32_t i = 0; i < client->local_world.colony_count; i++) {
@@ -216,8 +289,8 @@ static void client_process_input(Client* client) {
         case INPUT_SPEED_UP:
             client_send_command(client, CMD_SPEED_UP, NULL);
             client->local_world.speed_multiplier *= 1.5f;
-            if (client->local_world.speed_multiplier > 100.0f) {
-                client->local_world.speed_multiplier = 100.0f;
+            if (client->local_world.speed_multiplier > 10.0f) {
+                client->local_world.speed_multiplier = 10.0f;
             }
             break;
             
@@ -268,28 +341,24 @@ static void client_process_input(Client* client) {
 }
 
 static void client_receive_updates(Client* client) {
-    if (!client->socket) return;
-
-    int messages_processed = 0;
-    const int max_messages_per_frame = 50;
-
-    while (net_has_data(client->socket) && messages_processed < max_messages_per_frame) {
-        MessageHeader header;
-        uint8_t* payload = NULL;
-
-        int result = protocol_recv_message(client->socket->fd, &header, &payload);
-        if (result == 0) {
-            client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
-            free(payload);
-            messages_processed++;
-        } else if (result < 0) {
-            client->connected = false;
-            client->running = false;
-            break;
-        } else {
-            break;
-        }
+    if (!client->socket || !net_has_data(client->socket)) return;
+    
+    MessageHeader header;
+    uint8_t* payload = NULL;
+    
+    // Set blocking temporarily for receive
+    net_set_nonblocking(client->socket, false);
+    
+    if (protocol_recv_message(client->socket->fd, &header, &payload) == 0) {
+        client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
+        free(payload);
+    } else {
+        // Connection lost
+        client->connected = false;
+        client->running = false;
     }
+    
+    net_set_nonblocking(client->socket, true);
 }
 
 static void client_render(Client* client) {
@@ -307,8 +376,11 @@ static void client_render(Client* client) {
     renderer_draw_world(client->renderer, &client->local_world);
     
     // Draw colony info panel
-    const proto_colony* selected = client_get_selected_colony(client);
-    renderer_draw_colony_info(client->renderer, selected);
+    const ProtoColony* selected = client_get_selected_colony(client);
+    const ProtoColonyDetail* detail = (client->has_selected_detail && selected && client->selected_detail.base.id == selected->id)
+        ? &client->selected_detail
+        : NULL;
+    renderer_draw_colony_info(client->renderer, selected, detail);
     
     // Draw status bar
     int alive_count = 0;
