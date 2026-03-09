@@ -89,6 +89,32 @@ target_compile_definitions(test_visual_stability PRIVATE STANDALONE_TEST)
 add_test(NAME VisualStabilityTests COMMAND test_visual_stability)
 set_tests_properties(VisualStabilityTests PROPERTIES TIMEOUT 300)
 
+# SIMD correctness and performance evaluation tests
+add_executable(test_simd_eval test_simd_eval.c)
+target_link_libraries(test_simd_eval PRIVATE ferox_server_lib)
+target_compile_definitions(test_simd_eval PRIVATE STANDALONE_TEST)
+add_test(NAME SimdEvalTests COMMAND test_simd_eval)
+set_tests_properties(SimdEvalTests PROPERTIES TIMEOUT 120)
+
+# Reaction-diffusion solver controls tests
+add_executable(test_rd_controls test_rd_controls.c)
+target_link_libraries(test_rd_controls PRIVATE ferox_server_lib)
+target_compile_definitions(test_rd_controls PRIVATE STANDALONE_TEST)
+add_test(NAME RdControlsTests COMMAND test_rd_controls)
+
+# Broad performance evaluation tests
+add_executable(test_performance_eval test_performance_eval.c)
+target_link_libraries(test_performance_eval PRIVATE ferox_server_lib)
+target_compile_definitions(test_performance_eval PRIVATE STANDALONE_TEST)
+add_test(NAME PerformanceEvalTests COMMAND test_performance_eval)
+set_tests_properties(PerformanceEvalTests PROPERTIES TIMEOUT 180)
+
+# Focused component-level performance evaluation tests
+add_executable(test_perf_components test_perf_components.c)
+target_link_libraries(test_perf_components PRIVATE ferox_server_lib)
+target_compile_definitions(test_perf_components PRIVATE STANDALONE_TEST)
+add_test(NAME PerformanceComponentTests COMMAND test_perf_components)
+set_tests_properties(PerformanceComponentTests PROPERTIES TIMEOUT 180)
 # Combat system tests
 add_executable(test_combat_system test_combat_system.c)
 target_link_libraries(test_combat_system PRIVATE ferox_server_lib)
@@ -166,6 +192,10 @@ add_executable(test_runner test_runner.c
     test_world_advanced.c
     test_simulation_stress.c
     test_simulation_logic.c
+    test_simd_eval.c
+    test_performance_eval.c
+    test_perf_components.c
+    test_growth_shapes.c
     test_visual_stability.c
     test_threadpool_stress.c
     test_protocol_edge.c

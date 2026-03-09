@@ -283,7 +283,7 @@ TEST(server_broadcast_path_breakdown_eval) {
     const int scale = get_perf_scale();
     const int iters = 80 * scale;
 
-    Server* server = server_create(0, 320, 180, 4);
+    Server* server = server_create_headless(320, 180, 4);
     ASSERT_NOT_NULL(server);
 
     rng_seed(1337);
@@ -296,7 +296,11 @@ TEST(server_broadcast_path_breakdown_eval) {
     double build_start = now_ms();
     for (int i = 0; i < iters; i++) {
         proto_world snapshot;
-        server_build_protocol_world_snapshot(server, &snapshot);
+        ASSERT_EQ(server_build_protocol_world_snapshot(server->world,
+                                                      server->paused,
+                                                      server->speed_multiplier,
+                                                      &snapshot),
+                  0);
         total_snapshot_bytes += (size_t)snapshot.colony_count * COLONY_SERIALIZED_SIZE;
         total_snapshot_bytes += (size_t)snapshot.grid_size * sizeof(uint16_t);
         proto_world_free(&snapshot);
@@ -307,7 +311,11 @@ TEST(server_broadcast_path_breakdown_eval) {
     double build_serialize_start = now_ms();
     for (int i = 0; i < iters; i++) {
         proto_world snapshot;
-        server_build_protocol_world_snapshot(server, &snapshot);
+        ASSERT_EQ(server_build_protocol_world_snapshot(server->world,
+                                                      server->paused,
+                                                      server->speed_multiplier,
+                                                      &snapshot),
+                  0);
 
         uint8_t* encoded = NULL;
         size_t encoded_len = 0;

@@ -267,6 +267,69 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
     return server;
 }
 
+Server* server_create_headless(int world_width, int world_height, int thread_count) {
+    if (world_width <= 0 || world_height <= 0 || thread_count <= 0) {
+        return NULL;
+    }
+
+    Server* server = (Server*)calloc(1, sizeof(Server));
+    if (!server) return NULL;
+
+    server->world = world_create(world_width, world_height);
+    if (!server->world) {
+        free(server);
+        return NULL;
+    }
+
+    server->pool = threadpool_create(thread_count);
+    if (!server->pool) {
+        world_destroy(server->world);
+        free(server);
+        return NULL;
+    }
+
+    int regions = thread_count > 1 ? 4 : 2;
+    server->parallel_ctx = parallel_create(server->pool, server->world, regions, regions);
+    if (!server->parallel_ctx) {
+        threadpool_destroy(server->pool);
+        world_destroy(server->world);
+        free(server);
+        return NULL;
+    }
+    parallel_init_regions(server->parallel_ctx, world_width, world_height);
+
+    server->atomic_world = atomic_world_create(server->world, server->pool, thread_count);
+    if (!server->atomic_world) {
+        parallel_destroy(server->parallel_ctx);
+        threadpool_destroy(server->pool);
+        world_destroy(server->world);
+        free(server);
+        return NULL;
+    }
+
+    if (pthread_mutex_init(&server->clients_mutex, NULL) != 0) {
+        atomic_world_destroy(server->atomic_world);
+        parallel_destroy(server->parallel_ctx);
+        threadpool_destroy(server->pool);
+        world_destroy(server->world);
+        free(server);
+        return NULL;
+    }
+
+    server->clients = NULL;
+    server->client_count = 0;
+    server->world_width = world_width;
+    server->world_height = world_height;
+    server->default_colonies = DEFAULT_INITIAL_COLONY_COUNT;
+    server->running = false;
+    server->paused = false;
+    server->tick_rate_ms = DEFAULT_TICK_RATE_MS;
+    server->speed_multiplier = 1.0f;
+    server->next_client_id = 1;
+
+    return server;
+}
+
 void server_destroy(Server* server) {
     if (!server) return;
     

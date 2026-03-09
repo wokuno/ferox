@@ -8,13 +8,19 @@
 #define TWO_PI 6.28318530717958647692
 
 typedef struct {
-    uint32_t lineage_id;
-    size_t count;
-} LineageCount;
+    uint32_t cell_idx;
+} FrontierCellIndex;
 
 static const Colony* find_colony_any(const World* world, uint32_t id) {
     if (!world || id == 0) {
         return NULL;
+    }
+
+    if (world->colony_by_id && id < world->colony_by_id_capacity) {
+        Colony* colony = world->colony_by_id[id];
+        if (colony) {
+            return colony;
+        }
     }
 
     for (size_t i = 0; i < world->colony_count; i++) {
@@ -25,9 +31,16 @@ static const Colony* find_colony_any(const World* world, uint32_t id) {
     return NULL;
 }
 
-static uint32_t resolve_root_lineage_id(const World* world, uint32_t colony_id) {
+static uint32_t resolve_root_lineage_id_cached(const World* world,
+                                               uint32_t colony_id,
+                                               uint32_t* root_cache,
+                                               size_t root_cache_capacity) {
     if (!world || colony_id == 0) {
         return 0;
+    }
+
+    if (root_cache && colony_id < root_cache_capacity && root_cache[colony_id] != 0) {
+        return root_cache[colony_id];
     }
 
     uint32_t current = colony_id;
@@ -36,45 +49,35 @@ static uint32_t resolve_root_lineage_id(const World* world, uint32_t colony_id) 
     while (guard-- > 0) {
         const Colony* colony = find_colony_any(world, current);
         if (!colony || colony->parent_id == 0) {
+            if (root_cache && colony_id < root_cache_capacity) {
+                root_cache[colony_id] = current;
+            }
             return current;
         }
         current = colony->parent_id;
     }
 
+    if (root_cache && colony_id < root_cache_capacity) {
+        root_cache[colony_id] = colony_id;
+    }
     return colony_id;
 }
 
-static void increment_lineage_count(LineageCount* counts, size_t* used, uint32_t lineage_id) {
-    for (size_t i = 0; i < *used; i++) {
-        if (counts[i].lineage_id == lineage_id) {
-            counts[i].count++;
-            return;
-        }
+static void increment_lineage_count_direct(size_t* counts,
+                                           uint32_t* active_ids,
+                                           size_t* used,
+                                           uint32_t lineage_id,
+                                           size_t delta) {
+    if (!counts || !active_ids || !used || lineage_id == 0) {
+        return;
     }
 
-    counts[*used].lineage_id = lineage_id;
-    counts[*used].count = 1;
-    (*used)++;
-}
-
-static bool is_frontier_cell(const World* world, int x, int y, uint32_t colony_id) {
-    static const int dx4[4] = {0, 1, 0, -1};
-    static const int dy4[4] = {-1, 0, 1, 0};
-
-    for (int i = 0; i < 4; i++) {
-        int nx = x + dx4[i];
-        int ny = y + dy4[i];
-        if (nx < 0 || nx >= world->width || ny < 0 || ny >= world->height) {
-            continue;
-        }
-
-        uint32_t neighbor = world->cells[ny * world->width + nx].colony_id;
-        if (neighbor != colony_id) {
-            return true;
-        }
+    if (counts[lineage_id] == 0) {
+        active_ids[*used] = lineage_id;
+        (*used)++;
     }
 
-    return false;
+    counts[lineage_id] += delta;
 }
 
 bool frontier_telemetry_compute(const World* world, uint32_t seed, FrontierTelemetry* out) {
@@ -86,12 +89,23 @@ bool frontier_telemetry_compute(const World* world, uint32_t seed, FrontierTelem
     out->seed = seed;
     out->tick = world->tick;
 
-    size_t lineage_capacity = world->colony_count > 0 ? world->colony_count : 1;
-    LineageCount* total_counts = (LineageCount*)calloc(lineage_capacity, sizeof(LineageCount));
-    LineageCount* frontier_counts = (LineageCount*)calloc(lineage_capacity, sizeof(LineageCount));
-    if (!total_counts || !frontier_counts) {
+    size_t root_cache_capacity = world->colony_by_id_capacity > 0
+        ? world->colony_by_id_capacity
+        : (world->colony_count + 1);
+    size_t* total_counts = (size_t*)calloc(root_cache_capacity, sizeof(size_t));
+    size_t* frontier_counts = (size_t*)calloc(root_cache_capacity, sizeof(size_t));
+    uint32_t* total_lineages = (uint32_t*)calloc(root_cache_capacity, sizeof(uint32_t));
+    uint32_t* frontier_lineages = (uint32_t*)calloc(root_cache_capacity, sizeof(uint32_t));
+    uint32_t* root_cache = (uint32_t*)calloc(root_cache_capacity, sizeof(uint32_t));
+    FrontierCellIndex* frontier_cells = NULL;
+    size_t frontier_capacity = 0;
+    size_t frontier_used_cells = 0;
+    if (!total_counts || !frontier_counts || !total_lineages || !frontier_lineages || !root_cache) {
         free(total_counts);
         free(frontier_counts);
+        free(total_lineages);
+        free(frontier_lineages);
+        free(root_cache);
         return false;
     }
 
@@ -102,17 +116,44 @@ bool frontier_telemetry_compute(const World* world, uint32_t seed, FrontierTelem
 
     for (int y = 0; y < world->height; y++) {
         for (int x = 0; x < world->width; x++) {
-            uint32_t colony_id = world->cells[y * world->width + x].colony_id;
+            const Cell* cell = &world->cells[y * world->width + x];
+            uint32_t colony_id = cell->colony_id;
             if (colony_id == 0) {
                 continue;
             }
 
-            uint32_t lineage_id = resolve_root_lineage_id(world, colony_id);
-            increment_lineage_count(total_counts, &total_used, lineage_id);
+            uint32_t lineage_id = resolve_root_lineage_id_cached(
+                world, colony_id, root_cache, root_cache_capacity);
+            increment_lineage_count_direct(total_counts, total_lineages, &total_used, lineage_id, 1);
 
             out->occupied_cells++;
             sum_x += (double)x;
             sum_y += (double)y;
+
+            // Simulation code maintains per-cell border state; reuse it here
+            // instead of rescanning neighbors for telemetry.
+            if (!cell->is_border) {
+                continue;
+            }
+
+            if (frontier_used_cells == frontier_capacity) {
+                size_t new_capacity = frontier_capacity == 0 ? 1024 : frontier_capacity * 2;
+                FrontierCellIndex* new_frontier_cells = (FrontierCellIndex*)realloc(
+                    frontier_cells, new_capacity * sizeof(FrontierCellIndex));
+                if (!new_frontier_cells) {
+                    free(total_counts);
+                    free(frontier_counts);
+                    free(root_cache);
+                    free(frontier_cells);
+                    return false;
+                }
+                frontier_cells = new_frontier_cells;
+                frontier_capacity = new_capacity;
+            }
+
+            frontier_cells[frontier_used_cells++].cell_idx = (uint32_t)(y * world->width + x);
+            out->frontier_cells++;
+            increment_lineage_count_direct(frontier_counts, frontier_lineages, &frontier_used, lineage_id, 1);
         }
     }
 
@@ -123,32 +164,24 @@ bool frontier_telemetry_compute(const World* world, uint32_t seed, FrontierTelem
     double center_y = out->occupied_cells > 0 ? (sum_y / (double)out->occupied_cells) : 0.0;
     const double sector_size = TWO_PI / (double)FRONTIER_TELEMETRY_SECTORS;
 
-    for (int y = 0; y < world->height; y++) {
-        for (int x = 0; x < world->width; x++) {
-            uint32_t colony_id = world->cells[y * world->width + x].colony_id;
-            if (colony_id == 0 || !is_frontier_cell(world, x, y, colony_id)) {
-                continue;
-            }
-
-            out->frontier_cells++;
-            uint32_t lineage_id = resolve_root_lineage_id(world, colony_id);
-            increment_lineage_count(frontier_counts, &frontier_used, lineage_id);
-
-            double dx = (double)x - center_x;
-            double dy = (double)y - center_y;
-            double angle = atan2(dy, dx);
-            if (angle < 0.0) {
-                angle += TWO_PI;
-            }
-
-            int sector = (int)(angle / sector_size);
-            if (sector < 0) {
-                sector = 0;
-            } else if (sector >= FRONTIER_TELEMETRY_SECTORS) {
-                sector = FRONTIER_TELEMETRY_SECTORS - 1;
-            }
-            sector_seen[sector] = true;
+    for (size_t i = 0; i < frontier_used_cells; i++) {
+        uint32_t idx = frontier_cells[i].cell_idx;
+        int x = (int)(idx % (uint32_t)world->width);
+        int y = (int)(idx / (uint32_t)world->width);
+        double dx = (double)x - center_x;
+        double dy = (double)y - center_y;
+        double angle = atan2(dy, dx);
+        if (angle < 0.0) {
+            angle += TWO_PI;
         }
+
+        int sector = (int)(angle / sector_size);
+        if (sector < 0) {
+            sector = 0;
+        } else if (sector >= FRONTIER_TELEMETRY_SECTORS) {
+            sector = FRONTIER_TELEMETRY_SECTORS - 1;
+        }
+        sector_seen[sector] = true;
     }
 
     for (int i = 0; i < FRONTIER_TELEMETRY_SECTORS; i++) {
@@ -161,7 +194,8 @@ bool frontier_telemetry_compute(const World* world, uint32_t seed, FrontierTelem
         double inv = 1.0 / (double)out->frontier_cells;
         double concentration = 0.0;
         for (size_t i = 0; i < frontier_used; i++) {
-            double p = (double)frontier_counts[i].count * inv;
+            uint32_t lineage_id = frontier_lineages[i];
+            double p = (double)frontier_counts[lineage_id] * inv;
             concentration += p * p;
         }
         out->lineage_diversity_proxy = (float)(1.0 - concentration);
@@ -171,7 +205,8 @@ bool frontier_telemetry_compute(const World* world, uint32_t seed, FrontierTelem
         double inv = 1.0 / (double)out->occupied_cells;
         double entropy = 0.0;
         for (size_t i = 0; i < total_used; i++) {
-            double p = (double)total_counts[i].count * inv;
+            uint32_t lineage_id = total_lineages[i];
+            double p = (double)total_counts[lineage_id] * inv;
             if (p > 0.0) {
                 entropy -= p * (log(p) / log(2.0));
             }
@@ -181,6 +216,10 @@ bool frontier_telemetry_compute(const World* world, uint32_t seed, FrontierTelem
 
     free(total_counts);
     free(frontier_counts);
+    free(total_lineages);
+    free(frontier_lineages);
+    free(root_cache);
+    free(frontier_cells);
     return true;
 }
 

@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <time.h>
 
 // Direction offsets for 8-connectivity spreading  
 static const int DX8[] = {0, 1, 1, 1, 0, -1, -1, -1};
@@ -40,6 +41,12 @@ static inline uint32_t xorshift32(uint32_t* state) {
 
 static inline float rand_float_local(uint32_t* state) {
     return (float)(xorshift32(state) & 0x7FFFFFFF) / (float)0x7FFFFFFF;
+}
+
+static double atomic_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
 }
 
 static int atomic_parse_env_int(const char* name, int default_value, int min_value, int max_value) {
@@ -1392,6 +1399,62 @@ void atomic_tick(AtomicWorld* aworld) {
     }
 
     world->tick++;
+}
+
+void atomic_tick_with_breakdown(AtomicWorld* aworld, AtomicTickBreakdown* breakdown) {
+    if (!aworld || !aworld->world) {
+        if (breakdown) {
+            memset(breakdown, 0, sizeof(*breakdown));
+        }
+        return;
+    }
+
+    AtomicTickBreakdown local = {0};
+    World* world = aworld->world;
+    double total_start = atomic_now_ms();
+
+    double phase_start = atomic_now_ms();
+    simulation_update_behavior_layers(world);
+    atomic_age(aworld);
+    atomic_barrier(aworld);
+    local.age_ms = atomic_now_ms() - phase_start;
+
+    phase_start = atomic_now_ms();
+    atomic_spread_step(aworld);
+    local.spread_ms = atomic_now_ms() - phase_start;
+
+    phase_start = atomic_now_ms();
+    atomic_world_sync_to_world(aworld);
+    local.sync_to_world_ms = atomic_now_ms() - phase_start;
+
+    bool run_serial = (aworld->serial_interval <= 1) ||
+                      ((int)(world->tick % (uint64_t)aworld->serial_interval) == 0);
+    phase_start = atomic_now_ms();
+    if (run_serial) {
+        simulation_mutate(world);
+        simulation_check_divisions(world);
+        simulation_check_recombinations(world);
+        simulation_resolve_combat(world);
+        simulation_recount_colony_cells(world);
+        simulation_apply_horizontal_gene_transfer(world);
+        simulation_update_colony_dynamics(world);
+    } else {
+        simulation_update_colony_dynamics(world);
+    }
+    local.serial_ms = atomic_now_ms() - phase_start;
+
+    phase_start = atomic_now_ms();
+    if (run_serial) {
+        atomic_world_sync_from_world(aworld);
+    }
+    local.sync_from_world_ms = atomic_now_ms() - phase_start;
+
+    world->tick++;
+    local.total_ms = atomic_now_ms() - total_start;
+
+    if (breakdown) {
+        *breakdown = local;
+    }
 }
 
 // ============================================================================

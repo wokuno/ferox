@@ -91,6 +91,181 @@ Interpretation guidance:
 - If `serial core` dominates, optimizing atomic regions alone will not materially improve end-to-end `atomic_tick` latency.
 - For scaling lines, values near `1.00x` indicate near-linear throughput retention as grid size grows; lower values indicate cache/memory pressure.
 
+## Expanded Component Baseline (macOS arm64, 2026-03-06)
+
+`test_perf_components` now isolates additional serial-core work:
+
+- `simulation_update_scents()`
+- `simulation_resolve_combat()`
+- `frontier_telemetry_compute()`
+
+Representative `FEROX_PERF_SCALE=5` snapshot:
+
+- `simulation_update_nutrients`: **67.55 ms**
+- `simulation_spread`: **42.12 ms**
+- `simulation_update_scents`: **31.36 ms**
+- `simulation_resolve_combat`: **35.36 ms**
+- `frontier_telemetry_compute`: **110.17 ms**
+- `atomic_age` phase: **21.82 ms**
+- `atomic_spread` phase: **28.84 ms**
+- `server snapshot build`: **44.20 ms**
+
+Interpretation:
+
+- `frontier_telemetry_compute()` is now clearly expensive enough to treat as a first-class optimization target.
+- Nutrient diffusion remains the dominant continuous-field update.
+- Combat and scent updates matter, but they are secondary to telemetry + nutrient transport in the current local profile.
+- Snapshot building is no longer the top bottleneck, which argues for focusing on simulation-core work before transport redesign.
+
+See [docs/PERFORMANCE_RESEARCH.md](/Users/wokuno/Desktop/ferox/docs/PERFORMANCE_RESEARCH.md) for the external research mapping and next experiment list.
+
+## 2026-03-06 Implemented Follow-up
+
+Two suggestions from the research pass were implemented immediately:
+
+1. `frontier_telemetry_compute()` now does one full-grid scan plus a frontier-only sector pass, and caches root-lineage resolution through the existing `colony_by_id` table.
+2. `diffuse_scalar_field()` now uses a branch-reduced interior stencil path for normal-sized grids instead of paying four boundary checks on every cell.
+
+Clean validation was taken on `paco` (`Intel Xeon E-2124`) one workload at a time:
+
+- `test_frontier_metrics`: passed
+- `test_perf_components` with `FEROX_PERF_SCALE=5`: passed
+- `test_performance_eval`: passed `13/13`
+
+Representative `paco` before/after comparison:
+
+- previous broad snapshot:
+  - `simulation_tick (serial)`: about `205.70 ms`
+  - `atomic_tick (4 threads)`: about `171.31 ms`
+  - `atomic/serial`: about `0.87x`
+- current broad snapshot:
+  - `simulation_tick (serial)`: about `184.09 ms`
+  - `atomic_tick (4 threads)`: about `133.13 ms`
+  - `atomic/serial`: about `0.79x`
+
+Current `paco` component snapshot (`FEROX_PERF_SCALE=5`):
+
+- `simulation_update_nutrients`: about `85.13 ms`
+- `simulation_spread`: about `41.47 ms`
+- `simulation_update_scents`: about `60.41 ms`
+- `simulation_resolve_combat`: about `37.05 ms`
+- `frontier_telemetry_compute`: about `71.73 ms`
+- `atomic_age` phase: about `4.74 ms`
+- `atomic_spread` phase: about `21.11 ms`
+- `server snapshot build`: about `43.62 ms`
+
+Interpretation:
+
+- The telemetry rewrite materially reduced the frontier hotspot on the Xeon.
+- The branch-reduced stencil path improved both broad serial throughput and atomic end-to-end throughput by shrinking the serial core inside `atomic_tick()`.
+- The next obvious serial-core targets are still scent updates and combat filtering.
+
+Methodology note:
+
+- Do not overlap performance runs or long stress suites on the same machine.
+- A local `SimulationLogicTests` stall observed during this pass was reproduced as a scheduling artifact caused by concurrent heavy jobs; `atomic_tick_concurrent_stability` passed when rerun in isolation.
+
+### 2026-03-06 Combat Broadphase Follow-up
+
+Kept:
+
+- `simulation_resolve_combat()` now builds a contested-border frontier during the toxin emission pass and only runs the expensive combat resolution logic on those contested cells.
+- `tests/test_perf_components.c` now includes `simulation_resolve_combat_sparse_border_component_eval` so the broadphase has a focused regression/perf harness.
+
+Rejected:
+
+- EPS caching inside `simulation_update_scents()` looked plausible but regressed the isolated scent component on both the M1 Max and the Xeon.
+- A per-colony scalar cache for nutrient consumption and scent emission added code complexity and produced mixed-at-best results, with a worse broad atomic result on the Xeon. That experiment was reverted.
+
+Stable kept-state snapshots:
+
+- Local M1 Max, `FEROX_PERF_SCALE=5 test_perf_components`:
+  - `simulation_update_nutrients`: `43.03 ms`
+  - `simulation_update_scents`: `30.16 ms`
+  - `simulation_resolve_combat`: `63.63 ms`
+  - `simulation_resolve_combat_sparse_border`: `9.08 ms`
+  - `frontier_telemetry_compute`: `62.76 ms`
+- `paco` Xeon, `FEROX_PERF_SCALE=5 test_perf_components`:
+  - `simulation_update_nutrients`: `86.77 ms`
+  - `simulation_update_scents`: `56.37 ms`
+  - `simulation_resolve_combat`: `33.44 ms`
+  - `simulation_resolve_combat_sparse_border`: `16.84 ms`
+  - `frontier_telemetry_compute`: `73.08 ms`
+- `paco` Xeon, broad `test_performance_eval`:
+  - `simulation_tick (serial)`: `185.66 ms`
+  - `atomic_tick (4 threads)`: `133.16 ms`
+  - atomic/serial ratio: `0.78x`
+  - atomic serial-core share: `107.52 ms`
+
+### 2026-03-06 Telemetry Histogram Rewrite
+
+Kept:
+
+- `frontier_telemetry_compute()` now uses direct-index lineage histograms keyed by resolved root lineage id instead of a linear search through active lineage buckets for each occupied/frontier cell.
+- `test_frontier_metrics` stays green after the rewrite.
+
+Measured effect:
+
+- Local M1 Max:
+  - `FEROX_PERF_SCALE=5 test_perf_components`: `frontier_telemetry_compute` improved from `62.76 ms` to `27.81 ms`
+  - broad `test_performance_eval` seeded telemetry metric moved only slightly, from `90.03 ms` to `88.28 ms`
+- `paco` Xeon:
+  - `FEROX_PERF_SCALE=5 test_perf_components`: `frontier_telemetry_compute` improved from `73.08 ms` to `41.18 ms`
+  - broad `test_performance_eval` seeded telemetry metric moved only slightly, from `112.71 ms` to `111.54 ms`
+
+Interpretation:
+
+- The component-level telemetry kernel clearly benefited.
+- The broader seeded telemetry benchmark still spends enough time on world-state characteristics and frontier size that the histogram improvement shows up only modestly there.
+
+### 2026-03-06 Snapshot + No-Biofilm Transport Follow-up
+
+Kept:
+
+- `server_build_protocol_world_snapshot()` now uses a direct `colony_id -> proto_idx` table during the snapshot grid pass instead of searching the protocol colony list for each occupied cell.
+- `simulation_update_nutrients()`, toxin transport, and `simulation_update_scents()` now skip EPS attenuation logic entirely when no active colony has non-zero biofilm strength.
+
+Clean validation:
+
+- Local M1 Max:
+  - `test_perf_components`: passed `8/8`
+  - `test_performance_eval`: passed `13/13`
+  - representative `FEROX_PERF_SCALE=5` snapshot:
+    - `simulation_update_nutrients`: `27.20 ms`
+    - `simulation_update_scents`: `30.84 ms`
+    - `simulation_resolve_combat`: `60.66 ms`
+    - `simulation_resolve_combat_sparse_border`: `5.19 ms`
+    - `frontier_telemetry_compute`: `24.92 ms`
+    - `server snapshot build`: `31.28 ms`
+  - broad snapshot:
+    - `simulation_tick (serial)`: `140.18 ms`
+    - `frontier telemetry compute`: `84.05 ms`
+    - `broadcast build snapshot`: `3.20 ms`
+    - `atomic_tick (4 threads)`: `139.90 ms`
+    - atomic/serial ratio: `0.97x`
+- `paco` Xeon:
+  - `test_perf_components`: passed `8/8`
+  - `test_performance_eval`: passed `13/13`
+  - representative `FEROX_PERF_SCALE=5` snapshot:
+    - `simulation_update_nutrients`: `69.94 ms`
+    - `simulation_update_scents`: `56.59 ms`
+    - `simulation_resolve_combat`: `34.45 ms`
+    - `simulation_resolve_combat_sparse_border`: `11.36 ms`
+    - `frontier_telemetry_compute`: `41.10 ms`
+    - `server snapshot build`: `40.77 ms`
+  - broad snapshot:
+    - `simulation_tick (serial)`: `187.84 ms`
+    - `frontier telemetry compute`: `111.02 ms`
+    - `broadcast build snapshot`: `4.25 ms`
+    - `atomic_tick (4 threads)`: `125.62 ms`
+    - atomic/serial ratio: `0.73x`
+
+Interpretation:
+
+- The snapshot id-lookup rewrite is a clean keep. It reduces the focused snapshot build cost on both machines and improves the broad broadcast-build stage without changing behavior.
+- The no-biofilm fast path is also a keep. The isolated nutrient win is strong on both machines, while the broader serial-tick effect is smaller and mixed on the Xeon.
+- The remaining broad bottleneck is still the serial core inside `simulation_tick()`, not the snapshot path.
+
 ### Previous baseline (before optimizations)
 
 - `simulation_tick` (serial): 904 ms → **533 ms** (41% faster)
@@ -130,7 +305,15 @@ Interpretation guidance:
 ### ✅ Broadcast/protocol build-path optimization
 - `server_build_protocol_world_snapshot()` now folds grid copy + centroid accumulation into one pass.
 - Removed per-broadcast heap allocations for centroid accumulation (stack-backed fixed arrays).
-- Replaced per-cell colony lookup + division/modulo work with binary-search id mapping and row/column iteration.
+- Replaced per-cell colony lookup + division/modulo work with direct colony-id to proto-index lookup and row/column iteration.
+
+### ✅ Snapshot id-lookup rewrite
+- `server_build_protocol_world_snapshot()` now builds a dense `colony_id -> proto_idx` lookup table once per snapshot instead of doing compare-heavy searches through the protocol colony list during the grid pass.
+- The lookup stays stack-backed for normal colony-id ranges and only falls back to heap allocation for unusually sparse large id spaces.
+
+### ✅ No-biofilm transport fast path
+- Nutrient, toxin, and scent transport now skip EPS attenuation logic entirely when no active colony has non-zero biofilm strength.
+- This keeps the common no-biofilm case on the plain 4-neighbor diffusion path instead of paying repeated EPS lookup and attenuation work.
 
 ## Remaining Bottlenecks
 
@@ -152,9 +335,11 @@ network bandwidth by 10-100× for mostly-static grids.
 ## Recommended Further Optimizations
 
 1. **Larger grid perf mode** — Run atomic path benchmarks on 1000×1000 grids to validate thread scaling.
-2. **Combat pass fusion** — Combine toxin emission + combat resolution into single pass.
-3. **Protocol delta stream** — Send only changed cells instead of full grid snapshots.
-4. **SIMD spread/combat** — Vectorize inner loops of `simulation_spread()` and `simulation_resolve_combat()`.
+2. **Tiled transport updates** — Block nutrient/scent stencils so active rows fit cache better.
+3. **Dirty frontier / dirty tiles** — Stop rescanning the full grid for telemetry, combat, and eventually snapshots.
+4. **Combat pass filtering** — Build a cheap mixed-border/tile broadphase before expensive combat scans.
+5. **Protocol delta stream** — Send only changed cells instead of full grid snapshots once dirty metadata exists.
+6. **SIMD spread/combat** — Vectorize inner loops of `simulation_spread()` and `simulation_resolve_combat()`.
 
 ## Optional External Profiling Tools
 

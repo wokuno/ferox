@@ -65,6 +65,16 @@ typedef struct Server {
 Server* server_create(uint16_t port, int world_width, int world_height, int thread_count);
 
 /**
+ * Create an in-process server instance without opening a listening socket.
+ * Intended for benchmarks or local snapshot work that does not accept clients.
+ * @param world_width Width of the world grid
+ * @param world_height Height of the world grid
+ * @param thread_count Number of threads for the thread pool
+ * @return Pointer to the new Server, or NULL on failure
+ */
+Server* server_create_headless(int world_width, int world_height, int thread_count);
+
+/**
  * Destroy the server and free all resources.
  * @param server The server to destroy
  */

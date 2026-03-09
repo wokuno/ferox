@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdatomic.h>
 
 // Direction indices for spread_weights
 typedef enum {
@@ -168,6 +169,7 @@ typedef struct {
     // New dynamic state
     ColonyState state;       // Current colony state
     bool is_dormant;         // Colony is in spore/dormant state
+    bool is_persister;       // Colony entered a transient persister state
     float stress_level;      // 0-1: accumulated stress
     float biofilm_strength;  // 0-1: current biofilm protection level
     float drift_x, drift_y;  // Accumulated motility drift
@@ -191,7 +193,52 @@ typedef struct {
     // Neural network learning state
     float success_history[8]; // Tracks which directions led to successful expansion
     uint32_t last_population; // For tracking growth/decline
+
+    // Optional tracked cell list and centroid cache.
+    uint32_t* cell_indices;
+    size_t cell_indices_capacity;
+    size_t cell_indices_count;
+    float centroid_x;
+    float centroid_y;
+
+    // Horizontal gene transfer state.
+    float hgt_plasmid_fraction;
+    float hgt_fitness_scale;
+    bool hgt_is_transconjugant;
+    uint64_t hgt_transfer_events_in;
+    uint64_t hgt_transfer_events_out;
+    uint64_t hgt_plasmid_loss_events;
 } Colony;
+
+typedef struct {
+    float diffusion;
+    float decay;
+} RDFieldControl;
+
+typedef struct {
+    RDFieldControl nutrients;
+    RDFieldControl toxins;
+    RDFieldControl signals;
+} RDSolverControls;
+
+typedef struct {
+    float contact_rate;
+    float donor_transfer_rate;
+    float transconjugant_transfer_rate;
+    float recipient_uptake_rate;
+    float transfer_efficiency;
+    float plasmid_cost_per_fraction;
+    float plasmid_loss_rate;
+    bool enable_plasmid_cost;
+    bool enable_plasmid_loss;
+} HGTKinetics;
+
+typedef struct {
+    uint64_t transfer_events_total;
+    uint64_t transconjugant_events_total;
+    uint64_t plasmid_loss_events_total;
+    uint64_t cross_lineage_transfer_events_total;
+} HGTMetrics;
 
 // World structure
 typedef struct {
@@ -201,18 +248,38 @@ typedef struct {
     Colony* colonies;       // dynamic array of colonies
     uint32_t* colony_index_map; // colony id -> colonies[] index
     size_t colony_index_capacity;
-    uint32_t next_colony_id;
+    atomic_uint next_colony_id;
     size_t colony_count;
     size_t colony_capacity;
     uint64_t tick;
     
-    // Environmental layers
-    float* nutrients;       // nutrient level per cell (0-1)
-    float* toxins;          // toxin level per cell (0-1) 
-    float* signals;         // chemical signal level per cell (0-1)
-    float* alarm_signals;   // alarm signal level per cell (0-1) - warns of hostile contact
-    uint32_t* signal_source; // which colony emitted signal at each cell
-    uint32_t* alarm_source;  // which colony emitted alarm at each cell
+    Colony** colony_by_id;
+    size_t colony_by_id_capacity;
+    
+    float* nutrients;
+    float* toxins;
+    float* signals;
+    float* alarm_signals;
+    uint32_t* signal_source;
+    uint32_t* alarm_source;
+    
+    float* scratch_signals;
+    float* scratch_nutrients;
+    float* scratch_toxins;
+    float* scratch_eps;
+    uint32_t* scratch_sources;
+
+    struct {
+        bool enabled;
+        float half_saturation;
+        float uptake_min;
+        float uptake_max;
+        float growth_coupling;
+    } monod;
+
+    RDSolverControls rd_controls;
+    HGTKinetics hgt_kinetics;
+    HGTMetrics hgt_metrics;
 } World;
 
 #endif // FEROX_TYPES_H
