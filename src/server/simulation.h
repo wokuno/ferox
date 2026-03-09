@@ -3,16 +3,6 @@
 
 #include "world.h"
 
-typedef struct {
-    float nutrient_diffusivity;
-    float toxin_diffusivity;
-    float signal_neighbor_transfer;
-    float signal_decay;
-    float eps_attenuation;
-    float eps_exponent;
-    float min_relative_diffusivity;
-} TransportModelParams;
-
 // Main simulation tick - advances world by one step
 void simulation_tick(World* world);
 
@@ -21,9 +11,6 @@ void simulation_spread(World* world);
 
 // Apply mutations to all colonies
 void simulation_mutate(World* world);
-
-// Update HGT plasmid cost/loss state before spread.
-void simulation_update_hgt_kinetics(World* world);
 
 // Detect and handle colony divisions (flood-fill based)
 void simulation_check_divisions(World* world);
@@ -77,18 +64,26 @@ void simulation_age_region(World* world, int start_x, int start_y,
 // Update colony stats (wobble animation, etc) - can run in parallel per colony
 void simulation_update_colony_stats(World* world);
 
+// Recount colony cell counts from the grid without updating derived animation/state data.
+void simulation_recount_colony_cells(World* world);
+
+// Update only derived colony stats using existing cell_count values.
+// Does not recount cells from the grid.
+void simulation_update_colony_derived(World* world);
+
 // Combat resolution when colonies meet at borders
 void simulation_resolve_combat(World* world);
 
 // Update nutrients, toxins, and environmental layers
 void simulation_update_nutrients(World* world);
 
-// Update scent field - colonies emit scent that diffuses outward
-void simulation_update_scents(World* world);
+// Update behavioral environment layers such as toxins, signals, and alarm gradients
+void simulation_update_behavior_layers(World* world);
 
-// Configure EPS-dependent transport model parameters.
-void simulation_set_transport_params(const TransportModelParams* params);
-void simulation_get_transport_params(TransportModelParams* out_params);
-void simulation_reset_transport_params(void);
+// Update colony stress, lifecycle state, biofilm, learning, and drift dynamics
+void simulation_update_colony_dynamics(World* world);
+
+// Apply horizontal gene transfer across contacting colonies
+void simulation_apply_horizontal_gene_transfer(World* world);
 
 #endif // FEROX_SIMULATION_H

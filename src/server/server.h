@@ -8,7 +8,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdatomic.h>
 #include <pthread.h>
 
 #include "../shared/network.h"
@@ -19,27 +18,33 @@
 #include "atomic_sim.h"
 
 // Default tick rate (10 ticks per second)
+#define DEFAULT_WORLD_WIDTH 400
+#define DEFAULT_WORLD_HEIGHT 200
+#define DEFAULT_INITIAL_COLONY_COUNT 50
 #define DEFAULT_TICK_RATE_MS 100
 
 // Client session represents a connected client
-typedef struct client_session {
-    net_socket* socket;
+typedef struct ClientSession {
+    NetSocket* socket;
     uint32_t id;
     bool active;
     uint32_t selected_colony;  // Colony selected for detailed view
-    struct client_session* next;
-} client_session;
+    struct ClientSession* next;
+} ClientSession;
 
 // Server structure
 typedef struct Server {
-    net_server* listener;
-    client_session* clients;
+    NetServer* listener;
+    ClientSession* clients;
     int client_count;
     World* world;
     ThreadPool* pool;
     ParallelContext* parallel_ctx;
     AtomicWorld* atomic_world;    // Atomic simulation engine
-    _Atomic bool running;
+    int world_width;
+    int world_height;
+    int default_colonies;
+    bool running;
     bool paused;
     int tick_rate_ms;  // Milliseconds between ticks
     float speed_multiplier;
@@ -79,17 +84,25 @@ void server_run(Server* server);
 void server_stop(Server* server);
 
 /**
+ * Build a protocol snapshot from a world.
+ * Inline grid data is included only when the world fits the inline threshold;
+ * larger worlds rely on follow-up delta chunks for grid transfer.
+ * @param world Source world state
+ * @param paused Whether simulation is paused
+ * @param speed_multiplier Current playback speed multiplier
+ * @param proto_world Output protocol snapshot
+ * @return 0 on success, -1 on failure
+ */
+int server_build_protocol_world_snapshot(const World* world,
+                                         bool paused,
+                                         float speed_multiplier,
+                                         ProtoWorld* proto_world);
+
+/**
  * Broadcast world state to all connected clients.
  * @param server The server
  */
 void server_broadcast_world_state(Server* server);
-
-/**
- * Build a protocol snapshot from the current server world state.
- * @param server The server
- * @param out_world Destination protocol world (must be freed with proto_world_free)
- */
-void server_build_protocol_world_snapshot(Server* server, proto_world* out_world);
 
 /**
  * Send detailed colony info to a specific client.
@@ -97,10 +110,31 @@ void server_build_protocol_world_snapshot(Server* server, proto_world* out_world
  * @param client The client session
  * @param colony_id ID of the colony to send info for
  */
-void server_send_colony_info(Server* server, client_session* client, uint32_t colony_id);
-void server_handle_command(Server* server, client_session* client, CommandType cmd, void* data);
-client_session* server_add_client(Server* server, net_socket* socket);
-void server_remove_client(Server* server, client_session* client);
+void server_send_colony_info(Server* server, ClientSession* client, uint32_t colony_id);
+
+/**
+ * Handle a command from a client.
+ * @param server The server
+ * @param client The client session that sent the command
+ * @param cmd The command type
+ * @param data Command-specific data (may be NULL)
+ */
+void server_handle_command(Server* server, ClientSession* client, CommandType cmd, void* data);
+
+/**
+ * Add a new client to the server.
+ * @param server The server
+ * @param socket The client's socket
+ * @return Pointer to the new client session, or NULL on failure
+ */
+ClientSession* server_add_client(Server* server, NetSocket* socket);
+
+/**
+ * Remove a client from the server.
+ * @param server The server
+ * @param client The client session to remove
+ */
+void server_remove_client(Server* server, ClientSession* client);
 
 /**
  * Process incoming data from all clients.

@@ -74,28 +74,31 @@ static Genome create_test_genome(float spread, float mutation, float aggr, float
     g.defense_priority = spread;
     // Survival strategies
     g.dormancy_threshold = spread;
-    g.dormancy_resistance = spread;
-    g.persister_entry_stress = spread;
-    g.persister_exit_stress = spread;
-    g.persister_entry_rate = spread;
-    g.persister_exit_rate = spread;
-    g.sporulation_threshold = spread;
     g.biofilm_investment = spread;
-    g.biofilm_tendency = spread;
     g.motility = spread;
-    g.motility_direction = spread * 2.0f - 1.0f;
-    g.specialization = spread;
     g.efficiency = spread;
     // Neural network
     for (int i = 0; i < 8; i++) g.hidden_weights[i] = spread * 2.0f - 1.0f;  // Scale to -1 to 1 range
     g.learning_rate = spread;
     g.memory_factor = spread;
+    for (int i = 0; i < COLONY_SENSOR_COUNT; i++) g.behavior_sensor_gains[i] = spread;
+    for (int drive = 0; drive < COLONY_DRIVE_COUNT; drive++) {
+        g.behavior_drive_biases[drive] = spread * 2.0f - 1.0f;
+        for (int sensor = 0; sensor < COLONY_SENSOR_COUNT; sensor++) {
+            g.behavior_drive_weights[drive][sensor] = spread * 2.0f - 1.0f;
+        }
+    }
+    for (int action = 0; action < COLONY_ACTION_COUNT; action++) {
+        g.behavior_action_biases[action] = spread * 2.0f - 1.0f;
+        for (int drive = 0; drive < COLONY_DRIVE_COUNT; drive++) {
+            g.behavior_action_weights[action][drive] = spread * 2.0f - 1.0f;
+        }
+    }
     // Environmental sensing (missing fields)
     g.toxin_sensitivity = spread;
     g.quorum_threshold = spread;
-    uint8_t color = (uint8_t)(spread * 255.0f);
-    g.body_color = (Color){color, color, color};
-    g.border_color = (Color){(uint8_t)(255 - color), color, (uint8_t)(color / 2)};
+    g.body_color = (Color){128, 128, 128};
+    g.border_color = (Color){64, 64, 64};
     return g;
 }
 
@@ -122,6 +125,14 @@ TEST(mutation_values_stay_in_range_after_10000_iterations) {
                "resilience out of range");
         ASSERT(g.metabolism >= 0.0f && g.metabolism <= 1.0f, 
                "metabolism out of range");
+        for (int sensor = 0; sensor < COLONY_SENSOR_COUNT; sensor++) {
+            ASSERT(g.behavior_sensor_gains[sensor] >= 0.0f && g.behavior_sensor_gains[sensor] <= 1.0f,
+                   "behavior sensor gain out of range");
+        }
+        for (int drive = 0; drive < COLONY_DRIVE_COUNT; drive++) {
+            ASSERT(g.behavior_drive_biases[drive] >= -1.0f && g.behavior_drive_biases[drive] <= 1.0f,
+                   "behavior drive bias out of range");
+        }
     }
 }
 
@@ -208,13 +219,12 @@ TEST(genome_distance_is_always_non_negative) {
 }
 
 TEST(genome_distance_max_is_one_for_extreme_diff) {
-    // Distance remains bounded and high for strongly different genomes.
+    // Test that maximum possible distance is 1.0
     Genome a = create_test_genome(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     Genome b = create_test_genome(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
     
     float dist = genome_distance(&a, &b);
-    ASSERT_GT(dist, 0.5f);
-    ASSERT_TRUE(isfinite(dist));
+    ASSERT_FLOAT_NEAR(dist, 1.0f, 0.0001f);
 }
 
 // ============================================================================
@@ -300,6 +310,17 @@ TEST(genome_merge_blends_body_colors) {
            "Blue component should be ~127");
 }
 
+TEST(genome_merge_blends_behavior_graph_genes) {
+    Genome a = create_test_genome(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    Genome b = create_test_genome(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+
+    Genome result = genome_merge(&a, 50, &b, 50);
+
+    ASSERT_FLOAT_NEAR(result.behavior_sensor_gains[COLONY_SENSOR_NUTRIENT], 0.5f, 0.0001f);
+    ASSERT_FLOAT_NEAR(result.behavior_drive_biases[COLONY_DRIVE_GROWTH], 0.0f, 0.0001f);
+    ASSERT_FLOAT_NEAR(result.behavior_action_weights[COLONY_ACTION_ATTACK][COLONY_DRIVE_HOSTILITY], 0.0f, 0.0001f);
+}
+
 // ============================================================================
 // Compatibility Tests
 // ============================================================================
@@ -360,10 +381,10 @@ TEST(genome_create_produces_valid_color_range) {
     for (int i = 0; i < 100; i++) {
         Genome g = genome_create_random();
         
-        // Body colors should be in valid range (30-255 for more variety)
-        ASSERT(g.body_color.r >= 30 && g.body_color.r <= 255, "Body R out of range");
-        ASSERT(g.body_color.g >= 30 && g.body_color.g <= 255, "Body G out of range");
-        ASSERT(g.body_color.b >= 30 && g.body_color.b <= 255, "Body B out of range");
+        // Body colors should be in valid range (50-255 based on implementation)
+        ASSERT(g.body_color.r >= 50 && g.body_color.r <= 255, "Body R out of range");
+        ASSERT(g.body_color.g >= 50 && g.body_color.g <= 255, "Body G out of range");
+        ASSERT(g.body_color.b >= 50 && g.body_color.b <= 255, "Body B out of range");
         
         // Border should be darker (half of body based on implementation)
         ASSERT_LE(g.border_color.r, g.body_color.r);
@@ -397,22 +418,21 @@ TEST(genome_mutations_cause_genetic_drift) {
     ASSERT(final_distance > 0.0f, "No genetic drift after 1000 mutations");
 }
 
-TEST(genome_low_mutation_rate_causes_minimal_change) {
+TEST(genome_zero_mutation_rate_causes_no_change) {
     rng_seed(42);
     
-    Genome original = create_test_genome(0.5f, 0.02f, 0.5f, 0.5f, 0.5f);  // Minimum mutation rate
+    Genome original = create_test_genome(0.5f, 0.0f, 0.5f, 0.5f, 0.5f);
     Genome current = original;
     
-    // With very low mutation rate, changes should be small but present (dynamic simulation)
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 1000; i++) {
         genome_mutate(&current);
     }
     
-    // Values can change but should stay reasonable
-    ASSERT(current.spread_rate >= 0.0f && current.spread_rate <= 1.0f, "spread_rate in range");
-    ASSERT(current.aggression >= 0.0f && current.aggression <= 1.0f, "aggression in range");
-    ASSERT(current.resilience >= 0.0f && current.resilience <= 1.0f, "resilience in range");
-    ASSERT(current.metabolism >= 0.0f && current.metabolism <= 1.0f, "metabolism in range");
+    // With 0 mutation rate, nothing should change
+    ASSERT_FLOAT_NEAR(current.spread_rate, original.spread_rate, 0.0001f);
+    ASSERT_FLOAT_NEAR(current.aggression, original.aggression, 0.0001f);
+    ASSERT_FLOAT_NEAR(current.resilience, original.resilience, 0.0001f);
+    ASSERT_FLOAT_NEAR(current.metabolism, original.metabolism, 0.0001f);
 }
 
 // ============================================================================
@@ -465,6 +485,7 @@ int run_genetics_advanced_tests(void) {
     RUN_TEST(genome_merge_handles_extreme_weight_ratios);
     RUN_TEST(genome_merge_with_zero_count_returns_other);
     RUN_TEST(genome_merge_blends_body_colors);
+    RUN_TEST(genome_merge_blends_behavior_graph_genes);
     
     printf("\nCompatibility Tests:\n");
     RUN_TEST(genome_compatible_respects_threshold);
@@ -476,7 +497,7 @@ int run_genetics_advanced_tests(void) {
     
     printf("\nGenetic Drift Tests:\n");
     RUN_TEST(genome_mutations_cause_genetic_drift);
-    RUN_TEST(genome_low_mutation_rate_causes_minimal_change);
+    RUN_TEST(genome_zero_mutation_rate_causes_no_change);
     
     printf("\nColor Tests:\n");
     RUN_TEST(genome_colors_stay_in_valid_rgb_range);

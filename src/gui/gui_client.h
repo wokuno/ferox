@@ -8,14 +8,19 @@
 #include "gui_renderer.h"
 
 typedef struct GuiClient {
-    net_socket* socket;
+    NetSocket* socket;
     GuiRenderer* renderer;
-    proto_world local_world;       // Local copy of world state
+    ProtoWorld local_world;       // Local copy of world state
+    ProtoColonyDetail selected_detail;
     bool connected;
     bool running;
+    bool has_selected_detail;
     uint32_t selected_colony;
     uint32_t selected_index;      // Index in colony array for cycling
     float fps;                    // Current frames per second
+    bool pending_grid_active;
+    uint32_t pending_grid_tick;
+    uint32_t pending_grid_next_index;
 } GuiClient;
 
 // Create and destroy
@@ -34,14 +39,15 @@ void gui_client_send_command(GuiClient* client, CommandType cmd, void* data);
 
 // Message handling
 void gui_client_handle_message(GuiClient* client, MessageType type, 
-                                const uint8_t* payload, size_t len);
+                                 const uint8_t* payload, size_t len);
 void gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len);
+void gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t len);
 
 // Selection
 void gui_client_select_next_colony(GuiClient* client);
 void gui_client_select_prev_colony(GuiClient* client);
 void gui_client_deselect_colony(GuiClient* client);
 void gui_client_select_colony_at(GuiClient* client, float world_x, float world_y);
-const proto_colony* gui_client_get_selected_colony(GuiClient* client);
+const ProtoColony* gui_client_get_selected_colony(GuiClient* client);
 
 #endif // GUI_CLIENT_H

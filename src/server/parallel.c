@@ -8,13 +8,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-// Task argument structure for region processing
-typedef struct RegionTask {
-    ParallelContext* ctx;
-    Region* region;
-    int region_index;
-} RegionTask;
-
 // Spread task function - process spreading for a region
 static void spread_task(void* arg) {
     RegionTask* task = (RegionTask*)arg;
@@ -30,7 +23,6 @@ static void spread_task(void* arg) {
                                  region->end_x, region->end_y, pending);
     }
     
-    free(task);
 }
 
 // Age task function - age cells in a region
@@ -42,7 +34,6 @@ static void age_task(void* arg) {
     simulation_age_region(world, region->start_x, region->start_y,
                           region->end_x, region->end_y);
     
-    free(task);
 }
 
 // Mutate task function (mutations are per-colony, kept for API completeness)
@@ -50,7 +41,6 @@ static void mutate_task(void* arg) {
     RegionTask* task = (RegionTask*)arg;
     (void)task;
     // Mutations happen per-colony in simulation_mutate(), not per-region
-    free(task);
 }
 
 ParallelContext* parallel_create(ThreadPool* pool, World* world, int regions_x, int regions_y) {
@@ -85,6 +75,23 @@ ParallelContext* parallel_create(ThreadPool* pool, World* world, int regions_x, 
         free(ctx);
         return NULL;
     }
+
+    ctx->region_tasks = (RegionTask*)malloc(sizeof(RegionTask) * region_count);
+    if (ctx->region_tasks == NULL) {
+        free(ctx->pending_buffers);
+        free(ctx->regions);
+        free(ctx);
+        return NULL;
+    }
+
+    ctx->submit_args = (void**)malloc(sizeof(void*) * (size_t)region_count);
+    if (ctx->submit_args == NULL) {
+        free(ctx->region_tasks);
+        free(ctx->pending_buffers);
+        free(ctx->regions);
+        free(ctx);
+        return NULL;
+    }
     
     // Initialize regions and pending buffers
     for (int i = 0; i < region_count; i++) {
@@ -93,6 +100,10 @@ ParallelContext* parallel_create(ThreadPool* pool, World* world, int regions_x, 
         ctx->regions[i].end_x = 0;
         ctx->regions[i].end_y = 0;
         ctx->pending_buffers[i] = pending_buffer_create(256);
+        ctx->region_tasks[i].ctx = ctx;
+        ctx->region_tasks[i].region = &ctx->regions[i];
+        ctx->region_tasks[i].region_index = i;
+        ctx->submit_args[i] = &ctx->region_tasks[i];
     }
     
     return ctx;
@@ -112,6 +123,9 @@ void parallel_destroy(ParallelContext* ctx) {
         }
         free(ctx->pending_buffers);
     }
+
+    free(ctx->region_tasks);
+    free(ctx->submit_args);
     
     free(ctx->regions);
     free(ctx);
@@ -150,66 +164,27 @@ void parallel_init_regions(ParallelContext* ctx, int world_width, int world_heig
 }
 
 void parallel_age(ParallelContext* ctx) {
-    if (ctx == NULL) {
+    if (ctx == NULL || ctx->submit_args == NULL) {
         return;
     }
-    
-    // Submit an age task for each region
-    for (int i = 0; i < ctx->region_count; i++) {
-        RegionTask* task = (RegionTask*)malloc(sizeof(RegionTask));
-        if (task == NULL) {
-            fprintf(stderr, "Warning: Failed to allocate age task for region %d\n", i);
-            continue;
-        }
-        
-        task->ctx = ctx;
-        task->region = &ctx->regions[i];
-        task->region_index = i;
-        
-        threadpool_submit(ctx->pool, age_task, task);
-    }
+
+    threadpool_submit_batch(ctx->pool, age_task, ctx->submit_args, ctx->region_count);
 }
 
 void parallel_spread(ParallelContext* ctx) {
-    if (ctx == NULL) {
+    if (ctx == NULL || ctx->submit_args == NULL) {
         return;
     }
-    
-    // Submit a spread task for each region
-    for (int i = 0; i < ctx->region_count; i++) {
-        RegionTask* task = (RegionTask*)malloc(sizeof(RegionTask));
-        if (task == NULL) {
-            fprintf(stderr, "Warning: Failed to allocate spread task for region %d\n", i);
-            continue;
-        }
-        
-        task->ctx = ctx;
-        task->region = &ctx->regions[i];
-        task->region_index = i;
-        
-        threadpool_submit(ctx->pool, spread_task, task);
-    }
+
+    threadpool_submit_batch(ctx->pool, spread_task, ctx->submit_args, ctx->region_count);
 }
 
 void parallel_mutate(ParallelContext* ctx) {
-    if (ctx == NULL) {
+    if (ctx == NULL || ctx->submit_args == NULL) {
         return;
     }
-    
-    // Submit a mutate task for each region
-    for (int i = 0; i < ctx->region_count; i++) {
-        RegionTask* task = (RegionTask*)malloc(sizeof(RegionTask));
-        if (task == NULL) {
-            fprintf(stderr, "Warning: Failed to allocate mutate task for region %d\n", i);
-            continue;
-        }
-        
-        task->ctx = ctx;
-        task->region = &ctx->regions[i];
-        task->region_index = i;
-        
-        threadpool_submit(ctx->pool, mutate_task, task);
-    }
+
+    threadpool_submit_batch(ctx->pool, mutate_task, ctx->submit_args, ctx->region_count);
 }
 
 void parallel_barrier(ParallelContext* ctx) {
@@ -231,9 +206,6 @@ void parallel_tick(ParallelContext* ctx) {
     // Phase 1: Age cells in parallel
     parallel_age(ctx);
     parallel_barrier(ctx);
-
-    // Update HGT donor/recipient/transconjugant kinetics before spread.
-    simulation_update_hgt_kinetics(world);
     
     // Phase 2: Spread colonies in parallel (writes to pending buffers)
     parallel_spread(ctx);

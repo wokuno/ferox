@@ -16,7 +16,6 @@
 #include "../src/server/world.h"
 #include "../src/server/genetics.h"
 #include "../src/server/simulation.h"
-#include "../src/server/simulation_common.h"
 #include "../src/server/threadpool.h"
 #include "../src/server/atomic_sim.h"
 
@@ -80,127 +79,16 @@ static int count_colony_cells(World* world, uint32_t colony_id) {
     return count;
 }
 
-static uint64_t mix64(uint64_t value) {
-    value ^= value >> 30;
-    value *= 0xbf58476d1ce4e5b9ULL;
-    value ^= value >> 27;
-    value *= 0x94d049bb133111ebULL;
-    value ^= value >> 31;
-    return value;
-}
-
-static uint64_t world_signature(const World* world) {
-    uint64_t sig = 0x9e3779b97f4a7c15ULL;
-    int grid_size = world->width * world->height;
-
-    for (int i = 0; i < grid_size; i++) {
-        uint64_t cell_bits = ((uint64_t)world->cells[i].colony_id << 32) |
-                             ((uint64_t)world->cells[i].age << 24) |
-                             (uint64_t)(world->cells[i].is_border ? 1u : 0u);
-        sig ^= mix64(cell_bits ^ (uint64_t)i * 0x9e3779b97f4a7c15ULL);
-    }
-
-    for (size_t i = 0; i < world->colony_count; i++) {
-        const Colony* colony = &world->colonies[i];
-        if (!colony->active) continue;
-        uint64_t colony_bits = ((uint64_t)colony->id << 32) ^
-                               (uint64_t)colony->cell_count ^
-                               ((uint64_t)colony->max_cell_count << 1);
-        sig ^= mix64(colony_bits);
-    }
-
-    return sig ^ mix64(world->tick);
-}
-
-static World* create_atomic_rng_fixture(void) {
-    World* world = world_create(48, 48);
-    if (!world) return NULL;
-
-    Colony colony = create_test_colony();
-    colony.genome.spread_rate = 0.28f;
-    colony.genome.metabolism = 0.92f;
-    colony.genome.social_factor = 0.0f;
-    colony.genome.detection_range = 0.0f;
-    colony.genome.max_tracked = 1;
-    for (int d = 0; d < 8; d++) {
-        colony.genome.spread_weights[d] = 1.0f;
-    }
-
-    uint32_t id = world_add_colony(world, colony);
-    if (id == 0) {
-        world_destroy(world);
-        return NULL;
-    }
-
-    int seeded_cells = 0;
-    for (int y = 23; y <= 25; y++) {
-        for (int x = 23; x <= 25; x++) {
+static void fill_colony_rect(World* world, uint32_t colony_id, int start_x, int start_y, int width, int height) {
+    for (int y = start_y; y < start_y + height; y++) {
+        for (int x = start_x; x < start_x + width; x++) {
             Cell* cell = world_get_cell(world, x, y);
-            if (!cell) continue;
-            cell->colony_id = id;
-            cell->age = 0;
-            seeded_cells++;
+            if (cell) {
+                cell->colony_id = colony_id;
+                cell->age = 1;
+            }
         }
     }
-
-    Colony* inserted = world_get_colony(world, id);
-    if (!inserted) {
-        world_destroy(world);
-        return NULL;
-    }
-    inserted->cell_count = (size_t)seeded_cells;
-    inserted->max_cell_count = (size_t)seeded_cells;
-
-    return world;
-}
-
-static uint64_t run_atomic_spread_signature(uint64_t seed, int thread_count, int ticks) {
-    rng_seed(seed);
-    World* world = create_atomic_rng_fixture();
-    if (!world) return 0;
-
-    ThreadPool* pool = threadpool_create(thread_count);
-    if (!pool) {
-        world_destroy(world);
-        return 0;
-    }
-
-    AtomicWorld* aworld = atomic_world_create(world, pool, thread_count);
-    if (!aworld) {
-        threadpool_destroy(pool);
-        world_destroy(world);
-        return 0;
-    }
-
-    for (int i = 0; i < ticks; i++) {
-        atomic_age(aworld);
-        atomic_barrier(aworld);
-        atomic_spread(aworld);
-        atomic_barrier(aworld);
-        atomic_world_sync_to_world(aworld);
-        world->tick++;
-    }
-
-    atomic_world_sync_to_world(aworld);
-    uint64_t sig = world_signature(world);
-
-    atomic_world_destroy(aworld);
-    threadpool_destroy(pool);
-    world_destroy(world);
-    return sig;
-}
-
-static Colony create_switch_test_colony(void) {
-    Colony colony = create_test_colony();
-    colony.state = COLONY_STATE_STRESSED;
-    colony.is_dormant = false;
-    colony.is_persister = false;
-    colony.genome.persister_entry_stress = 0.60f;
-    colony.genome.persister_exit_stress = 0.30f;
-    colony.genome.persister_entry_rate = 1.0f;
-    colony.genome.persister_exit_rate = 1.0f;
-    colony.genome.dormancy_resistance = 0.0f;
-    return colony;
 }
 
 // ============================================================================
@@ -918,16 +806,11 @@ TEST(atomic_tick_preserves_cell_count) {
     Colony colony = create_test_colony();
     colony.genome.spread_rate = 0.0f;  // No spreading
     colony.genome.aggression = 0.0f;   // No attacks
-    colony.genome.efficiency = 1.0f;   // Minimize death chance
-    colony.genome.resilience = 1.0f;
-    colony.genome.toxin_resistance = 1.0f;
-    colony.biofilm_strength = 1.0f;
     uint32_t id = world_add_colony(world, colony);
     
-    // Place cells and ensure high nutrients
+    // Place cells
     for (int x = 10; x < 20; x++) {
         world_get_cell(world, x, 15)->colony_id = id;
-        world->nutrients[(15) * 30 + x] = 1.0f;
     }
     Colony* col = world_get_colony(world, id);
     col->cell_count = 10;
@@ -941,13 +824,12 @@ TEST(atomic_tick_preserves_cell_count) {
     // Run atomic tick
     atomic_tick(aworld);
     
-    // Verify cell count roughly preserved (no spreading, no attacks, minimal death)
-    // Stochastic death can still remove cells even with high resilience
+    // Verify cell count preserved (no spreading, no attacks)
     int actual_count = count_colony_cells(world, id);
-    ASSERT_TRUE(actual_count >= 5);
+    ASSERT_EQ(actual_count, 10);
     
     col = world_get_colony(world, id);
-    ASSERT_TRUE((int)col->cell_count >= 5);
+    ASSERT_EQ((int)col->cell_count, 10);
     
     atomic_world_destroy(aworld);
     threadpool_destroy(pool);
@@ -990,9 +872,9 @@ TEST(cell_count_stable_without_spreading) {
     col->cell_count = 15;
     col->biofilm_strength = 1.0f;  // Ensure biofilm is set
     
-    // Run very few ticks due to aggressive decay
+    // Run fewer ticks to reduce natural decay impact
     int initial_count = 15;
-    for (int tick = 0; tick < 3; tick++) {
+    for (int tick = 0; tick < 10; tick++) {
         // Maintain max nutrients and reset borders each tick
         for (int i = 0; i < grid_size; i++) {
             world->nutrients[i] = 1.0f;
@@ -1015,10 +897,10 @@ TEST(cell_count_stable_without_spreading) {
         ASSERT_EQ((int)col->cell_count, actual);
     }
     
-    // Should have retained cells (>40%) with full protection
-    // Dynamic simulation has aggressive decay
+    // Should have retained most cells (>60%) with full protection
+    // Note: some natural decay is expected even with protection
     int final_count = count_colony_cells(world, id);
-    ASSERT(final_count >= initial_count * 0.4, "Should retain cells with protection");
+    ASSERT(final_count >= initial_count * 0.6, "Should retain most cells with full protection");
     
     world_destroy(world);
 }
@@ -1235,7 +1117,7 @@ TEST(wobble_phase_preserved_across_sync) {
 // ============================================================================
 
 TEST(protocol_preserves_shape_seed) {
-    proto_colony original = {0};
+    ProtoColony original = {0};
     original.id = 42;
     strncpy(original.name, "Test Colony", MAX_COLONY_NAME);
     original.shape_seed = 0xCAFEBABE;
@@ -1246,7 +1128,7 @@ TEST(protocol_preserves_shape_seed) {
     int written = protocol_serialize_colony(&original, buffer);
     ASSERT_GT(written, 0);
     
-    proto_colony restored = {0};
+    ProtoColony restored = {0};
     int read = protocol_deserialize_colony(buffer, &restored);
     ASSERT_GT(read, 0);
     
@@ -1254,7 +1136,7 @@ TEST(protocol_preserves_shape_seed) {
 }
 
 TEST(protocol_preserves_wobble_phase) {
-    proto_colony original = {0};
+    ProtoColony original = {0};
     original.id = 42;
     strncpy(original.name, "Test Colony", MAX_COLONY_NAME);
     original.shape_seed = 0;
@@ -1265,7 +1147,7 @@ TEST(protocol_preserves_wobble_phase) {
     int written = protocol_serialize_colony(&original, buffer);
     ASSERT_GT(written, 0);
     
-    proto_colony restored = {0};
+    ProtoColony restored = {0};
     int read = protocol_deserialize_colony(buffer, &restored);
     ASSERT_GT(read, 0);
     
@@ -1274,7 +1156,7 @@ TEST(protocol_preserves_wobble_phase) {
 }
 
 TEST(protocol_population_round_trip) {
-    proto_colony original = {0};
+    ProtoColony original = {0};
     original.id = 1;
     original.population = 12345;
     original.max_population = 99999;
@@ -1282,7 +1164,7 @@ TEST(protocol_population_round_trip) {
     uint8_t buffer[COLONY_SERIALIZED_SIZE];
     protocol_serialize_colony(&original, buffer);
     
-    proto_colony restored = {0};
+    ProtoColony restored = {0};
     protocol_deserialize_colony(buffer, &restored);
     
     ASSERT_EQ(restored.population, original.population);
@@ -1446,12 +1328,12 @@ TEST(atomic_tick_concurrent_stability) {
     }
     
     // Save state before atomic operations
-    size_t saved_counts[256];
+    uint32_t saved_ids[256];
     uint32_t saved_seeds[256];
     float saved_wobbles[256];
     
     for (size_t i = 0; i < world->colony_count && i < 256; i++) {
-        saved_counts[i] = world->colonies[i].cell_count;
+        saved_ids[i] = world->colonies[i].id;
         saved_seeds[i] = world->colonies[i].shape_seed;
         saved_wobbles[i] = world->colonies[i].wobble_phase;
     }
@@ -1470,31 +1352,34 @@ TEST(atomic_tick_concurrent_stability) {
         for (size_t i = 0; i < world->colony_count && i < 256; i++) {
             Colony* col = &world->colonies[i];
             if (!col->active) continue;
+
+            if (saved_ids[i] != col->id) {
+                saved_ids[i] = col->id;
+                saved_seeds[i] = col->shape_seed;
+                saved_wobbles[i] = col->wobble_phase;
+                continue;
+            }
             
-            // shape_seed can change via mutation OR speciation events
-            // Speciation creates new colonies with different shape_seeds
-            // So we track but don't fail on large changes
+            // shape_seed should only change via XOR with single bit (1% chance)
+            // If rand() has a race condition, shape_seed could get corrupted
             uint32_t seed_diff = col->shape_seed ^ saved_seeds[i];
             int bits_changed = __builtin_popcount(seed_diff);
             
-            // Only flag extreme corruption (more than 16 bits changed might indicate race)
-            // But speciation can cause full changes, so just track
-            if (bits_changed > 16 && saved_seeds[i] != 0) {
-                // Possible corruption or speciation - log but continue
-            }
+            // With proper mutation, only 0 or 1 bit should change per tick
+            // (unless multiple mutations occur, which is < 0.01% chance)
+            // Large bit changes indicate corruption
+            ASSERT(bits_changed <= 8, "shape_seed appears corrupted - too many bit changes");
             
             saved_seeds[i] = col->shape_seed;
             
-            // wobble_phase should increment smoothly (but new colonies from speciation can have any phase)
-            if (saved_wobbles[i] != 0.0f) {
-                float delta = col->wobble_phase - saved_wobbles[i];
-                if (delta < -3.0f) delta += 6.28318f;  // Handle wrap
-                
-                // New colonies from speciation get random phases, so allow any delta
-                // Only check that wobble_phase is in valid range
-                ASSERT(col->wobble_phase >= 0.0f && col->wobble_phase <= 6.5f, "wobble_phase out of range");
-            }
+            // wobble_phase should increment smoothly 
+            float delta = col->wobble_phase - saved_wobbles[i];
+            if (delta < -3.0f) delta += 6.28318f;  // Handle wrap
             
+            // Each tick adds 0.03, so delta should be ~0.03
+            ASSERT(delta >= 0.02f && delta <= 0.04f, "wobble_phase jumped unexpectedly");
+             
+            saved_ids[i] = col->id;
             saved_wobbles[i] = col->wobble_phase;
         }
     }
@@ -1502,24 +1387,6 @@ TEST(atomic_tick_concurrent_stability) {
     atomic_world_destroy(aworld);
     threadpool_destroy(pool);
     world_destroy(world);
-}
-
-TEST(atomic_parallel_rng_reproducible_across_runs) {
-    uint64_t sig_a = run_atomic_spread_signature(0x1234ULL, 4, 45);
-    uint64_t sig_b = run_atomic_spread_signature(0x1234ULL, 4, 45);
-
-    ASSERT_NE(sig_a, 0);
-    ASSERT_NE(sig_b, 0);
-    ASSERT_EQ(sig_a, sig_b);
-}
-
-TEST(atomic_parallel_rng_reproducible_across_thread_counts) {
-    uint64_t sig_single = run_atomic_spread_signature(0xC0FFEEULL, 1, 45);
-    uint64_t sig_multi = run_atomic_spread_signature(0xC0FFEEULL, 4, 45);
-
-    ASSERT_NE(sig_single, 0);
-    ASSERT_NE(sig_multi, 0);
-    ASSERT_EQ(sig_single, sig_multi);
 }
 
 TEST(rand_thread_safety_issue) {
@@ -1591,38 +1458,40 @@ TEST(cell_count_concurrent_consistency) {
     AtomicWorld* aworld = atomic_world_create(world, pool, 4);
     ASSERT_NOT_NULL(aworld);
     
-    // Run many ticks and verify per-colony counts stay synchronized with grid state.
-    int mismatch_count = 0;
+    // Run many ticks checking for cell count jumps
+    int jump_count = 0;
+    size_t prev_counts[256] = {0};
+    
+    for (size_t i = 0; i < world->colony_count && i < 256; i++) {
+        prev_counts[i] = world->colonies[i].cell_count;
+    }
     
     for (int tick = 0; tick < 200; tick++) {
         atomic_tick(aworld);
-
-        size_t total_grid_cells = 0;
-        size_t total_colony_cells = 0;
         
         for (size_t i = 0; i < world->colony_count && i < 256; i++) {
             Colony* col = &world->colonies[i];
             if (!col->active) continue;
-
-            size_t grid_count = (size_t)count_colony_cells(world, col->id);
-            total_grid_cells += grid_count;
-            total_colony_cells += col->cell_count;
-
-            if (grid_count != col->cell_count) {
-                mismatch_count++;
-                printf("\n    [WARNING] Cell count mismatch (tick %d, colony %u): grid=%zu stats=%zu\n",
-                       tick, col->id, grid_count, col->cell_count);
+            
+            // Cell count should not jump by more than reasonable spread
+            // With more aggressive spreading and combat, allow up to 100% growth per tick
+            int64_t diff = (int64_t)col->cell_count - (int64_t)prev_counts[i];
+            int64_t max_expected = (int64_t)prev_counts[i] + 20;  // Allow full doubling + buffer
+            
+            if (diff < 0) diff = -diff;
+            
+            if (diff > max_expected && prev_counts[i] > 0) {
+                jump_count++;
+                printf("\n    [WARNING] Cell count jumped: %zu -> %zu (tick %d, colony %u)\n",
+                       prev_counts[i], col->cell_count, tick, col->id);
             }
-        }
-
-        if (total_grid_cells != total_colony_cells) {
-            mismatch_count++;
-            printf("\n    [WARNING] Total count mismatch (tick %d): grid=%zu stats=%zu\n",
-                   tick, total_grid_cells, total_colony_cells);
+            
+            prev_counts[i] = col->cell_count;
         }
     }
     
-    ASSERT_EQ(mismatch_count, 0);
+    // No unexplained jumps should occur
+    ASSERT_EQ(jump_count, 0);
     
     atomic_world_destroy(aworld);
     threadpool_destroy(pool);
@@ -1690,7 +1559,6 @@ TEST(centroid_stability) {
     ASSERT_NOT_NULL(aworld);
     
     float prev_x[5], prev_y[5];
-    int prev_count[5];
     for (int col = 0; col < 5; col++) {
         float sum_x = 0, sum_y = 0;
         int count = 0;
@@ -1706,7 +1574,6 @@ TEST(centroid_stability) {
         }
         prev_x[col] = count > 0 ? sum_x / count : 0;
         prev_y[col] = count > 0 ? sum_y / count : 0;
-        prev_count[col] = count;
     }
     
     int jump_count = 0;
@@ -1731,22 +1598,17 @@ TEST(centroid_stability) {
             }
             
             if (count > 0) {
-                int delta = count - prev_count[col];
-                if (delta < 0) delta = -delta;
-                int major_pop_change = delta > (prev_count[col] / 5 + 1);
-
                 float curr_x = sum_x / count;
                 float curr_y = sum_y / count;
                 float dist = sqrtf((curr_x - prev_x[col]) * (curr_x - prev_x[col]) + 
                                    (curr_y - prev_y[col]) * (curr_y - prev_y[col]));
                 
-                if (!major_pop_change && dist > 5.0f) {
+                if (dist > 5.0f) {
                     jump_count++;
                 }
                 
                 prev_x[col] = curr_x;
                 prev_y[col] = curr_y;
-                prev_count[col] = count;
             }
         }
     }
@@ -1797,226 +1659,293 @@ TEST(shape_function_smooth_with_phase) {
     ASSERT_EQ(large_jump_count, 0);
 }
 
-TEST(persister_switch_enters_under_high_stress) {
-    Colony colony = create_switch_test_colony();
-    colony.stress_level = 1.0f;
-    colony.genome.persister_entry_stress = 0.15f;
-    colony.is_persister = false;
+TEST(behavior_layers_emit_signals_and_alarms) {
+    World* world = world_create(12, 12);
+    ASSERT_NOT_NULL(world);
 
-    for (int i = 0; i < 16 && !colony.is_persister; i++) {
-        colony_update_persister_switching(&colony);
-    }
-
-    ASSERT_TRUE(colony.is_persister);
-}
-
-TEST(persister_switch_exits_under_low_stress) {
-    Colony colony = create_switch_test_colony();
-    colony.stress_level = 0.0f;
-    colony.is_persister = true;
-    colony.genome.persister_exit_stress = 0.6f;
-
-    for (int i = 0; i < 16 && colony.is_persister; i++) {
-        colony_update_persister_switching(&colony);
-    }
-
-    ASSERT_FALSE(colony.is_persister);
-}
-
-TEST(persister_switch_hysteresis_holds_mid_stress) {
-    Colony colony = create_switch_test_colony();
-    colony.stress_level = 0.45f;
-
-    colony.is_persister = false;
-    colony_update_persister_switching(&colony);
-    ASSERT_FALSE(colony.is_persister);
-
-    colony.is_persister = true;
-    colony_update_persister_switching(&colony);
-    ASSERT_TRUE(colony.is_persister);
-}
-
-TEST(dormancy_forces_persister_state) {
-    Colony colony = create_switch_test_colony();
-    colony.stress_level = 0.95f;
-    colony.is_dormant = true;
-    colony.is_persister = false;
-
-    colony_update_persister_switching(&colony);
-
-    ASSERT_TRUE(colony.is_persister);
-    ASSERT_LT(colony_spread_activity_factor(&colony), 0.5f);
-}
-
-TEST(persister_activity_modifiers_reduce_growth_pressure) {
-    Colony colony = create_switch_test_colony();
-    colony.is_dormant = false;
-    colony.is_persister = false;
-    float active_spread = colony_spread_activity_factor(&colony);
-    float active_turnover = colony_turnover_factor(&colony);
-
-    colony.is_persister = true;
-    float persister_spread = colony_spread_activity_factor(&colony);
-    float persister_turnover = colony_turnover_factor(&colony);
-
-    ASSERT_GT(active_spread, persister_spread);
-    ASSERT_GT(active_turnover, persister_turnover);
-}
-
-static uint32_t add_transport_test_colony(World* world, float biofilm_strength) {
     Colony colony = create_test_colony();
-    colony.active = true;
-    colony.biofilm_strength = biofilm_strength;
-    colony.genome.biofilm_investment = 1.0f;
-    colony.genome.signal_emission = 0.0f;
-    colony.genome.toxin_production = 0.0f;
-    return world_add_colony(world, colony);
-}
+    colony.genome.signal_emission = 1.0f;
+    colony.genome.signal_sensitivity = 1.0f;
+    colony.genome.alarm_threshold = 0.1f;
+    colony.stress_level = 0.9f;
+    uint32_t id = world_add_colony(world, colony);
+    ASSERT_NE(id, 0);
 
-static float measure_signal_penetration_depth(float barrier_biofilm) {
-    World* world = world_create(64, 9);
-    if (!world) return 0.0f;
+    Cell* cell = world_get_cell(world, 6, 6);
+    ASSERT_NOT_NULL(cell);
+    cell->colony_id = id;
+    cell->age = 1;
 
-    uint32_t barrier_id = add_transport_test_colony(world, barrier_biofilm);
-    if (barrier_id == 0u) {
-        world_destroy(world);
-        return 0.0f;
-    }
+    Colony* stored = world_get_colony(world, id);
+    ASSERT_NOT_NULL(stored);
+    stored->cell_count = 1;
 
-    Colony* barrier = world_get_colony(world, barrier_id);
-    if (!barrier) {
-        world_destroy(world);
-        return 0.0f;
-    }
+    simulation_update_behavior_layers(world);
 
-    for (int y = 0; y < world->height; y++) {
-        for (int x = 28; x <= 33; x++) {
-            Cell* cell = world_get_cell(world, x, y);
-            cell->colony_id = barrier_id;
-            cell->is_border = false;
-            barrier->cell_count++;
-        }
-    }
-
-    for (int y = 0; y < world->height; y++) {
-        int idx = y * world->width + 18;
-        world->signals[idx] = 1.0f;
-        world->signal_source[idx] = barrier_id;
-    }
-
-    for (int t = 0; t < 120; t++) {
-        for (int y = 0; y < world->height; y++) {
-            int source_idx = y * world->width + 18;
-            world->signals[source_idx] = 1.0f;
-            world->signal_source[source_idx] = barrier_id;
-        }
-        simulation_update_scents(world);
-    }
-
-    float weighted_sum = 0.0f;
-    float total_mass = 0.0f;
-    for (int x = 34; x < world->width; x++) {
-        for (int y = 0; y < world->height; y++) {
-            float v = world->signals[y * world->width + x];
-            weighted_sum += v * (float)(x - 33);
-            total_mass += v;
-        }
-    }
+    int idx = 6 * world->width + 6;
+    ASSERT_GT(world->signals[idx], 0.01f);
+    ASSERT_EQ(world->signal_source[idx], id);
+    ASSERT_GT(world->alarm_signals[idx], 0.01f);
+    ASSERT_EQ(world->alarm_source[idx], id);
+    ASSERT_TRUE(world->cells[idx].is_border);
 
     world_destroy(world);
-    return total_mass <= 1e-6f ? 0.0f : (weighted_sum / total_mass);
 }
 
-static float measure_toxin_penetration_depth(float barrier_biofilm) {
-    World* world = world_create(64, 9);
-    if (!world) return 0.0f;
+TEST(colony_dynamics_enters_dormancy_under_stress) {
+    World* world = world_create(12, 12);
+    ASSERT_NOT_NULL(world);
 
-    uint32_t emitter_id = add_transport_test_colony(world, 0.0f);
-    uint32_t barrier_id = add_transport_test_colony(world, barrier_biofilm);
-    if (emitter_id == 0u || barrier_id == 0u) {
-        world_destroy(world);
-        return 0.0f;
-    }
+    Colony colony = create_test_colony();
+    colony.genome.dormancy_threshold = 0.8f;
+    colony.genome.sporulation_threshold = 0.4f;
+    colony.genome.dormancy_resistance = 0.9f;
+    colony.genome.biofilm_investment = 0.8f;
+    colony.genome.biofilm_tendency = 0.9f;
+    colony.genome.motility = 0.25f;
+    for (int i = 0; i < COLONY_SENSOR_COUNT; i++) colony.genome.behavior_sensor_gains[i] = 1.0f;
+    colony.genome.behavior_drive_biases[COLONY_DRIVE_PRESERVATION] = 1.0f;
+    colony.genome.behavior_action_biases[COLONY_ACTION_DORMANCY] = 1.0f;
+    colony.genome.behavior_action_weights[COLONY_ACTION_DORMANCY][COLONY_DRIVE_PRESERVATION] = 1.0f;
+    colony.stress_level = 0.95f;
+    uint32_t id = world_add_colony(world, colony);
+    ASSERT_NE(id, 0);
 
-    Colony* emitter = world_get_colony(world, emitter_id);
-    Colony* barrier = world_get_colony(world, barrier_id);
-    if (!emitter || !barrier) {
-        world_destroy(world);
-        return 0.0f;
-    }
-    emitter->genome.toxin_production = 1.0f;
+    fill_colony_rect(world, id, 4, 4, 2, 2);
 
-    for (int y = 0; y < world->height; y++) {
-        Cell* emitter_cell = world_get_cell(world, 10, y);
-        emitter_cell->colony_id = emitter_id;
-        emitter_cell->is_border = true;
-        emitter->cell_count++;
+    Colony* stored = world_get_colony(world, id);
+    ASSERT_NOT_NULL(stored);
+    stored->cell_count = 4;
 
-        for (int x = 28; x <= 33; x++) {
-            Cell* barrier_cell = world_get_cell(world, x, y);
-            barrier_cell->colony_id = barrier_id;
-            barrier_cell->is_border = false;
-            barrier->cell_count++;
+    for (int y = 4; y < 6; y++) {
+        for (int x = 4; x < 6; x++) {
+            int idx = y * world->width + x;
+            world->nutrients[idx] = 0.05f;
+            world->toxins[idx] = 0.35f;
         }
     }
 
-    for (int t = 0; t < 120; t++) {
-        simulation_resolve_combat(world);
-    }
+    simulation_update_colony_dynamics(world);
 
-    float weighted_sum = 0.0f;
-    float total_mass = 0.0f;
-    for (int x = 34; x < world->width; x++) {
-        for (int y = 0; y < world->height; y++) {
-            float v = world->toxins[y * world->width + x];
-            weighted_sum += v * (float)(x - 33);
-            total_mass += v;
-        }
-    }
+    ASSERT_EQ(stored->state, COLONY_STATE_DORMANT);
+    ASSERT_TRUE(stored->is_dormant);
+    ASSERT_GT(stored->biofilm_strength, 0.0f);
+    ASSERT_GT(fabsf(stored->drift_x) + fabsf(stored->drift_y), 0.0f);
+    ASSERT_EQ(stored->age, 1);
 
     world_destroy(world);
-    return total_mass <= 1e-6f ? 0.0f : (weighted_sum / total_mass);
 }
 
-TEST(higher_eps_reduces_signal_penetration_depth) {
-    TransportModelParams previous;
-    simulation_get_transport_params(&previous);
+TEST(behavior_graph_distinguishes_aggressive_and_cooperative_colonies) {
+    World* world = world_create(12, 8);
+    ASSERT_NOT_NULL(world);
 
-    TransportModelParams params = previous;
-    params.signal_neighbor_transfer = 0.20f;
-    params.signal_decay = 0.01f;
-    params.eps_attenuation = 1.0f;
-    params.eps_exponent = 2.0f;
-    params.min_relative_diffusivity = 0.02f;
-    simulation_set_transport_params(&params);
+    Colony aggressive = create_test_colony();
+    aggressive.genome.aggression = 1.0f;
+    aggressive.genome.toxin_production = 1.0f;
+    aggressive.genome.defense_priority = 0.2f;
+    aggressive.genome.merge_affinity = 0.0f;
+    aggressive.genome.signal_emission = 0.1f;
+    for (int i = 0; i < COLONY_SENSOR_COUNT; i++) aggressive.genome.behavior_sensor_gains[i] = 1.0f;
+    aggressive.genome.behavior_drive_biases[COLONY_DRIVE_HOSTILITY] = 1.0f;
+    aggressive.genome.behavior_action_biases[COLONY_ACTION_ATTACK] = 1.0f;
+    aggressive.genome.behavior_action_weights[COLONY_ACTION_ATTACK][COLONY_DRIVE_HOSTILITY] = 1.0f;
+    uint32_t aggressive_id = world_add_colony(world, aggressive);
+    ASSERT_NE(aggressive_id, 0);
 
-    float low_eps_depth = measure_signal_penetration_depth(0.0f);
-    float high_eps_depth = measure_signal_penetration_depth(1.0f);
+    Colony cooperative = create_test_colony();
+    cooperative.genome.aggression = 0.1f;
+    cooperative.genome.toxin_production = 0.0f;
+    cooperative.genome.defense_priority = 0.4f;
+    cooperative.genome.merge_affinity = 1.0f;
+    cooperative.genome.signal_emission = 1.0f;
+    cooperative.genome.signal_sensitivity = 1.0f;
+    cooperative.genome.social_factor = 1.0f;
+    for (int i = 0; i < COLONY_SENSOR_COUNT; i++) cooperative.genome.behavior_sensor_gains[i] = 1.0f;
+    cooperative.genome.behavior_drive_biases[COLONY_DRIVE_COHESION] = 1.0f;
+    cooperative.genome.behavior_action_biases[COLONY_ACTION_SIGNAL] = 1.0f;
+    cooperative.genome.behavior_action_weights[COLONY_ACTION_SIGNAL][COLONY_DRIVE_COHESION] = 1.0f;
+    uint32_t cooperative_id = world_add_colony(world, cooperative);
+    ASSERT_NE(cooperative_id, 0);
 
-    simulation_set_transport_params(&previous);
+    fill_colony_rect(world, aggressive_id, 3, 3, 2, 2);
+    fill_colony_rect(world, cooperative_id, 5, 3, 2, 2);
 
-    ASSERT_GT(low_eps_depth, 0.0f);
-    ASSERT_LT(high_eps_depth, low_eps_depth);
+    Colony* aggressive_colony = world_get_colony(world, aggressive_id);
+    Colony* cooperative_colony = world_get_colony(world, cooperative_id);
+    ASSERT_NOT_NULL(aggressive_colony);
+    ASSERT_NOT_NULL(cooperative_colony);
+    aggressive_colony->cell_count = 4;
+    cooperative_colony->cell_count = 4;
+
+    simulation_update_colony_dynamics(world);
+
+    ASSERT_GT(aggressive_colony->behavior_actions[COLONY_ACTION_ATTACK],
+              cooperative_colony->behavior_actions[COLONY_ACTION_ATTACK]);
+    ASSERT_GT(aggressive_colony->behavior_drives[COLONY_DRIVE_HOSTILITY],
+              cooperative_colony->behavior_drives[COLONY_DRIVE_HOSTILITY]);
+    ASSERT_TRUE(aggressive_colony->behavior_mode == COLONY_BEHAVIOR_MODE_RAIDING ||
+                aggressive_colony->behavior_mode == COLONY_BEHAVIOR_MODE_FORTIFYING);
+    ASSERT_GT(cooperative_colony->behavior_actions[COLONY_ACTION_SIGNAL],
+              cooperative_colony->behavior_actions[COLONY_ACTION_ATTACK]);
+    ASSERT_TRUE(cooperative_colony->dominant_drive != COLONY_DRIVE_HOSTILITY);
+    ASSERT_TRUE(aggressive_colony->focus_direction >= 0 && aggressive_colony->focus_direction < DIR_COUNT);
+
+    world_destroy(world);
 }
 
-TEST(higher_eps_reduces_toxin_penetration_depth) {
-    TransportModelParams previous;
-    simulation_get_transport_params(&previous);
+TEST(horizontal_gene_transfer_occurs_under_contact) {
+    World* world = world_create(10, 10);
+    ASSERT_NOT_NULL(world);
 
-    TransportModelParams params = previous;
-    params.toxin_diffusivity = 0.22f;
-    params.eps_attenuation = 1.0f;
-    params.eps_exponent = 2.0f;
-    params.min_relative_diffusivity = 0.02f;
-    simulation_set_transport_params(&params);
+    Colony recipient = create_test_colony();
+    recipient.genome.gene_transfer_rate = 1.0f;
+    recipient.genome.toxin_resistance = 0.0f;
+    recipient.stress_level = 0.95f;
+    uint32_t recipient_id = world_add_colony(world, recipient);
+    ASSERT_NE(recipient_id, 0);
 
-    float low_eps_depth = measure_toxin_penetration_depth(0.0f);
-    float high_eps_depth = measure_toxin_penetration_depth(1.0f);
+    Colony donor = create_test_colony();
+    donor.genome.gene_transfer_rate = 1.0f;
+    donor.genome.toxin_resistance = 1.0f;
+    donor.stress_level = 0.05f;
+    uint32_t donor_id = world_add_colony(world, donor);
+    ASSERT_NE(donor_id, 0);
 
-    simulation_set_transport_params(&previous);
+    fill_colony_rect(world, recipient_id, 3, 3, 1, 3);
+    fill_colony_rect(world, donor_id, 4, 3, 1, 3);
 
-    ASSERT_GT(low_eps_depth, 0.0f);
-    ASSERT_LT(high_eps_depth, low_eps_depth);
+    Colony* recipient_colony = world_get_colony(world, recipient_id);
+    Colony* donor_colony = world_get_colony(world, donor_id);
+    ASSERT_NOT_NULL(recipient_colony);
+    ASSERT_NOT_NULL(donor_colony);
+    recipient_colony->cell_count = 3;
+    donor_colony->cell_count = 3;
+
+    float before = recipient_colony->genome.toxin_resistance;
+    for (int i = 0; i < 200; i++) {
+        simulation_apply_horizontal_gene_transfer(world);
+        if (recipient_colony->genome.toxin_resistance > before) {
+            break;
+        }
+    }
+
+    ASSERT_GT(recipient_colony->genome.toxin_resistance, before);
+
+    world_destroy(world);
+}
+
+TEST(atomic_tick_updates_behavior_state) {
+    World* world = world_create(12, 12);
+    ASSERT_NOT_NULL(world);
+
+    Colony colony = create_test_colony();
+    colony.genome.spread_rate = 0.0f;
+    colony.genome.signal_emission = 1.0f;
+    colony.genome.signal_sensitivity = 1.0f;
+    colony.genome.alarm_threshold = 0.1f;
+    colony.genome.dormancy_threshold = 0.7f;
+    colony.genome.sporulation_threshold = 0.4f;
+    colony.stress_level = 0.9f;
+    uint32_t id = world_add_colony(world, colony);
+    ASSERT_NE(id, 0);
+
+    Cell* cell = world_get_cell(world, 5, 5);
+    ASSERT_NOT_NULL(cell);
+    cell->colony_id = id;
+    cell->age = 1;
+
+    Colony* stored = world_get_colony(world, id);
+    ASSERT_NOT_NULL(stored);
+    stored->cell_count = 1;
+    world->nutrients[5 * world->width + 5] = 0.05f;
+
+    ThreadPool* pool = threadpool_create(1);
+    ASSERT_NOT_NULL(pool);
+    AtomicWorld* aworld = atomic_world_create(world, pool, 1);
+    ASSERT_NOT_NULL(aworld);
+
+    atomic_tick(aworld);
+
+    int idx = 5 * world->width + 5;
+    ASSERT_GT(world->signals[idx], 0.01f);
+    ASSERT_TRUE(stored->state == COLONY_STATE_STRESSED || stored->state == COLONY_STATE_DORMANT);
+    ASSERT_GT(stored->age, 0);
+
+    atomic_world_destroy(aworld);
+    threadpool_destroy(pool);
+    world_destroy(world);
+}
+
+TEST(atomic_tick_runs_graph_shaped_combat_maintenance) {
+    rng_seed(31337);
+
+    World* world = world_create(20, 10);
+    ASSERT_NOT_NULL(world);
+
+    Colony attacker = create_test_colony();
+    attacker.genome.spread_rate = 0.0f;
+    attacker.genome.aggression = 1.0f;
+    attacker.genome.toxin_production = 1.0f;
+    attacker.genome.defense_priority = 0.1f;
+    for (int i = 0; i < COLONY_SENSOR_COUNT; i++) attacker.genome.behavior_sensor_gains[i] = 1.0f;
+    attacker.genome.behavior_drive_biases[COLONY_DRIVE_HOSTILITY] = 1.0f;
+    attacker.genome.behavior_action_biases[COLONY_ACTION_ATTACK] = 1.0f;
+    attacker.genome.behavior_action_weights[COLONY_ACTION_ATTACK][COLONY_DRIVE_HOSTILITY] = 1.0f;
+    uint32_t attacker_id = world_add_colony(world, attacker);
+    ASSERT_NE(attacker_id, 0);
+
+    Colony defender = create_test_colony();
+    defender.genome.spread_rate = 0.0f;
+    defender.genome.aggression = 0.0f;
+    defender.genome.resilience = 0.4f;
+    defender.genome.defense_priority = 0.0f;
+    uint32_t defender_id = world_add_colony(world, defender);
+    ASSERT_NE(defender_id, 0);
+
+    fill_colony_rect(world, attacker_id, 3, 2, 6, 6);
+    fill_colony_rect(world, defender_id, 9, 2, 6, 6);
+
+    Colony* attacker_colony = world_get_colony(world, attacker_id);
+    Colony* defender_colony = world_get_colony(world, defender_id);
+    ASSERT_NOT_NULL(attacker_colony);
+    ASSERT_NOT_NULL(defender_colony);
+    attacker_colony->cell_count = 36;
+    defender_colony->cell_count = 36;
+
+    for (int y = 2; y < 8; y++) {
+        for (int x = 3; x < 15; x++) {
+            int idx = y * world->width + x;
+            world->nutrients[idx] = 1.0f;
+            Cell* cell = &world->cells[idx];
+            if (cell->colony_id == attacker_id) {
+                cell->is_border = (x == 8);
+            } else if (cell->colony_id == defender_id) {
+                cell->is_border = (x == 9);
+            }
+        }
+    }
+
+    ThreadPool* pool = threadpool_create(1);
+    ASSERT_NOT_NULL(pool);
+    AtomicWorld* aworld = atomic_world_create(world, pool, 1);
+    ASSERT_NOT_NULL(aworld);
+    aworld->serial_interval = 1;
+
+    int changed = 0;
+    for (int i = 0; i < 20; i++) {
+        atomic_tick(aworld);
+        if (attacker_colony->cell_count != 36 || defender_colony->cell_count != 36) {
+            changed = 1;
+            break;
+        }
+    }
+
+    ASSERT_TRUE(changed);
+
+    atomic_world_destroy(aworld);
+    threadpool_destroy(pool);
+    world_destroy(world);
 }
 // Run Tests
 // ============================================================================
@@ -2078,27 +2007,22 @@ int run_simulation_logic_tests(void) {
     
     printf("\nMulti-threaded Stress Tests:\n");
     RUN_TEST(atomic_tick_concurrent_stability);
-    RUN_TEST(atomic_parallel_rng_reproducible_across_runs);
-    RUN_TEST(atomic_parallel_rng_reproducible_across_thread_counts);
     RUN_TEST(rand_thread_safety_issue);
     RUN_TEST(cell_count_concurrent_consistency);
+
+    printf("\nBehavior Dynamics Tests:\n");
+    RUN_TEST(behavior_layers_emit_signals_and_alarms);
+    RUN_TEST(colony_dynamics_enters_dormancy_under_stress);
+    RUN_TEST(behavior_graph_distinguishes_aggressive_and_cooperative_colonies);
+    RUN_TEST(horizontal_gene_transfer_occurs_under_contact);
+    RUN_TEST(atomic_tick_updates_behavior_state);
+    RUN_TEST(atomic_tick_runs_graph_shaped_combat_maintenance);
     
     printf("\nVisual Stability Tests:\n");
     RUN_TEST(visual_radius_stability);
     RUN_TEST(centroid_stability);
     RUN_TEST(shape_function_deterministic);
     RUN_TEST(shape_function_smooth_with_phase);
-
-    printf("\nPersister Switching Tests:\n");
-    RUN_TEST(persister_switch_enters_under_high_stress);
-    RUN_TEST(persister_switch_exits_under_low_stress);
-    RUN_TEST(persister_switch_hysteresis_holds_mid_stress);
-    RUN_TEST(dormancy_forces_persister_state);
-    RUN_TEST(persister_activity_modifiers_reduce_growth_pressure);
-
-    printf("\nEPS Transport Tests:\n");
-    RUN_TEST(higher_eps_reduces_signal_penetration_depth);
-    RUN_TEST(higher_eps_reduces_toxin_penetration_depth);
     
     printf("\n--- Simulation Logic Results ---\n");
     printf("Passed: %d\n", tests_passed);

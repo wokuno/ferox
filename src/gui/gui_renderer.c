@@ -159,8 +159,8 @@ GuiRenderer* gui_renderer_create(const char* title) {
     // Initialize state
     renderer->window_width = GUI_DEFAULT_WIDTH;
     renderer->window_height = GUI_DEFAULT_HEIGHT;
-    renderer->view_x = 50.0f;  // Center of default 100x100 world
-    renderer->view_y = 50.0f;
+    renderer->view_x = 200.0f;  // Center of default 400x200 world
+    renderer->view_y = 100.0f;
     renderer->zoom = 6.0f;     // 6 pixels per world unit
     renderer->show_grid = false;
     renderer->show_info_panel = true;
@@ -211,16 +211,15 @@ void gui_renderer_world_to_screen(GuiRenderer* renderer, float wx, float wy, int
 void gui_renderer_screen_to_world(GuiRenderer* renderer, int sx, int sy, float* wx, float* wy) {
     float cx = renderer->window_width / 2.0f;
     float cy = renderer->window_height / 2.0f;
-    float zoom = renderer->zoom > 0.001f ? renderer->zoom : 1.0f;
     
-    *wx = renderer->view_x + (sx - cx) / zoom;
-    *wy = renderer->view_y + (sy - cy) / zoom;
+    *wx = renderer->view_x + (sx - cx) / renderer->zoom;
+    *wy = renderer->view_y + (sy - cy) / renderer->zoom;
 }
 
 void gui_renderer_set_zoom(GuiRenderer* renderer, float zoom) {
     if (!renderer) return;
     renderer->zoom = zoom;
-    if (renderer->zoom < 0.1f) renderer->zoom = 0.1f;
+    if (renderer->zoom < 1.0f) renderer->zoom = 1.0f;
     if (renderer->zoom > 50.0f) renderer->zoom = 50.0f;
 }
 
@@ -324,8 +323,37 @@ static void draw_aa_line(SDL_Renderer* r, float x1, float y1, float x2, float y2
     }
 }
 
+static const ProtoColony* gui_renderer_find_colony_by_id(const ProtoWorld* world, uint16_t colony_id) {
+    if (!world || colony_id == 0 || world->colony_count == 0) {
+        return NULL;
+    }
+
+    int left = 0;
+    int right = (int)world->colony_count - 1;
+    while (left <= right) {
+        int mid = left + (right - left) / 2;
+        uint32_t mid_id = world->colonies[mid].id;
+        if (mid_id == colony_id) {
+            return world->colonies[mid].alive ? &world->colonies[mid] : NULL;
+        }
+        if (mid_id < colony_id) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+
+    for (uint32_t i = 0; i < world->colony_count; i++) {
+        if (world->colonies[i].id == colony_id && world->colonies[i].alive) {
+            return &world->colonies[i];
+        }
+    }
+
+    return NULL;
+}
+
 // Draw a single colony with organic shape
-void gui_renderer_draw_colony(GuiRenderer* renderer, const proto_colony* colony, bool selected) {
+void gui_renderer_draw_colony(GuiRenderer* renderer, const ProtoColony* colony, bool selected) {
     if (!renderer || !colony || !colony->alive) return;
     
     SDL_Renderer* r = renderer->renderer;
@@ -556,7 +584,7 @@ void gui_renderer_draw_petri_dish(GuiRenderer* renderer, int world_width, int wo
     SDL_RenderDrawLine(r, x2, y2, x2, y2 - corner_size);
 }
 
-void gui_renderer_draw_world(GuiRenderer* renderer, const proto_world* world) {
+void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
     if (!renderer || !world) return;
     
     SDL_Renderer* r = renderer->renderer;
@@ -583,6 +611,8 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const proto_world* world) {
     if (end_x > (int)world->width) end_x = (int)world->width;
     if (end_y > (int)world->height) end_y = (int)world->height;
     
+    float cell_size_pixels = renderer->zoom;
+    
     // Use grid-based rendering if grid data is available
     if (world->has_grid && world->grid && world->grid_size > 0) {
         // Direct cell rendering from grid data
@@ -595,13 +625,7 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const proto_world* world) {
                 if (colony_id == 0) continue;  // Empty cell
                 
                 // Find colony data
-                const proto_colony* colony = NULL;
-                for (uint32_t i = 0; i < world->colony_count; i++) {
-                    if (world->colonies[i].id == colony_id && world->colonies[i].alive) {
-                        colony = &world->colonies[i];
-                        break;
-                    }
-                }
+                const ProtoColony* colony = gui_renderer_find_colony_by_id(world, colony_id);
                 if (!colony) continue;
                 
                 // Check if this is a border cell (adjacent to empty or different colony)
@@ -616,24 +640,19 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const proto_world* world) {
                         break;
                     }
                     int nidx = ny * (int)world->width + nx;
-                    if (nidx < 0 || nidx >= (int)world->grid_size) {
-                        is_border = true;
-                        break;
-                    }
                     if (world->grid[nidx] != colony_id) {
                         is_border = true;
                         break;
                     }
                 }
                 
-                // Get screen position of this cell and next cell to ensure seamless tiling
-                int sx, sy, sx_next, sy_next;
+                // Get screen position
+                int sx, sy;
                 gui_renderer_world_to_screen(renderer, (float)wx, (float)wy, &sx, &sy);
-                gui_renderer_world_to_screen(renderer, (float)(wx + 1), (float)(wy + 1), &sx_next, &sy_next);
                 
-                // Cell size spans exactly to the next cell — no gaps
-                int cell_w = sx_next - sx;
-                int cell_h = sy_next - sy;
+                // Calculate cell size
+                int cell_w = (int)(cell_size_pixels + 0.5f);
+                int cell_h = (int)(cell_size_pixels + 0.5f);
                 if (cell_w < 1) cell_w = 1;
                 if (cell_h < 1) cell_h = 1;
                 
@@ -665,7 +684,7 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const proto_world* world) {
     } else {
         // Fallback: simple colony center rendering (no grid data)
         for (uint32_t i = 0; i < world->colony_count; i++) {
-            const proto_colony* colony = &world->colonies[i];
+            const ProtoColony* colony = &world->colonies[i];
             if (!colony->alive) continue;
             
             int cx, cy;
@@ -681,10 +700,121 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const proto_world* world) {
     }
 }
 
-void gui_renderer_draw_colony_info(GuiRenderer* renderer, const proto_colony* colony) {
+static const char* gui_renderer_state_name(uint8_t state) {
+    switch (state) {
+        case 1: return "Dormant";
+        case 2: return "Stressed";
+        case 0:
+        default:
+            return "Normal";
+    }
+}
+
+static const char* gui_renderer_behavior_mode_name(uint8_t mode) {
+    switch (mode) {
+        case PROTO_COLONY_BEHAVIOR_MODE_EXPANDING: return "Expanding";
+        case PROTO_COLONY_BEHAVIOR_MODE_RAIDING: return "Raiding";
+        case PROTO_COLONY_BEHAVIOR_MODE_FORTIFYING: return "Fortifying";
+        case PROTO_COLONY_BEHAVIOR_MODE_COOPERATING: return "Cooperating";
+        case PROTO_COLONY_BEHAVIOR_MODE_SURVIVAL: return "Survival";
+        case PROTO_COLONY_BEHAVIOR_MODE_DORMANT: return "Dormant";
+        case PROTO_COLONY_BEHAVIOR_MODE_BALANCED:
+        default:
+            return "Balanced";
+    }
+}
+
+static const char* gui_renderer_direction_name(int dir) {
+    static const char* names[PROTO_DIRECTION_COUNT] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+    return (dir >= 0 && dir < PROTO_DIRECTION_COUNT) ? names[dir] : "--";
+}
+
+static const char* gui_renderer_sensor_name(uint8_t sensor) {
+    switch (sensor) {
+        case PROTO_COLONY_SENSOR_NUTRIENT: return "Nutrient";
+        case PROTO_COLONY_SENSOR_TOXIN: return "Toxin";
+        case PROTO_COLONY_SENSOR_SIGNAL: return "Signal";
+        case PROTO_COLONY_SENSOR_ALARM: return "Alarm";
+        case PROTO_COLONY_SENSOR_FRONTIER: return "Frontier";
+        case PROTO_COLONY_SENSOR_PRESSURE: return "Pressure";
+        case PROTO_COLONY_SENSOR_MOMENTUM: return "Momentum";
+        case PROTO_COLONY_SENSOR_GROWTH: return "Growth";
+        default: return "Unknown";
+    }
+}
+
+static const char* gui_renderer_drive_name(uint8_t drive) {
+    switch (drive) {
+        case PROTO_COLONY_DRIVE_GROWTH: return "Growth";
+        case PROTO_COLONY_DRIVE_CAUTION: return "Caution";
+        case PROTO_COLONY_DRIVE_HOSTILITY: return "Hostility";
+        case PROTO_COLONY_DRIVE_COHESION: return "Cohesion";
+        case PROTO_COLONY_DRIVE_EXPLORATION: return "Explore";
+        case PROTO_COLONY_DRIVE_PRESERVATION: return "Preserve";
+        default: return "Unknown";
+    }
+}
+
+static const char* gui_renderer_action_name(uint8_t action) {
+    switch (action) {
+        case PROTO_COLONY_ACTION_EXPAND: return "Expand";
+        case PROTO_COLONY_ACTION_ATTACK: return "Attack";
+        case PROTO_COLONY_ACTION_DEFEND: return "Defend";
+        case PROTO_COLONY_ACTION_SIGNAL: return "Signal";
+        case PROTO_COLONY_ACTION_TRANSFER: return "Transfer";
+        case PROTO_COLONY_ACTION_DORMANCY: return "Dormant";
+        case PROTO_COLONY_ACTION_MOTILITY: return "Motility";
+        default: return "Unknown";
+    }
+}
+
+static float gui_renderer_action_value(const ProtoColonyDetail* detail, uint8_t action) {
+    switch (action) {
+        case PROTO_COLONY_ACTION_EXPAND: return detail->action_expand;
+        case PROTO_COLONY_ACTION_ATTACK: return detail->action_attack;
+        case PROTO_COLONY_ACTION_DEFEND: return detail->action_defend;
+        case PROTO_COLONY_ACTION_SIGNAL: return detail->action_signal;
+        case PROTO_COLONY_ACTION_TRANSFER: return detail->action_transfer;
+        case PROTO_COLONY_ACTION_DORMANCY: return detail->action_dormancy;
+        case PROTO_COLONY_ACTION_MOTILITY: return detail->action_motility;
+        default: return 0.0f;
+    }
+}
+
+static void gui_renderer_pick_top_actions(const ProtoColonyDetail* detail,
+                                          uint8_t* first,
+                                          uint8_t* second,
+                                          uint8_t* third) {
+    uint8_t order[PROTO_COLONY_ACTION_MOTILITY + 1] = {
+        PROTO_COLONY_ACTION_EXPAND,
+        PROTO_COLONY_ACTION_ATTACK,
+        PROTO_COLONY_ACTION_DEFEND,
+        PROTO_COLONY_ACTION_SIGNAL,
+        PROTO_COLONY_ACTION_TRANSFER,
+        PROTO_COLONY_ACTION_DORMANCY,
+        PROTO_COLONY_ACTION_MOTILITY,
+    };
+
+    for (int i = 0; i < 7; i++) {
+        for (int j = i + 1; j < 7; j++) {
+            if (gui_renderer_action_value(detail, order[j]) > gui_renderer_action_value(detail, order[i])) {
+                uint8_t tmp = order[i];
+                order[i] = order[j];
+                order[j] = tmp;
+            }
+        }
+    }
+
+    if (first) *first = order[0];
+    if (second) *second = order[1];
+    if (third) *third = order[2];
+}
+
+void gui_renderer_draw_colony_info(GuiRenderer* renderer, const ProtoColony* colony, const ProtoColonyDetail* detail) {
     if (!renderer || !renderer->show_info_panel) return;
     
     SDL_Renderer* r = renderer->renderer;
+    const bool has_detail = detail && colony && detail->base.id == colony->id && detail->base.alive;
     
     int panel_x = renderer->window_width - INFO_PANEL_WIDTH - INFO_PANEL_MARGIN;
     int panel_y = INFO_PANEL_MARGIN;
@@ -758,14 +888,14 @@ void gui_renderer_draw_colony_info(GuiRenderer* renderer, const proto_colony* co
     snprintf(pop_buf, sizeof(pop_buf), "%d / %d", colony->population, colony->max_population);
     gui_renderer_draw_text(renderer, panel_x + 20, bar_y + 20, pop_buf, 180, 180, 200);
     
-    // Growth indicator
+    // Spread indicator
     int growth_y = panel_y + 140;
-    gui_renderer_draw_text(renderer, panel_x + 10, growth_y - 10, "Growth:", 150, 160, 180);
+    gui_renderer_draw_text(renderer, panel_x + 10, growth_y - 10, "Spread:", 150, 160, 180);
     
     SDL_SetRenderDrawColor(r, 100, 100, 120, 255);
     SDL_RenderDrawLine(r, panel_x + 20, growth_y + 7, panel_x + INFO_PANEL_WIDTH - 20, growth_y + 7);
     
-    // Growth arrow
+    // Spread arrow
     if (colony->growth_rate > 0) {
         SDL_SetRenderDrawColor(r, 100, 200, 100, 255);  // Green for positive
     } else if (colony->growth_rate < 0) {
@@ -786,6 +916,123 @@ void gui_renderer_draw_colony_info(GuiRenderer* renderer, const proto_colony* co
         SDL_RenderDrawLine(r, arrow_x, growth_y + 2, arrow_x, growth_y + 2 + arrow_size);
         SDL_RenderDrawLine(r, arrow_x - 5, growth_y - 3 + arrow_size, arrow_x, growth_y + 2 + arrow_size);
         SDL_RenderDrawLine(r, arrow_x + 5, growth_y - 3 + arrow_size, arrow_x, growth_y + 2 + arrow_size);
+    }
+
+    if (has_detail) {
+        char buf[64];
+        int detail_y = panel_y + 180;
+        uint8_t top_action = 0;
+        uint8_t second_action = 0;
+        uint8_t third_action = 0;
+        gui_renderer_pick_top_actions(detail, &top_action, &second_action, &third_action);
+
+        snprintf(buf, sizeof(buf), "State: %s%s",
+                 gui_renderer_state_name(detail->state),
+                 (detail->flags & COLONY_DETAIL_FLAG_DORMANT) ? " (spore)" : "");
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y, buf, 180, 190, 210);
+
+        snprintf(buf, sizeof(buf), "Mode: %s %s",
+                 gui_renderer_behavior_mode_name(detail->behavior_mode),
+                 gui_renderer_direction_name(detail->focus_direction));
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 18, buf, 180, 190, 210);
+
+        snprintf(buf, sizeof(buf), "Stress %.0f%%  Biofilm %.0f%%",
+                 detail->stress_level * 100.0f,
+                 detail->biofilm_strength * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 36, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "Signal %.0f%%  Age %u",
+                 detail->signal_strength * 100.0f,
+                 detail->age);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 54, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "Drift %+0.2f %+0.2f",
+                 detail->drift_x,
+                 detail->drift_y);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 72, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "Acts X%.0f A%.0f D%.0f S%.0f",
+                 detail->action_expand * 100.0f,
+                 detail->action_attack * 100.0f,
+                 detail->action_defend * 100.0f,
+                 detail->action_signal * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 90, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "More T%.0f Z%.0f M%.0f",
+                 detail->action_transfer * 100.0f,
+                 detail->action_dormancy * 100.0f,
+                 detail->action_motility * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 108, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "Top %s %.0f %s %.0f %s %.0f",
+                 gui_renderer_action_name(top_action),
+                 gui_renderer_action_value(detail, top_action) * 100.0f,
+                 gui_renderer_action_name(second_action),
+                 gui_renderer_action_value(detail, second_action) * 100.0f,
+                 gui_renderer_action_name(third_action),
+                 gui_renderer_action_value(detail, third_action) * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 126, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "Drive %s %.0f%%",
+                 gui_renderer_drive_name(detail->dominant_drive),
+                 detail->dominant_drive_value * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 144, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "2nd   %s %.0f%%",
+                 gui_renderer_drive_name(detail->secondary_drive),
+                 detail->secondary_drive_value * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 162, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "Sense %s %.0f%%",
+                 gui_renderer_sensor_name(detail->dominant_sensor),
+                 detail->dominant_sensor_value * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 180, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "2nd   %s %.0f%%",
+                 gui_renderer_sensor_name(detail->secondary_sensor),
+                 detail->secondary_sensor_value * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 198, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "S>D %s>%s %+0.2f",
+                 gui_renderer_sensor_name(detail->sensor_link_sensor),
+                 gui_renderer_drive_name(detail->sensor_link_drive),
+                 detail->sensor_link_value);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 216, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "D>A %s>%s %+0.2f",
+                 gui_renderer_drive_name(detail->action_link_drive),
+                 gui_renderer_action_name(detail->action_link_action),
+                 detail->action_link_value);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 234, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "2nd %s>%s %+0.2f",
+                 gui_renderer_sensor_name(detail->secondary_sensor_link_sensor),
+                 gui_renderer_drive_name(detail->secondary_sensor_link_drive),
+                 detail->secondary_sensor_link_value);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 252, buf, 160, 170, 190);
+
+        snprintf(buf, sizeof(buf), "2nd %s>%s %+0.2f",
+                 gui_renderer_drive_name(detail->secondary_action_link_drive),
+                 gui_renderer_action_name(detail->secondary_action_link_action),
+                 detail->secondary_action_link_value);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 270, buf, 160, 170, 190);
+
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 294, "CHARACTER", 180, 200, 255);
+
+        snprintf(buf, sizeof(buf), "Expand %.0f  Aggro %.0f",
+                 detail->trait_expansion * 100.0f,
+                 detail->trait_aggression * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 312, buf, 170, 180, 200);
+
+        snprintf(buf, sizeof(buf), "Resil  %.0f  Coop  %.0f",
+                 detail->trait_resilience * 100.0f,
+                 detail->trait_cooperation * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 330, buf, 170, 180, 200);
+
+        snprintf(buf, sizeof(buf), "Eff    %.0f  Learn %.0f",
+                 detail->trait_efficiency * 100.0f,
+                 detail->trait_learning * 100.0f);
+        gui_renderer_draw_text(renderer, panel_x + 10, detail_y + 348, buf, 170, 180, 200);
     }
 }
 

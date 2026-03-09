@@ -1598,6 +1598,120 @@ Initialize region bounds based on world dimensions.
 
 ---
 
+### hardware_profile.h
+
+Host detection and accelerator-aware runtime tuning helpers.
+
+#### Types
+
+```c
+typedef enum {
+    FEROX_ACCELERATOR_PREFERENCE_AUTO = 0,
+    FEROX_ACCELERATOR_PREFERENCE_CPU,
+    FEROX_ACCELERATOR_PREFERENCE_APPLE,
+    FEROX_ACCELERATOR_PREFERENCE_AMD
+} FeroxAcceleratorPreference;
+
+typedef enum {
+    FEROX_ACCELERATOR_BACKEND_CPU = 0,
+    FEROX_ACCELERATOR_BACKEND_APPLE,
+    FEROX_ACCELERATOR_BACKEND_AMD
+} FeroxAcceleratorBackend;
+
+typedef struct {
+    char os_name[32];
+    char arch_name[32];
+    char cpu_vendor[64];
+    char gpu_vendor[64];
+    int logical_cpus;
+    bool has_gpu;
+    bool has_compute_gpu;
+    bool has_apple_gpu;
+    bool has_amd_gpu;
+    bool unified_memory;
+} FeroxHardwareInfo;
+
+typedef struct {
+    FeroxAcceleratorPreference requested;
+    FeroxAcceleratorBackend selected;
+    int recommended_threads;
+    const char* threadpool_profile;
+    int atomic_serial_interval;
+    int atomic_frontier_dense_pct;
+    bool atomic_frontier_enabled;
+    bool gpu_offload_enabled;
+    const char* reason;
+} FeroxRuntimeTuning;
+```
+
+These types describe the probed host and the runtime defaults selected for the
+current run.
+
+---
+
+#### ferox_detect_hardware
+
+```c
+int ferox_detect_hardware(FeroxHardwareInfo* info);
+```
+
+Probe the local system and populate a `FeroxHardwareInfo` structure.
+
+**Parameters:**
+- `info` - Output structure to fill
+
+**Returns:** `0` on success, `-1` on invalid input
+
+---
+
+#### ferox_accelerator_preference_from_string
+
+```c
+bool ferox_accelerator_preference_from_string(const char* raw,
+                                              FeroxAcceleratorPreference* out);
+```
+
+Parse `auto`, `cpu`, `apple`, or `amd` into a runtime target preference.
+
+---
+
+#### ferox_runtime_tuning_init
+
+```c
+void ferox_runtime_tuning_init(const FeroxHardwareInfo* info,
+                               FeroxAcceleratorPreference requested,
+                               FeroxRuntimeTuning* tuning);
+```
+
+Resolve a requested target against detected hardware and produce the default
+threadpool profile plus atomic tuning values for that run.
+
+---
+
+#### ferox_apply_runtime_tuning_env
+
+```c
+void ferox_apply_runtime_tuning_env(const FeroxRuntimeTuning* tuning);
+```
+
+Apply selected defaults to the Ferox runtime env vars only when the caller has
+not already provided explicit overrides.
+
+---
+
+#### ferox_print_hardware_report
+
+```c
+void ferox_print_hardware_report(FILE* stream,
+                                 const FeroxHardwareInfo* info,
+                                 const FeroxRuntimeTuning* tuning);
+```
+
+Print a human-readable report showing detected hardware, selected target, and
+effective default tuning.
+
+---
+
 ### server.h
 
 Server core functionality.

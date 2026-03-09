@@ -30,14 +30,12 @@ static void choose_color(const World* world, uint32_t colony_id, uint8_t* r, uin
         return;
     }
 
-    if (colony_id < world->colony_by_id_capacity) {
-        Colony* colony = world->colony_by_id[colony_id];
-        if (colony && colony->active) {
-            *r = colony->color.r;
-            *g = colony->color.g;
-            *b = colony->color.b;
-            return;
-        }
+    Colony* colony = world_get_colony((World*)world, colony_id);
+    if (colony && colony->active) {
+        *r = colony->color.r;
+        *g = colony->color.g;
+        *b = colony->color.b;
+        return;
     }
 
     *r = 120;

@@ -8,7 +8,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <math.h>
-#include <arpa/inet.h>
 
 #include "../src/shared/protocol.h"
 
@@ -39,20 +38,14 @@ static int tests_failed = 0;
 #define ASSERT_GE(a, b) ASSERT((a) >= (b), #a " >= " #b)
 #define ASSERT_LE(a, b) ASSERT((a) <= (b), #a " <= " #b)
 #define ASSERT_NOT_NULL(ptr) ASSERT((ptr) != NULL, #ptr " is not NULL")
-#define ASSERT_FALSE(cond) ASSERT(!(cond), "Expected condition to be false: " #cond)
-
-static void write_u32_be(uint8_t* buffer, uint32_t value) {
-    uint32_t net = htonl(value);
-    memcpy(buffer, &net, sizeof(net));
-}
 
 // ============================================================================
 // Empty World Tests
 // ============================================================================
 
 TEST(empty_world_serialization) {
-    proto_world world;
-    memset(&world, 0, sizeof(proto_world));
+    ProtoWorld world;
+    memset(&world, 0, sizeof(ProtoWorld));
     world.width = 100;
     world.height = 100;
     world.tick = 0;
@@ -69,7 +62,7 @@ TEST(empty_world_serialization) {
     ASSERT(len > 0, "Buffer length should be > 0");
     
     // Deserialize and verify
-    proto_world deserialized;
+    ProtoWorld deserialized;
     result = protocol_deserialize_world_state(buffer, len, &deserialized);
     ASSERT_EQ(result, 0);
     ASSERT_EQ(deserialized.width, 100);
@@ -84,8 +77,8 @@ TEST(empty_world_serialization) {
 // ============================================================================
 
 TEST(world_with_max_colonies) {
-    proto_world world;
-    memset(&world, 0, sizeof(proto_world));
+    ProtoWorld world;
+    memset(&world, 0, sizeof(ProtoWorld));
     world.width = 200;
     world.height = 200;
     world.tick = 12345;
@@ -116,7 +109,7 @@ TEST(world_with_max_colonies) {
     ASSERT_NOT_NULL(buffer);
     
     // Deserialize
-    proto_world deserialized;
+    ProtoWorld deserialized;
     result = protocol_deserialize_world_state(buffer, len, &deserialized);
     ASSERT_EQ(result, 0);
     ASSERT_EQ(deserialized.colony_count, MAX_COLONIES);
@@ -129,8 +122,8 @@ TEST(world_with_max_colonies) {
 }
 
 TEST(world_with_1000_colonies_capped) {
-    proto_world world;
-    memset(&world, 0, sizeof(proto_world));
+    ProtoWorld world;
+    memset(&world, 0, sizeof(ProtoWorld));
     world.colony_count = MAX_COLONIES;  // Cap at max
     
     for (uint32_t i = 0; i < MAX_COLONIES; i++) {
@@ -144,7 +137,7 @@ TEST(world_with_1000_colonies_capped) {
     int result = protocol_serialize_world_state(&world, &buffer, &len);
     ASSERT_EQ(result, 0);
     
-    proto_world deserialized;
+    ProtoWorld deserialized;
     result = protocol_deserialize_world_state(buffer, len, &deserialized);
     ASSERT_EQ(result, 0);
     ASSERT_EQ(deserialized.colony_count, MAX_COLONIES);
@@ -221,8 +214,8 @@ TEST(header_all_message_types) {
 // ============================================================================
 
 TEST(zero_length_payload) {
-    proto_world world;
-    memset(&world, 0, sizeof(proto_world));
+    ProtoWorld world;
+    memset(&world, 0, sizeof(ProtoWorld));
     world.width = 10;
     world.height = 10;
     world.colony_count = 0;
@@ -240,8 +233,8 @@ TEST(zero_length_payload) {
 }
 
 TEST(partial_message_handling) {
-    proto_world world;
-    memset(&world, 0, sizeof(proto_world));
+    ProtoWorld world;
+    memset(&world, 0, sizeof(ProtoWorld));
     world.width = 50;
     world.height = 50;
     world.colony_count = 5;
@@ -258,91 +251,75 @@ TEST(partial_message_handling) {
     ASSERT_EQ(result, 0);
     
     // Try to deserialize with truncated buffer
-    proto_world partial;
+    ProtoWorld partial;
     result = protocol_deserialize_world_state(buffer, 10, &partial);  // Too short
     ASSERT_EQ(result, -1);  // Should fail
     
     free(buffer);
 }
 
-TEST(rejects_world_state_with_too_many_colonies) {
-    proto_world world;
-    memset(&world, 0, sizeof(proto_world));
-    world.width = 8;
-    world.height = 8;
+TEST(world_delta_grid_chunk_roundtrip) {
+    ProtoWorldDeltaGridChunk chunk;
+    proto_world_delta_grid_chunk_init(&chunk);
+    chunk.tick = 77;
+    chunk.width = 512;
+    chunk.height = 512;
+    chunk.total_cells = 512u * 512u;
+    chunk.start_index = 65536u;
+    chunk.cell_count = 1024u;
+    chunk.final_chunk = false;
+    chunk.cells = (uint16_t*)malloc((size_t)chunk.cell_count * sizeof(uint16_t));
+    ASSERT_NOT_NULL(chunk.cells);
+
+    for (uint32_t i = 0; i < chunk.cell_count; i++) {
+        chunk.cells[i] = (uint16_t)((i * 17u) & 0xFFFFu);
+    }
 
     uint8_t* buffer = NULL;
     size_t len = 0;
-
-    int result = protocol_serialize_world_state(&world, &buffer, &len);
+    int result = protocol_serialize_world_delta_grid_chunk(&chunk, &buffer, &len);
     ASSERT_EQ(result, 0);
-    ASSERT_GE(len, 26);
+    ASSERT_NOT_NULL(buffer);
 
-    write_u32_be(buffer + 12, MAX_COLONIES + 1);
+    ProtoWorldDeltaGridChunk decoded;
+    proto_world_delta_grid_chunk_init(&decoded);
+    result = protocol_deserialize_world_delta_grid_chunk(buffer, len, &decoded);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(decoded.tick, chunk.tick);
+    ASSERT_EQ(decoded.width, chunk.width);
+    ASSERT_EQ(decoded.height, chunk.height);
+    ASSERT_EQ(decoded.total_cells, chunk.total_cells);
+    ASSERT_EQ(decoded.start_index, chunk.start_index);
+    ASSERT_EQ(decoded.cell_count, chunk.cell_count);
+    ASSERT_EQ(decoded.final_chunk, chunk.final_chunk);
+    for (uint32_t i = 0; i < decoded.cell_count; i++) {
+        ASSERT_EQ(decoded.cells[i], chunk.cells[i]);
+    }
 
-    proto_world deserialized;
-    memset(&deserialized, 0, sizeof(proto_world));
-    result = protocol_deserialize_world_state(buffer, len, &deserialized);
+    free(buffer);
+    proto_world_delta_grid_chunk_free(&decoded);
+    proto_world_delta_grid_chunk_free(&chunk);
+}
+
+TEST(world_delta_grid_chunk_rejects_invalid_bounds) {
+    ProtoWorldDeltaGridChunk chunk;
+    proto_world_delta_grid_chunk_init(&chunk);
+    chunk.tick = 1;
+    chunk.width = 32;
+    chunk.height = 32;
+    chunk.total_cells = 32u * 32u;
+    chunk.start_index = chunk.total_cells - 4u;
+    chunk.cell_count = 8u;
+    chunk.final_chunk = true;
+    chunk.cells = (uint16_t*)calloc((size_t)chunk.cell_count, sizeof(uint16_t));
+    ASSERT_NOT_NULL(chunk.cells);
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_delta_grid_chunk(&chunk, &buffer, &len);
     ASSERT_EQ(result, -1);
 
-    free(buffer);
-}
-
-TEST(grid_metadata_out_of_bounds_disables_grid) {
-    proto_world world;
-    memset(&world, 0, sizeof(proto_world));
-    world.width = 5;
-    world.height = 5;
-
-    uint8_t* buffer = NULL;
-    size_t len = 0;
-
-    int result = protocol_serialize_world_state(&world, &buffer, &len);
-    ASSERT_EQ(result, 0);
-    ASSERT_GE(len, 26);
-
-    buffer[21] = 1;
-    write_u32_be(buffer + 22, 10);
-
-    proto_world deserialized;
-    memset(&deserialized, 0, sizeof(proto_world));
-    result = protocol_deserialize_world_state(buffer, len, &deserialized);
-    ASSERT_EQ(result, 0);
-    ASSERT_FALSE(deserialized.has_grid);
-    ASSERT_EQ(deserialized.grid, NULL);
-    ASSERT_EQ(deserialized.grid_size, 0);
-
-    free(buffer);
-}
-
-TEST(invalid_rle_payload_disables_grid) {
-    proto_world world;
-    memset(&world, 0, sizeof(proto_world));
-    world.width = 2;
-    world.height = 2;
-    world.has_grid = true;
-    world.grid_size = 4;
-
-    uint16_t grid_data[4] = {1, 1, 1, 1};
-    world.grid = grid_data;
-
-    uint8_t* buffer = NULL;
-    size_t len = 0;
-
-    int result = protocol_serialize_world_state(&world, &buffer, &len);
-    ASSERT_EQ(result, 0);
-    ASSERT(buffer[21] == 1, "Serialized world should include grid data");
-
-    write_u32_be(buffer + 26, 9999);
-
-    proto_world deserialized;
-    memset(&deserialized, 0, sizeof(proto_world));
-    result = protocol_deserialize_world_state(buffer, len, &deserialized);
-    ASSERT_EQ(result, 0);
-    ASSERT_FALSE(deserialized.has_grid);
-
-    proto_world_free(&deserialized);
-    free(buffer);
+    proto_world_delta_grid_chunk_free(&chunk);
 }
 
 // ============================================================================
@@ -350,8 +327,8 @@ TEST(invalid_rle_payload_disables_grid) {
 // ============================================================================
 
 TEST(maximum_length_colony_name) {
-    proto_colony colony;
-    memset(&colony, 0, sizeof(proto_colony));
+    ProtoColony colony;
+    memset(&colony, 0, sizeof(ProtoColony));
     colony.id = 1;
     
     // Fill name to max length
@@ -364,7 +341,7 @@ TEST(maximum_length_colony_name) {
     int size = protocol_serialize_colony(&colony, buffer);
     ASSERT(size > 0, "Serialization should succeed");
     
-    proto_colony deserialized;
+    ProtoColony deserialized;
     size = protocol_deserialize_colony(buffer, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     
@@ -372,8 +349,8 @@ TEST(maximum_length_colony_name) {
 }
 
 TEST(special_characters_in_names) {
-    proto_colony colony;
-    memset(&colony, 0, sizeof(proto_colony));
+    ProtoColony colony;
+    memset(&colony, 0, sizeof(ProtoColony));
     colony.id = 42;
     strncpy(colony.name, "Test!@#$%^&*()_+-=[]", MAX_COLONY_NAME - 1);
     colony.name[MAX_COLONY_NAME - 1] = '\0';
@@ -382,7 +359,7 @@ TEST(special_characters_in_names) {
     int size = protocol_serialize_colony(&colony, buffer);
     ASSERT(size > 0, "Serialization should succeed");
     
-    proto_colony deserialized;
+    ProtoColony deserialized;
     size = protocol_deserialize_colony(buffer, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     
@@ -390,8 +367,8 @@ TEST(special_characters_in_names) {
 }
 
 TEST(unicode_like_bytes_in_names) {
-    proto_colony colony;
-    memset(&colony, 0, sizeof(proto_colony));
+    ProtoColony colony;
+    memset(&colony, 0, sizeof(ProtoColony));
     colony.id = 1;
     
     // High byte values (would be UTF-8 multi-byte chars)
@@ -403,14 +380,14 @@ TEST(unicode_like_bytes_in_names) {
     int size = protocol_serialize_colony(&colony, buffer);
     ASSERT(size > 0, "Serialization should succeed");
     
-    proto_colony deserialized;
+    ProtoColony deserialized;
     size = protocol_deserialize_colony(buffer, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
 }
 
 TEST(empty_colony_name) {
-    proto_colony colony;
-    memset(&colony, 0, sizeof(proto_colony));
+    ProtoColony colony;
+    memset(&colony, 0, sizeof(ProtoColony));
     colony.id = 1;
     colony.name[0] = '\0';  // Empty name
     
@@ -418,7 +395,7 @@ TEST(empty_colony_name) {
     int size = protocol_serialize_colony(&colony, buffer);
     ASSERT(size > 0, "Serialization should succeed");
     
-    proto_colony deserialized;
+    ProtoColony deserialized;
     size = protocol_deserialize_colony(buffer, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     ASSERT_EQ(strlen(deserialized.name), 0);
@@ -440,7 +417,7 @@ TEST(all_command_types) {
         ASSERT(size > 0, "Command serialization should succeed");
         
         CommandType deserialized;
-        size = protocol_deserialize_command(buffer, (size_t)size, &deserialized, NULL);
+        size = protocol_deserialize_command(buffer, &deserialized, NULL);
         ASSERT(size > 0, "Command deserialization should succeed");
         ASSERT_EQ(deserialized, commands[i]);
     }
@@ -455,7 +432,7 @@ TEST(select_colony_command) {
     
     CommandType cmd;
     CommandSelectColony deserialized;
-    size = protocol_deserialize_command(buffer, (size_t)size, &cmd, &deserialized);
+    size = protocol_deserialize_command(buffer, &cmd, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     ASSERT_EQ(cmd, CMD_SELECT_COLONY);
     ASSERT_EQ(deserialized.colony_id, 12345);
@@ -475,37 +452,13 @@ TEST(spawn_colony_command) {
     
     CommandType cmd;
     CommandSpawnColony deserialized;
-    size = protocol_deserialize_command(buffer, (size_t)size, &cmd, &deserialized);
+    size = protocol_deserialize_command(buffer, &cmd, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     ASSERT_EQ(cmd, CMD_SPAWN_COLONY);
     
     // Float comparison with tolerance
     ASSERT(fabsf(deserialized.x - 123.456f) < 0.001f, "X should match");
     ASSERT(fabsf(deserialized.y - 789.012f) < 0.001f, "Y should match");
-}
-
-TEST(rejects_truncated_command_payload) {
-    uint8_t buffer[128];
-    CommandType cmd;
-
-    CommandSelectColony select_data = { .colony_id = 123 };
-    int select_size = protocol_serialize_command(CMD_SELECT_COLONY, &select_data, buffer);
-    ASSERT(select_size > 0, "Serialization should succeed");
-    ASSERT_EQ(protocol_deserialize_command(buffer, 4, &cmd, NULL), -1);
-
-    CommandSpawnColony spawn_data = { .x = 1.0f, .y = 2.0f };
-    strncpy(spawn_data.name, "tiny", MAX_COLONY_NAME);
-    int spawn_size = protocol_serialize_command(CMD_SPAWN_COLONY, &spawn_data, buffer);
-    ASSERT(spawn_size > 0, "Serialization should succeed");
-    ASSERT_EQ(protocol_deserialize_command(buffer, 8, &cmd, NULL), -1);
-}
-
-TEST(rejects_unknown_command_type) {
-    uint8_t buffer[4];
-    CommandType cmd;
-
-    write_u32_be(buffer, 999);
-    ASSERT_EQ(protocol_deserialize_command(buffer, sizeof(buffer), &cmd, NULL), -1);
 }
 
 // ============================================================================
@@ -528,7 +481,7 @@ TEST(null_inputs_handled) {
     ASSERT_EQ(protocol_serialize_colony(NULL, buffer), -1);
     ASSERT_EQ(protocol_serialize_colony(NULL, NULL), -1);
     
-    proto_colony colony;
+    ProtoColony colony;
     ASSERT_EQ(protocol_serialize_colony(&colony, NULL), -1);
     ASSERT_EQ(protocol_deserialize_colony(NULL, &colony), -1);
     ASSERT_EQ(protocol_deserialize_colony(buffer, NULL), -1);
@@ -538,7 +491,7 @@ TEST(null_inputs_handled) {
     size_t len;
     ASSERT_EQ(protocol_serialize_world_state(NULL, &buf_ptr, &len), -1);
     
-    proto_world world;
+    ProtoWorld world;
     ASSERT_EQ(protocol_serialize_world_state(&world, NULL, &len), -1);
     ASSERT_EQ(protocol_serialize_world_state(&world, &buf_ptr, NULL), -1);
     
@@ -551,8 +504,8 @@ TEST(null_inputs_handled) {
 // ============================================================================
 
 TEST(extreme_float_values) {
-    proto_colony colony;
-    memset(&colony, 0, sizeof(proto_colony));
+    ProtoColony colony;
+    memset(&colony, 0, sizeof(ProtoColony));
     colony.id = 1;
     strcpy(colony.name, "Test");
     colony.x = 999999.999f;
@@ -564,7 +517,7 @@ TEST(extreme_float_values) {
     int size = protocol_serialize_colony(&colony, buffer);
     ASSERT(size > 0, "Serialization should succeed");
     
-    proto_colony deserialized;
+    ProtoColony deserialized;
     size = protocol_deserialize_colony(buffer, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     
@@ -573,18 +526,118 @@ TEST(extreme_float_values) {
 }
 
 TEST(max_population_value) {
-    proto_colony colony;
-    memset(&colony, 0, sizeof(proto_colony));
+    ProtoColony colony;
+    memset(&colony, 0, sizeof(ProtoColony));
     colony.id = 1;
     colony.population = 0xFFFFFFFF;  // Max uint32
     
     uint8_t buffer[COLONY_SERIALIZED_SIZE];
     protocol_serialize_colony(&colony, buffer);
     
-    proto_colony deserialized;
+    ProtoColony deserialized;
     protocol_deserialize_colony(buffer, &deserialized);
     
     ASSERT_EQ(deserialized.population, 0xFFFFFFFF);
+}
+
+TEST(colony_detail_roundtrip) {
+    ProtoColonyDetail detail;
+    memset(&detail, 0, sizeof(detail));
+    detail.base.id = 7;
+    strcpy(detail.base.name, "Detailus smartii");
+    detail.base.x = 42.0f;
+    detail.base.y = 18.0f;
+    detail.base.radius = 6.5f;
+    detail.base.population = 123;
+    detail.base.max_population = 456;
+    detail.base.growth_rate = 0.33f;
+    detail.base.color_r = 10;
+    detail.base.color_g = 20;
+    detail.base.color_b = 30;
+    detail.base.alive = true;
+    detail.tick = 99;
+    detail.age = 12;
+    detail.parent_id = 3;
+    detail.state = 2;
+    detail.flags = COLONY_DETAIL_FLAG_DORMANT;
+    detail.stress_level = 0.75f;
+    detail.biofilm_strength = 0.25f;
+    detail.signal_strength = 0.60f;
+    detail.drift_x = 0.12f;
+    detail.drift_y = -0.34f;
+    detail.behavior_mode = PROTO_COLONY_BEHAVIOR_MODE_RAIDING;
+    detail.focus_direction = 2;
+    detail.dominant_sensor = PROTO_COLONY_SENSOR_PRESSURE;
+    detail.dominant_drive = PROTO_COLONY_DRIVE_HOSTILITY;
+    detail.secondary_sensor = PROTO_COLONY_SENSOR_FRONTIER;
+    detail.secondary_drive = PROTO_COLONY_DRIVE_GROWTH;
+    detail.sensor_link_sensor = PROTO_COLONY_SENSOR_PRESSURE;
+    detail.sensor_link_drive = PROTO_COLONY_DRIVE_HOSTILITY;
+    detail.action_link_drive = PROTO_COLONY_DRIVE_HOSTILITY;
+    detail.action_link_action = PROTO_COLONY_ACTION_ATTACK;
+    detail.secondary_sensor_link_sensor = PROTO_COLONY_SENSOR_ALARM;
+    detail.secondary_sensor_link_drive = PROTO_COLONY_DRIVE_CAUTION;
+    detail.secondary_action_link_drive = PROTO_COLONY_DRIVE_GROWTH;
+    detail.secondary_action_link_action = PROTO_COLONY_ACTION_EXPAND;
+    detail.dominant_sensor_value = 0.91f;
+    detail.dominant_drive_value = 0.78f;
+    detail.secondary_sensor_value = 0.66f;
+    detail.secondary_drive_value = 0.58f;
+    detail.sensor_link_value = 0.72f;
+    detail.action_link_value = 0.68f;
+    detail.secondary_sensor_link_value = 0.44f;
+    detail.secondary_action_link_value = 0.39f;
+    detail.action_expand = 0.45f;
+    detail.action_attack = 0.82f;
+    detail.action_defend = 0.30f;
+    detail.action_signal = 0.15f;
+    detail.action_transfer = 0.27f;
+    detail.action_dormancy = 0.11f;
+    detail.action_motility = 0.36f;
+    detail.trait_expansion = 0.80f;
+    detail.trait_aggression = 0.90f;
+    detail.trait_resilience = 0.70f;
+    detail.trait_cooperation = 0.40f;
+    detail.trait_efficiency = 0.55f;
+    detail.trait_learning = 0.65f;
+
+    uint8_t buffer[COLONY_DETAIL_SERIALIZED_SIZE];
+    int size = protocol_serialize_colony_detail(&detail, buffer);
+    ASSERT_EQ(size, COLONY_DETAIL_SERIALIZED_SIZE);
+
+    ProtoColonyDetail decoded;
+    memset(&decoded, 0, sizeof(decoded));
+    size = protocol_deserialize_colony_detail(buffer, &decoded);
+    ASSERT_EQ(size, COLONY_DETAIL_SERIALIZED_SIZE);
+    ASSERT_EQ(decoded.base.id, detail.base.id);
+    ASSERT_EQ(strcmp(decoded.base.name, detail.base.name), 0);
+    ASSERT_EQ(decoded.tick, detail.tick);
+    ASSERT_EQ(decoded.age, detail.age);
+    ASSERT_EQ(decoded.parent_id, detail.parent_id);
+    ASSERT_EQ(decoded.state, detail.state);
+    ASSERT_EQ(decoded.flags, detail.flags);
+    ASSERT_EQ(decoded.behavior_mode, detail.behavior_mode);
+    ASSERT_EQ(decoded.focus_direction, detail.focus_direction);
+    ASSERT_EQ(decoded.dominant_sensor, detail.dominant_sensor);
+    ASSERT_EQ(decoded.dominant_drive, detail.dominant_drive);
+    ASSERT_EQ(decoded.secondary_sensor, detail.secondary_sensor);
+    ASSERT_EQ(decoded.secondary_drive, detail.secondary_drive);
+    ASSERT_EQ(decoded.sensor_link_sensor, detail.sensor_link_sensor);
+    ASSERT_EQ(decoded.sensor_link_drive, detail.sensor_link_drive);
+    ASSERT_EQ(decoded.action_link_drive, detail.action_link_drive);
+    ASSERT_EQ(decoded.action_link_action, detail.action_link_action);
+    ASSERT_EQ(decoded.secondary_sensor_link_sensor, detail.secondary_sensor_link_sensor);
+    ASSERT_EQ(decoded.secondary_sensor_link_drive, detail.secondary_sensor_link_drive);
+    ASSERT_EQ(decoded.secondary_action_link_drive, detail.secondary_action_link_drive);
+    ASSERT_EQ(decoded.secondary_action_link_action, detail.secondary_action_link_action);
+    ASSERT(fabsf(decoded.stress_level - detail.stress_level) < 0.0001f, "stress roundtrip");
+    ASSERT(fabsf(decoded.dominant_drive_value - detail.dominant_drive_value) < 0.0001f, "drive roundtrip");
+    ASSERT(fabsf(decoded.secondary_sensor_value - detail.secondary_sensor_value) < 0.0001f, "sensor2 roundtrip");
+    ASSERT(fabsf(decoded.sensor_link_value - detail.sensor_link_value) < 0.0001f, "sensor link roundtrip");
+    ASSERT(fabsf(decoded.secondary_action_link_value - detail.secondary_action_link_value) < 0.0001f, "action link2 roundtrip");
+    ASSERT(fabsf(decoded.action_attack - detail.action_attack) < 0.0001f, "attack roundtrip");
+    ASSERT(fabsf(decoded.action_motility - detail.action_motility) < 0.0001f, "motility roundtrip");
+    ASSERT(fabsf(decoded.trait_learning - detail.trait_learning) < 0.0001f, "learning roundtrip");
 }
 
 // ============================================================================
@@ -612,9 +665,8 @@ int run_protocol_edge_tests(void) {
     printf("\nPayload Tests:\n");
     RUN_TEST(zero_length_payload);
     RUN_TEST(partial_message_handling);
-    RUN_TEST(rejects_world_state_with_too_many_colonies);
-    RUN_TEST(grid_metadata_out_of_bounds_disables_grid);
-    RUN_TEST(invalid_rle_payload_disables_grid);
+    RUN_TEST(world_delta_grid_chunk_roundtrip);
+    RUN_TEST(world_delta_grid_chunk_rejects_invalid_bounds);
     
     printf("\nColony Name Tests:\n");
     RUN_TEST(maximum_length_colony_name);
@@ -626,8 +678,6 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(all_command_types);
     RUN_TEST(select_colony_command);
     RUN_TEST(spawn_colony_command);
-    RUN_TEST(rejects_truncated_command_payload);
-    RUN_TEST(rejects_unknown_command_type);
     
     printf("\nNull Input Tests:\n");
     RUN_TEST(null_inputs_handled);
@@ -635,6 +685,7 @@ int run_protocol_edge_tests(void) {
     printf("\nBoundary Values:\n");
     RUN_TEST(extreme_float_values);
     RUN_TEST(max_population_value);
+    RUN_TEST(colony_detail_roundtrip);
     
     printf("\n--- Protocol Edge Results ---\n");
     printf("Passed: %d\n", tests_passed);

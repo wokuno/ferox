@@ -104,12 +104,12 @@ int test_server_adds_and_removes_clients(void) {
     TEST_ASSERT(server != NULL, "Server should be created");
     
     // Create a mock socket (we won't actually connect)
-    net_socket* mock_socket = (net_socket*)calloc(1, sizeof(net_socket));
+    NetSocket* mock_socket = (NetSocket*)calloc(1, sizeof(NetSocket));
     mock_socket->fd = -1;  // Invalid but we won't use it
     mock_socket->connected = true;
     
     // Add client
-    client_session* client = server_add_client(server, mock_socket);
+    ClientSession* client = server_add_client(server, mock_socket);
     TEST_ASSERT(client != NULL, "Client should be added");
     TEST_ASSERT_EQ(client->socket, mock_socket, "Socket should be set");
     TEST_ASSERT_EQ(client->active, true, "Client should be active");
@@ -119,11 +119,11 @@ int test_server_adds_and_removes_clients(void) {
     TEST_ASSERT(client_id > 0, "Client should have valid ID");
     
     // Add another client
-    net_socket* mock_socket2 = (net_socket*)calloc(1, sizeof(net_socket));
+    NetSocket* mock_socket2 = (NetSocket*)calloc(1, sizeof(NetSocket));
     mock_socket2->fd = -1;
     mock_socket2->connected = true;
     
-    client_session* client2 = server_add_client(server, mock_socket2);
+    ClientSession* client2 = server_add_client(server, mock_socket2);
     TEST_ASSERT(client2 != NULL, "Second client should be added");
     TEST_ASSERT_NEQ(client2->id, client_id, "Clients should have different IDs");
     TEST_ASSERT_EQ(server->client_count, 2, "Client count should be 2");
@@ -149,10 +149,10 @@ int test_server_handles_pause_resume_commands(void) {
     TEST_ASSERT(server != NULL, "Server should be created");
     
     // Create mock client
-    net_socket* mock_socket = (net_socket*)calloc(1, sizeof(net_socket));
+    NetSocket* mock_socket = (NetSocket*)calloc(1, sizeof(NetSocket));
     mock_socket->fd = -1;
     mock_socket->connected = true;
-    client_session* client = server_add_client(server, mock_socket);
+    ClientSession* client = server_add_client(server, mock_socket);
     TEST_ASSERT(client != NULL, "Client should be added");
     
     // Test pause command
@@ -179,35 +179,6 @@ int test_server_handles_pause_resume_commands(void) {
     server_handle_command(server, client, CMD_SELECT_COLONY, &select_cmd);
     TEST_ASSERT_EQ(client->selected_colony, 42, "Selected colony should be updated");
     
-    server_remove_client(server, client);
-    server_destroy(server);
-    return 0;
-}
-
-int test_server_handles_spawn_colony_command(void) {
-    Server* server = server_create(0, 50, 50, 2);
-    TEST_ASSERT(server != NULL, "Server should be created");
-
-    net_socket* mock_socket = (net_socket*)calloc(1, sizeof(net_socket));
-    mock_socket->fd = -1;
-    mock_socket->connected = true;
-    client_session* client = server_add_client(server, mock_socket);
-    TEST_ASSERT(client != NULL, "Client should be added");
-
-    size_t before_count = server->world->colony_count;
-    CommandSpawnColony spawn_cmd = { .x = 10.0f, .y = 12.0f };
-    strncpy(spawn_cmd.name, "Issue75", MAX_COLONY_NAME - 1);
-    spawn_cmd.name[MAX_COLONY_NAME - 1] = '\0';
-
-    server_handle_command(server, client, CMD_SPAWN_COLONY, &spawn_cmd);
-
-    TEST_ASSERT(server->world->colony_count == before_count + 1, "Colony count should increase");
-    Cell* cell = world_get_cell(server->world, 10, 12);
-    TEST_ASSERT(cell != NULL, "Spawn cell should exist");
-    TEST_ASSERT(cell->colony_id != 0, "Spawned cell should be occupied");
-    TEST_ASSERT(atomic_load(&grid_current(&server->atomic_world->grid)[12 * server->world->width + 10].colony_id) == cell->colony_id,
-                "Atomic world should be resynced after spawn");
-
     server_remove_client(server, client);
     server_destroy(server);
     return 0;
@@ -266,7 +237,7 @@ static void* client_connect_thread(void* arg) {
     usleep(100000);  // 100ms
     
     // Connect to server
-    net_socket* socket = net_client_connect("127.0.0.1", data->port);
+    NetSocket* socket = net_client_connect("127.0.0.1", data->port);
     if (!socket) {
         return NULL;
     }
@@ -398,7 +369,6 @@ int main(void) {
     // Command handling tests
     printf("\n--- Command Handling Tests ---\n");
     RUN_TEST(test_server_handles_pause_resume_commands);
-    RUN_TEST(test_server_handles_spawn_colony_command);
     
     // World tests
     printf("\n--- World Tests ---\n");

@@ -196,7 +196,7 @@ void renderer_draw_cell(Renderer* renderer, int x, int y, uint8_t r, uint8_t g, 
     renderer_reset_colors(renderer);
 }
 
-void renderer_draw_world(Renderer* renderer, const proto_world* world) {
+void renderer_draw_world(Renderer* renderer, const ProtoWorld* world) {
     if (!world) return;
     
     // Clear background of petri dish (dark gray for "agar")
@@ -208,91 +208,30 @@ void renderer_draw_world(Renderer* renderer, const proto_world* world) {
         }
     }
     renderer_reset_colors(renderer);
-
-    // Prefer exact cell rendering when grid data is available (matches GUI behavior)
-    if (world->has_grid && world->grid && world->grid_size > 0) {
-        renderer_draw_world_grid(renderer, world);
-    } else {
-        renderer_draw_world_centroid(renderer, world);
-    }
-}
-
-void renderer_draw_world_grid(Renderer* renderer, const proto_world* world) {
-    static const int nx_off[4] = {0, 1, 0, -1};
-    static const int ny_off[4] = {-1, 0, 1, 0};
-    int start_x = renderer->view_x;
-    int start_y = renderer->view_y;
-    int end_x = renderer->view_x + renderer->view_width;
-    int end_y = renderer->view_y + renderer->view_height;
-    if (start_x < 0) start_x = 0;
-    if (start_y < 0) start_y = 0;
-    if (end_x > (int)world->width) end_x = (int)world->width;
-    if (end_y > (int)world->height) end_y = (int)world->height;
-
-    for (int wy = start_y; wy < end_y; wy++) {
-        for (int wx = start_x; wx < end_x; wx++) {
-            int idx = wy * (int)world->width + wx;
-            if (idx < 0 || idx >= (int)world->grid_size) continue;
-
-            uint16_t colony_id = world->grid[idx];
-            if (colony_id == 0) continue;
-
-            const proto_colony* colony = NULL;
-            for (uint32_t i = 0; i < world->colony_count; i++) {
-                if (world->colonies[i].id == colony_id && world->colonies[i].alive) {
-                    colony = &world->colonies[i];
-                    break;
-                }
-            }
-            if (!colony) continue;
-
-            bool is_border = false;
-            for (int d = 0; d < 4; d++) {
-                int nx = wx + nx_off[d];
-                int ny = wy + ny_off[d];
-                if (nx < 0 || nx >= (int)world->width || ny < 0 || ny >= (int)world->height) {
-                    is_border = true;
-                    break;
-                }
-                int nidx = ny * (int)world->width + nx;
-                if (world->grid[nidx] != colony_id) {
-                    is_border = true;
-                    break;
-                }
-            }
-
-            uint8_t r = colony->color_r;
-            uint8_t g = colony->color_g;
-            uint8_t b = colony->color_b;
-            if (colony->id == renderer->selected_colony) {
-                r = (uint8_t)(r + (255 - r) / 3);
-                g = (uint8_t)(g + (255 - g) / 3);
-                b = (uint8_t)(b + (255 - b) / 3);
-            }
-            renderer_draw_cell(renderer, wx, wy, r, g, b, is_border);
-        }
-    }
-}
-
-void renderer_draw_world_centroid(Renderer* renderer, const proto_world* world) {
+    
+    // Draw each colony
     for (uint32_t i = 0; i < world->colony_count; i++) {
-        const proto_colony* colony = &world->colonies[i];
+        const ProtoColony* colony = &world->colonies[i];
         if (!colony->alive) continue;
         
+        // Calculate colony's visual representation based on radius
+        // Use rounding instead of truncation to reduce jitter when centroid is near integer boundary
         int cx = (int)(colony->x + 0.5f);
         int cy = (int)(colony->y + 0.5f);
         float base_radius = colony->radius;
         
-        int int_radius = (int)(base_radius * 1.7f + 2);
+        // Draw cells with procedurally generated organic shape
+        int int_radius = (int)(base_radius * 1.7f + 2);  // Extra margin for shape variation
         for (int dy = -int_radius; dy <= int_radius; dy++) {
             for (int dx = -int_radius; dx <= int_radius; dx++) {
+                // Calculate angle from center
                 float angle = atan2f((float)dy, (float)dx);
                 if (angle < 0) angle += 2.0f * 3.14159265f;
                 
-                float shape_mult = colony_shape_at_angle_evolved(colony->shape_seed, angle,
-                                                                 colony->wobble_phase,
-                                                                 colony->shape_evolution);
+                // Get shape multiplier from procedural noise
+                float shape_mult = colony_shape_at_angle(colony->shape_seed, angle, colony->wobble_phase);
                 
+                // Calculate effective radius at this angle
                 float effective_radius = base_radius * shape_mult;
                 
                 float dist = sqrtf((float)(dx * dx + dy * dy));
@@ -301,13 +240,16 @@ void renderer_draw_world_centroid(Renderer* renderer, const proto_world* world) 
                     int cell_x = cx + dx;
                     int cell_y = cy + dy;
                     
+                    // Is this cell on the border? (within 1.2 units of edge)
                     bool is_border = dist > (effective_radius - 1.2f);
                     
+                    // Highlight selected colony
                     uint8_t r = colony->color_r;
                     uint8_t g = colony->color_g;
                     uint8_t b = colony->color_b;
                     
                     if (colony->id == renderer->selected_colony) {
+                        // Brighten selected colony
                         r = (uint8_t)(r + (255 - r) / 3);
                         g = (uint8_t)(g + (255 - g) / 3);
                         b = (uint8_t)(b + (255 - b) / 3);
@@ -320,9 +262,120 @@ void renderer_draw_world_centroid(Renderer* renderer, const proto_world* world) 
     }
 }
 
-void renderer_draw_colony_info(Renderer* renderer, const proto_colony* colony) {
+static const char* renderer_state_name(uint8_t state) {
+    switch (state) {
+        case 1: return "Dormant";
+        case 2: return "Stressed";
+        case 0:
+        default:
+            return "Normal";
+    }
+}
+
+static const char* renderer_behavior_mode_name(uint8_t mode) {
+    switch (mode) {
+        case PROTO_COLONY_BEHAVIOR_MODE_EXPANDING: return "Expanding";
+        case PROTO_COLONY_BEHAVIOR_MODE_RAIDING: return "Raiding";
+        case PROTO_COLONY_BEHAVIOR_MODE_FORTIFYING: return "Fortifying";
+        case PROTO_COLONY_BEHAVIOR_MODE_COOPERATING: return "Cooperating";
+        case PROTO_COLONY_BEHAVIOR_MODE_SURVIVAL: return "Survival";
+        case PROTO_COLONY_BEHAVIOR_MODE_DORMANT: return "Dormant";
+        case PROTO_COLONY_BEHAVIOR_MODE_BALANCED:
+        default:
+            return "Balanced";
+    }
+}
+
+static const char* renderer_direction_name(int dir) {
+    static const char* names[PROTO_DIRECTION_COUNT] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+    return (dir >= 0 && dir < PROTO_DIRECTION_COUNT) ? names[dir] : "--";
+}
+
+static const char* renderer_sensor_name(uint8_t sensor) {
+    switch (sensor) {
+        case PROTO_COLONY_SENSOR_NUTRIENT: return "Nutrient";
+        case PROTO_COLONY_SENSOR_TOXIN: return "Toxin";
+        case PROTO_COLONY_SENSOR_SIGNAL: return "Signal";
+        case PROTO_COLONY_SENSOR_ALARM: return "Alarm";
+        case PROTO_COLONY_SENSOR_FRONTIER: return "Frontier";
+        case PROTO_COLONY_SENSOR_PRESSURE: return "Pressure";
+        case PROTO_COLONY_SENSOR_MOMENTUM: return "Momentum";
+        case PROTO_COLONY_SENSOR_GROWTH: return "Growth";
+        default: return "Unknown";
+    }
+}
+
+static const char* renderer_drive_name(uint8_t drive) {
+    switch (drive) {
+        case PROTO_COLONY_DRIVE_GROWTH: return "Growth";
+        case PROTO_COLONY_DRIVE_CAUTION: return "Caution";
+        case PROTO_COLONY_DRIVE_HOSTILITY: return "Hostility";
+        case PROTO_COLONY_DRIVE_COHESION: return "Cohesion";
+        case PROTO_COLONY_DRIVE_EXPLORATION: return "Explore";
+        case PROTO_COLONY_DRIVE_PRESERVATION: return "Preserve";
+        default: return "Unknown";
+    }
+}
+
+static const char* renderer_action_name(uint8_t action) {
+    switch (action) {
+        case PROTO_COLONY_ACTION_EXPAND: return "Expand";
+        case PROTO_COLONY_ACTION_ATTACK: return "Attack";
+        case PROTO_COLONY_ACTION_DEFEND: return "Defend";
+        case PROTO_COLONY_ACTION_SIGNAL: return "Signal";
+        case PROTO_COLONY_ACTION_TRANSFER: return "Transfer";
+        case PROTO_COLONY_ACTION_DORMANCY: return "Dormant";
+        case PROTO_COLONY_ACTION_MOTILITY: return "Motility";
+        default: return "Unknown";
+    }
+}
+
+static float renderer_action_value(const ProtoColonyDetail* detail, uint8_t action) {
+    switch (action) {
+        case PROTO_COLONY_ACTION_EXPAND: return detail->action_expand;
+        case PROTO_COLONY_ACTION_ATTACK: return detail->action_attack;
+        case PROTO_COLONY_ACTION_DEFEND: return detail->action_defend;
+        case PROTO_COLONY_ACTION_SIGNAL: return detail->action_signal;
+        case PROTO_COLONY_ACTION_TRANSFER: return detail->action_transfer;
+        case PROTO_COLONY_ACTION_DORMANCY: return detail->action_dormancy;
+        case PROTO_COLONY_ACTION_MOTILITY: return detail->action_motility;
+        default: return 0.0f;
+    }
+}
+
+static void renderer_pick_top_actions(const ProtoColonyDetail* detail,
+                                      uint8_t* first,
+                                      uint8_t* second,
+                                      uint8_t* third) {
+    uint8_t order[PROTO_COLONY_ACTION_MOTILITY + 1] = {
+        PROTO_COLONY_ACTION_EXPAND,
+        PROTO_COLONY_ACTION_ATTACK,
+        PROTO_COLONY_ACTION_DEFEND,
+        PROTO_COLONY_ACTION_SIGNAL,
+        PROTO_COLONY_ACTION_TRANSFER,
+        PROTO_COLONY_ACTION_DORMANCY,
+        PROTO_COLONY_ACTION_MOTILITY,
+    };
+
+    for (int i = 0; i < 7; i++) {
+        for (int j = i + 1; j < 7; j++) {
+            if (renderer_action_value(detail, order[j]) > renderer_action_value(detail, order[i])) {
+                uint8_t tmp = order[i];
+                order[i] = order[j];
+                order[j] = tmp;
+            }
+        }
+    }
+
+    if (first) *first = order[0];
+    if (second) *second = order[1];
+    if (third) *third = order[2];
+}
+
+void renderer_draw_colony_info(Renderer* renderer, const ProtoColony* colony, const ProtoColonyDetail* detail) {
     int panel_x = renderer->view_width + 4;
     int panel_y = 3;
+    const bool has_detail = detail && colony && detail->base.id == colony->id && detail->base.alive;
     
     renderer_set_color_fg(renderer, 200, 200, 200);
     
@@ -364,35 +417,122 @@ void renderer_draw_colony_info(Renderer* renderer, const proto_colony* colony) {
     renderer_move_cursor(renderer, ++panel_y, panel_x);
     renderer_writef(renderer, "Radius: %.1f", colony->radius);
     
-    // Trait diagram header
-    panel_y += 2;
-    renderer_move_cursor(renderer, panel_y++, panel_x);
-    renderer_write(renderer, ANSI_BOLD "Traits" ANSI_RESET);
-    renderer_set_color_fg(renderer, 200, 200, 200);
-    
-    // Helper macro to draw a bar: [████░░░░░░] 0.75
-    #define DRAW_TRAIT_BAR(label, value, r, g, b) do { \
-        renderer_move_cursor(renderer, panel_y++, panel_x); \
-        renderer_writef(renderer, "%-6s", label); \
-        renderer_set_color_fg(renderer, r, g, b); \
-        int filled = (int)(value * 8 + 0.5f); \
-        renderer_write(renderer, "["); \
-        for (int _i = 0; _i < 8; _i++) { \
-            if (_i < filled) renderer_write(renderer, "█"); \
-            else renderer_write(renderer, "░"); \
-        } \
-        renderer_write(renderer, "]"); \
-        renderer_set_color_fg(renderer, 200, 200, 200); \
-    } while(0)
-    
-    // Draw trait bars with color coding
-    DRAW_TRAIT_BAR("ATK", colony->aggression, 255, 100, 100);      // Red for attack
-    DRAW_TRAIT_BAR("DEF", colony->defense, 100, 150, 255);         // Blue for defense
-    DRAW_TRAIT_BAR("SPD", colony->spread_rate, 100, 255, 100);     // Green for spread
-    DRAW_TRAIT_BAR("MET", colony->metabolism, 255, 200, 100);      // Orange for metabolism
-    DRAW_TRAIT_BAR("TOX", colony->toxin_production, 200, 100, 255); // Purple for toxin
-    
-    #undef DRAW_TRAIT_BAR
+    renderer_move_cursor(renderer, ++panel_y, panel_x);
+    renderer_writef(renderer, "Spread: %.2f", colony->growth_rate);
+
+    if (has_detail) {
+        uint8_t top_action = 0;
+        uint8_t second_action = 0;
+        uint8_t third_action = 0;
+        renderer_pick_top_actions(detail, &top_action, &second_action, &third_action);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "State: %s%s",
+                        renderer_state_name(detail->state),
+                        (detail->flags & COLONY_DETAIL_FLAG_DORMANT) ? " (spore)" : "");
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Mode: %s %s",
+                        renderer_behavior_mode_name(detail->behavior_mode),
+                        renderer_direction_name(detail->focus_direction));
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Stress: %.0f%%  Biofilm: %.0f%%",
+                        detail->stress_level * 100.0f,
+                        detail->biofilm_strength * 100.0f);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Signal: %.0f%%  Age: %u",
+                        detail->signal_strength * 100.0f,
+                        detail->age);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Drift: %+0.2f, %+0.2f", detail->drift_x, detail->drift_y);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Acts: X %.0f A %.0f D %.0f S %.0f",
+                        detail->action_expand * 100.0f,
+                        detail->action_attack * 100.0f,
+                        detail->action_defend * 100.0f,
+                        detail->action_signal * 100.0f);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "More: T %.0f Z %.0f M %.0f",
+                        detail->action_transfer * 100.0f,
+                        detail->action_dormancy * 100.0f,
+                        detail->action_motility * 100.0f);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Top: %s %.0f %s %.0f %s %.0f",
+                        renderer_action_name(top_action),
+                        renderer_action_value(detail, top_action) * 100.0f,
+                        renderer_action_name(second_action),
+                        renderer_action_value(detail, second_action) * 100.0f,
+                        renderer_action_name(third_action),
+                        renderer_action_value(detail, third_action) * 100.0f);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Drive: %s %.0f%%",
+                        renderer_drive_name(detail->dominant_drive),
+                        detail->dominant_drive_value * 100.0f);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "2nd:   %s %.0f%%",
+                        renderer_drive_name(detail->secondary_drive),
+                        detail->secondary_drive_value * 100.0f);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Sense: %s %.0f%%",
+                        renderer_sensor_name(detail->dominant_sensor),
+                        detail->dominant_sensor_value * 100.0f);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "2nd:   %s %.0f%%",
+                        renderer_sensor_name(detail->secondary_sensor),
+                        detail->secondary_sensor_value * 100.0f);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "S->D: %s>%s %+0.2f",
+                        renderer_sensor_name(detail->sensor_link_sensor),
+                        renderer_drive_name(detail->sensor_link_drive),
+                        detail->sensor_link_value);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "D->A: %s>%s %+0.2f",
+                        renderer_drive_name(detail->action_link_drive),
+                        renderer_action_name(detail->action_link_action),
+                        detail->action_link_value);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "2nd: %s>%s %+0.2f",
+                        renderer_sensor_name(detail->secondary_sensor_link_sensor),
+                        renderer_drive_name(detail->secondary_sensor_link_drive),
+                        detail->secondary_sensor_link_value);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "2nd: %s>%s %+0.2f",
+                        renderer_drive_name(detail->secondary_action_link_drive),
+                        renderer_action_name(detail->secondary_action_link_action),
+                        detail->secondary_action_link_value);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_write(renderer, "Character:");
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Expand %.0f  Aggro %.0f",
+                        detail->trait_expansion * 100.0f,
+                        detail->trait_aggression * 100.0f);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Resil  %.0f  Coop  %.0f",
+                        detail->trait_resilience * 100.0f,
+                        detail->trait_cooperation * 100.0f);
+
+        renderer_move_cursor(renderer, ++panel_y, panel_x);
+        renderer_writef(renderer, "Eff    %.0f  Learn %.0f",
+                        detail->trait_efficiency * 100.0f,
+                        detail->trait_learning * 100.0f);
+    }
     
     renderer_reset_colors(renderer);
 }

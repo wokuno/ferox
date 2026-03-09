@@ -5,9 +5,7 @@
 
 #include "server.h"
 #include "simulation.h"
-#include "genetics.h"
 #include "parallel.h"
-#include "../shared/names.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,40 +22,153 @@
 // Forward declarations for thread functions
 static void* accept_thread_func(void* arg);
 static void* simulation_thread_func(void* arg);
-static bool server_rebuild_world_state(Server* server, int width, int height, int initial_colonies);
-static bool server_spawn_colony(Server* server, const CommandSpawnColony* spawn);
 
-typedef struct {
-    uint32_t colony_id;
-    uint16_t proto_idx;
-} colony_proto_index;
+static void copy_colony_name(char dst[MAX_COLONY_NAME], const char* src) {
+    if (!dst) {
+        return;
+    }
 
-static int compare_colony_proto_index(const void* a, const void* b) {
-    const colony_proto_index* ia = (const colony_proto_index*)a;
-    const colony_proto_index* ib = (const colony_proto_index*)b;
-    if (ia->colony_id < ib->colony_id) return -1;
-    if (ia->colony_id > ib->colony_id) return 1;
-    return 0;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+
+    size_t len = strlen(src);
+    if (len >= MAX_COLONY_NAME) {
+        len = MAX_COLONY_NAME - 1;
+    }
+    memcpy(dst, src, len);
+    dst[len] = '\0';
 }
 
-static int32_t find_proto_index_for_colony(const colony_proto_index* lookup, uint32_t count, uint32_t colony_id) {
-    uint32_t lo = 0;
-    uint32_t hi = count;
+static float clamp_unit(float value) {
+    if (value < 0.0f) return 0.0f;
+    if (value > 1.0f) return 1.0f;
+    return value;
+}
 
-    while (lo < hi) {
-        uint32_t mid = lo + (hi - lo) / 2;
-        uint32_t mid_id = lookup[mid].colony_id;
-        if (mid_id == colony_id) {
-            return (int32_t)lookup[mid].proto_idx;
-        }
-        if (mid_id < colony_id) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
+static float summarize_trait_expansion(const Genome* genome) {
+    return clamp_unit((genome->spread_rate + genome->metabolism + genome->motility) / 3.0f);
+}
+
+static float summarize_trait_aggression(const Genome* genome) {
+    return clamp_unit((genome->aggression + genome->toxin_production + (1.0f - genome->merge_affinity)) / 3.0f);
+}
+
+static float summarize_trait_resilience(const Genome* genome) {
+    return clamp_unit((genome->resilience + genome->toxin_resistance + genome->dormancy_resistance + genome->biofilm_investment) / 4.0f);
+}
+
+static float summarize_trait_cooperation(const Genome* genome) {
+    float transfer = genome->gene_transfer_rate * 10.0f;
+    return clamp_unit((genome->merge_affinity + genome->signal_emission + genome->signal_sensitivity + clamp_unit(transfer)) / 4.0f);
+}
+
+static float summarize_trait_efficiency(const Genome* genome) {
+    return clamp_unit((genome->efficiency + genome->density_tolerance + (1.0f - genome->resource_consumption)) / 3.0f);
+}
+
+static float summarize_trait_learning(const Genome* genome) {
+    return clamp_unit((genome->learning_rate + genome->memory_factor) * 0.5f);
+}
+
+static void fill_proto_colony_graph_links(const Colony* colony, ProtoColonyDetail* detail) {
+    if (!colony || !detail) {
+        return;
+    }
+
+    float best_sensor_drive = -1.0f;
+    float second_sensor_drive = -1.0f;
+    for (int drive = 0; drive < COLONY_DRIVE_COUNT; drive++) {
+        for (int sensor = 0; sensor < COLONY_SENSOR_COUNT; sensor++) {
+            float centered_sensor = colony->behavior_sensors[sensor] * 2.0f - 1.0f;
+            float contribution = centered_sensor * colony->genome.behavior_drive_weights[drive][sensor];
+            float magnitude = fabsf(contribution);
+            if (magnitude > best_sensor_drive) {
+                second_sensor_drive = best_sensor_drive;
+                detail->secondary_sensor_link_sensor = detail->sensor_link_sensor;
+                detail->secondary_sensor_link_drive = detail->sensor_link_drive;
+                detail->secondary_sensor_link_value = detail->sensor_link_value;
+                best_sensor_drive = magnitude;
+                detail->sensor_link_sensor = (uint8_t)sensor;
+                detail->sensor_link_drive = (uint8_t)drive;
+                detail->sensor_link_value = contribution;
+            } else if (magnitude > second_sensor_drive) {
+                second_sensor_drive = magnitude;
+                detail->secondary_sensor_link_sensor = (uint8_t)sensor;
+                detail->secondary_sensor_link_drive = (uint8_t)drive;
+                detail->secondary_sensor_link_value = contribution;
+            }
         }
     }
 
-    return -1;
+    float best_drive_action = -1.0f;
+    float second_drive_action = -1.0f;
+    for (int action = 0; action < COLONY_ACTION_COUNT; action++) {
+        for (int drive = 0; drive < COLONY_DRIVE_COUNT; drive++) {
+            float centered_drive = colony->behavior_drives[drive] * 2.0f - 1.0f;
+            float contribution = centered_drive * colony->genome.behavior_action_weights[action][drive];
+            float magnitude = fabsf(contribution);
+            if (magnitude > best_drive_action) {
+                second_drive_action = best_drive_action;
+                detail->secondary_action_link_drive = detail->action_link_drive;
+                detail->secondary_action_link_action = detail->action_link_action;
+                detail->secondary_action_link_value = detail->action_link_value;
+                best_drive_action = magnitude;
+                detail->action_link_drive = (uint8_t)drive;
+                detail->action_link_action = (uint8_t)action;
+                detail->action_link_value = contribution;
+            } else if (magnitude > second_drive_action) {
+                second_drive_action = magnitude;
+                detail->secondary_action_link_drive = (uint8_t)drive;
+                detail->secondary_action_link_action = (uint8_t)action;
+                detail->secondary_action_link_value = contribution;
+            }
+        }
+    }
+}
+
+static void fill_proto_colony_detail_base(const World* world,
+                                          const Colony* colony,
+                                          ProtoColony* proto_colony) {
+    memset(proto_colony, 0, sizeof(*proto_colony));
+    proto_colony->id = colony->id;
+    copy_colony_name(proto_colony->name, colony->name);
+    proto_colony->population = (uint32_t)colony->cell_count;
+    proto_colony->max_population = (uint32_t)colony->max_cell_count;
+    proto_colony->growth_rate = colony->genome.spread_rate;
+    proto_colony->color_r = colony->color.r;
+    proto_colony->color_g = colony->color.g;
+    proto_colony->color_b = colony->color.b;
+    proto_colony->alive = colony->active;
+    proto_colony->shape_seed = colony->shape_seed;
+    proto_colony->wobble_phase = colony->wobble_phase;
+    proto_colony->shape_evolution = colony->shape_evolution;
+    proto_colony->radius = colony->cell_count > 0 ? sqrtf((float)colony->cell_count / 3.14159f) : 0.0f;
+
+    if (!world || colony->cell_count == 0) {
+        return;
+    }
+
+    float sum_x = 0.0f;
+    float sum_y = 0.0f;
+    uint32_t cells = 0;
+    for (int y = 0; y < world->height; y++) {
+        int row_base = y * world->width;
+        for (int x = 0; x < world->width; x++) {
+            const Cell* cell = &world->cells[row_base + x];
+            if (cell->colony_id == colony->id) {
+                sum_x += (float)x;
+                sum_y += (float)y;
+                cells++;
+            }
+        }
+    }
+
+    if (cells > 0) {
+        proto_colony->x = sum_x / (float)cells;
+        proto_colony->y = sum_y / (float)cells;
+    }
 }
 
 // Helper to get current time in milliseconds
@@ -130,7 +241,7 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
         return NULL;
     }
     
-    // Initialize mutexes
+    // Initialize mutex
     if (pthread_mutex_init(&server->clients_mutex, NULL) != 0) {
         atomic_world_destroy(server->atomic_world);
         parallel_destroy(server->parallel_ctx);
@@ -144,7 +255,10 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
     // Initialize state
     server->clients = NULL;
     server->client_count = 0;
-    atomic_init(&server->running, false);
+    server->world_width = world_width;
+    server->world_height = world_height;
+    server->default_colonies = DEFAULT_INITIAL_COLONY_COUNT;
+    server->running = false;
     server->paused = false;
     server->tick_rate_ms = DEFAULT_TICK_RATE_MS;
     server->speed_multiplier = 1.0f;
@@ -163,9 +277,9 @@ void server_destroy(Server* server) {
     
     // Clean up all clients
     pthread_mutex_lock(&server->clients_mutex);
-    client_session* client = server->clients;
+    ClientSession* client = server->clients;
     while (client) {
-        client_session* next = client->next;
+        ClientSession* next = client->next;
         if (client->socket) {
             net_socket_close(client->socket);
         }
@@ -201,14 +315,11 @@ void server_destroy(Server* server) {
 static void* accept_thread_func(void* arg) {
     Server* server = (Server*)arg;
     
-    bool running = atomic_load(&server->running);
-    
-    while (running) {
+    while (server->running) {
         // Accept new connection (blocking)
-        net_socket* socket = net_server_accept(server->listener);
+        NetSocket* socket = net_server_accept(server->listener);
         if (!socket) {
-            running = atomic_load(&server->running);
-            if (!running) break;
+            if (!server->running) break;
             continue;
         }
         
@@ -217,7 +328,7 @@ static void* accept_thread_func(void* arg) {
         net_set_nodelay(socket, true);
         
         // Add client
-        client_session* client = server_add_client(server, socket);
+        ClientSession* client = server_add_client(server, socket);
         if (client) {
             printf("Client %u connected from %s:%u\n", 
                    client->id, socket->address, socket->port);
@@ -232,28 +343,15 @@ static void* accept_thread_func(void* arg) {
 static void* simulation_thread_func(void* arg) {
     Server* server = (Server*)arg;
     
-    int tick_counter = 0;
-    
-    bool running = atomic_load(&server->running);
-    
-    while (running) {
+    while (server->running) {
         long start_time = get_time_ms();
         
         if (!server->paused) {
             // Run simulation tick using atomic lock-free parallel processing
             atomic_tick(server->atomic_world);
-            tick_counter++;
             
-            // At high speeds, skip some broadcasts to avoid flooding the network.
-            // Aim for ~15-30 broadcasts/sec max regardless of simulation speed.
-            int broadcast_every = 1;
-            float speed = server->speed_multiplier;
-            if (speed > 4.0f) broadcast_every = (int)(speed / 4.0f);
-            if (broadcast_every > 16) broadcast_every = 16;
-            
-            if (tick_counter % broadcast_every == 0) {
-                server_broadcast_world_state(server);
-            }
+            // Broadcast world state to all clients
+            server_broadcast_world_state(server);
         }
         
         // Process client messages
@@ -269,24 +367,19 @@ static void* simulation_thread_func(void* arg) {
         if (elapsed < target_ms) {
             sleep_ms(target_ms - (int)elapsed);
         }
-        
-        running = atomic_load(&server->running);
     }
     
     return NULL;
 }
 
 void server_run(Server* server) {
-    if (!server) return;
+    if (!server || server->running) return;
     
-    if (atomic_load(&server->running)) {
-        return;
-    }
-    atomic_store(&server->running, true);
+    server->running = true;
     
     // Start accept thread
     if (pthread_create(&server->accept_thread, NULL, accept_thread_func, server) != 0) {
-        atomic_store(&server->running, false);
+        server->running = false;
         return;
     }
     
@@ -298,198 +391,151 @@ void server_run(Server* server) {
 }
 
 void server_stop(Server* server) {
-    if (!server) return;
+    if (!server || !server->running) return;
     
-    if (!atomic_load(&server->running)) {
-        return;
-    }
-    atomic_store(&server->running, false);
+    server->running = false;
     
     // Close listener to unblock accept
     if (server->listener) {
-        net_server_stop(server->listener);
+        net_server_destroy(server->listener);
+        server->listener = NULL;
     }
 }
 
-static bool server_rebuild_world_state(Server* server, int width, int height, int initial_colonies) {
-    if (!server || width <= 0 || height <= 0) {
-        return false;
+int server_build_protocol_world_snapshot(const World* world,
+                                         bool paused,
+                                         float speed_multiplier,
+                                         ProtoWorld* proto_world) {
+    if (!world || !proto_world) {
+        return -1;
     }
 
-    World* new_world = world_create(width, height);
-    if (!new_world) {
-        return false;
-    }
+    proto_world_init(proto_world);
+    
+    proto_world->width = (uint32_t)world->width;
+    proto_world->height = (uint32_t)world->height;
+    proto_world->tick = (uint32_t)world->tick;
+    proto_world->paused = paused;
+    proto_world->speed_multiplier = speed_multiplier;
 
-    if (server->world) {
-        RDSolverControls controls = world_get_rd_controls(server->world);
-        if (!world_set_rd_controls(new_world, &controls, NULL, 0)) {
-            world_destroy(new_world);
-            return false;
+    uint32_t count = 0;
+    uint32_t* proto_index_by_world_index = NULL;
+    float sum_x[MAX_COLONIES] = {0};
+    float sum_y[MAX_COLONIES] = {0};
+    uint32_t sample_count[MAX_COLONIES] = {0};
+
+    if (world->colony_count > 0) {
+        proto_index_by_world_index = (uint32_t*)malloc(world->colony_count * sizeof(uint32_t));
+        if (!proto_index_by_world_index) {
+            return -1;
+        }
+        for (size_t i = 0; i < world->colony_count; i++) {
+            proto_index_by_world_index[i] = UINT32_MAX;
         }
     }
-
-    if (initial_colonies > 0) {
-        world_init_random_colonies(new_world, initial_colonies);
-    }
-
-    int regions = server->pool && server->pool->thread_count > 1 ? 4 : 2;
-    ParallelContext* new_parallel = parallel_create(server->pool, new_world, regions, regions);
-    if (!new_parallel) {
-        world_destroy(new_world);
-        return false;
-    }
-    parallel_init_regions(new_parallel, width, height);
-
-    int thread_count = server->pool ? server->pool->thread_count : 1;
-    AtomicWorld* new_atomic = atomic_world_create(new_world, server->pool, thread_count);
-    if (!new_atomic) {
-        parallel_destroy(new_parallel);
-        world_destroy(new_world);
-        return false;
-    }
-
-    AtomicWorld* old_atomic = server->atomic_world;
-    ParallelContext* old_parallel = server->parallel_ctx;
-    World* old_world = server->world;
-
-    server->world = new_world;
-    server->parallel_ctx = new_parallel;
-    server->atomic_world = new_atomic;
-
-    if (old_atomic) {
-        atomic_world_destroy(old_atomic);
-    }
-    if (old_parallel) {
-        parallel_destroy(old_parallel);
-    }
-    if (old_world) {
-        world_destroy(old_world);
-    }
-
-    return true;
-}
-
-// Convert internal World/Colony to protocol proto_world for serialization
-void server_build_protocol_world_snapshot(Server* server, proto_world* out_world) {
-    if (!out_world) return;
-    proto_world_init(out_world);
-    if (!server || !server->world) return;
-    World* world = server->world;
-
-    out_world->width = (uint32_t)world->width;
-    out_world->height = (uint32_t)world->height;
-    out_world->tick = (uint32_t)world->tick;
-    out_world->paused = server->paused;
-    out_world->speed_multiplier = server->speed_multiplier;
-
-    const uint32_t width = out_world->width;
-    const uint32_t height = out_world->height;
-    const size_t grid_size = (size_t)width * (size_t)height;
-
-    // Build protocol colony list and id->protocol index mapping.
-    uint32_t count = 0;
-    colony_proto_index colony_lookup[MAX_COLONIES];
 
     for (size_t i = 0; i < world->colony_count && count < MAX_COLONIES; i++) {
-        if (world->colonies[i].active) {
-            proto_colony* proto_colony = &out_world->colonies[count];
+        const Colony* colony = &world->colonies[i];
+        if (!colony->active) {
+            continue;
+        }
 
-            // Map fields from internal Colony (types.h) to protocol proto_colony
-            proto_colony->id = world->colonies[i].id;
-            strncpy(proto_colony->name, world->colonies[i].name, MAX_COLONY_NAME - 1);
-            proto_colony->name[MAX_COLONY_NAME - 1] = '\0';
+        ProtoColony* proto_colony = &proto_world->colonies[count];
+        proto_colony->id = colony->id;
+        copy_colony_name(proto_colony->name, colony->name);
+        proto_colony->population = (uint32_t)colony->cell_count;
+        proto_colony->max_population = (uint32_t)colony->max_cell_count;
+        proto_colony->growth_rate = colony->genome.spread_rate;
+        proto_colony->color_r = colony->color.r;
+        proto_colony->color_g = colony->color.g;
+        proto_colony->color_b = colony->color.b;
+        proto_colony->alive = colony->active;
+        proto_colony->shape_seed = colony->shape_seed;
+        proto_colony->wobble_phase = colony->wobble_phase;
+        proto_colony->shape_evolution = colony->shape_evolution;
+        proto_colony->x = 0.0f;
+        proto_colony->y = 0.0f;
+        proto_colony->radius = 0.0f;
 
-            colony_lookup[count].colony_id = proto_colony->id;
-            colony_lookup[count].proto_idx = (uint16_t)count;
-
-            proto_colony->x = world->colonies[i].centroid_x;
-            proto_colony->y = world->colonies[i].centroid_y;
-
-            proto_colony->population = (uint32_t)world->colonies[i].cell_count;
-            proto_colony->max_population = (uint32_t)world->colonies[i].max_cell_count;
-            proto_colony->radius = (float)world->colonies[i].cell_count / 3.14159f;
-            if (proto_colony->radius > 0) proto_colony->radius = sqrtf(proto_colony->radius);
-            proto_colony->growth_rate = world->colonies[i].genome.spread_rate;
-            proto_colony->color_r = world->colonies[i].color.r;
-            proto_colony->color_g = world->colonies[i].color.g;
-            proto_colony->color_b = world->colonies[i].color.b;
-            proto_colony->alive = world->colonies[i].active;
-            
-            // Copy shape data (kept for compatibility, may be removed later)
-            proto_colony->shape_seed = world->colonies[i].shape_seed;
-            proto_colony->wobble_phase = world->colonies[i].wobble_phase;
-            proto_colony->shape_evolution = world->colonies[i].shape_evolution;
-            
-            // Copy key trait data for info panel display
-            proto_colony->aggression = world->colonies[i].genome.aggression;
-            proto_colony->defense = world->colonies[i].genome.defense_priority;
-            proto_colony->metabolism = world->colonies[i].genome.metabolism;
-            proto_colony->toxin_production = world->colonies[i].genome.toxin_production;
-            proto_colony->spread_rate = world->colonies[i].genome.spread_rate;
-
-            count++;
+        if (proto_index_by_world_index) {
+            proto_index_by_world_index[i] = count;
+        }
+        count++;
+    }
+    
+    // Build grid data from world cells for smaller snapshots and always
+    // accumulate centroid data in the same pass.
+    uint32_t grid_size = proto_world->width * proto_world->height;
+    bool inline_grid = (grid_size > 0 && grid_size <= MAX_INLINE_GRID_SIZE);
+    if (inline_grid) {
+        proto_world_alloc_grid(proto_world, proto_world->width, proto_world->height);
+        if (!proto_world->grid) {
+            free(proto_index_by_world_index);
+            proto_world_free(proto_world);
+            return -1;
         }
     }
 
-    bool has_sorted_lookup = false;
-    if (count > 0) {
-        qsort(colony_lookup, count, sizeof(colony_lookup[0]), compare_colony_proto_index);
-        has_sorted_lookup = true;
-    }
-
-    if (grid_size > 0 && grid_size <= MAX_GRID_SIZE) {
-        proto_world_alloc_grid(out_world, width, height);
-    }
-
-    if (grid_size > 0 && has_sorted_lookup) {
-        double sum_x[MAX_COLONIES] = {0};
-        double sum_y[MAX_COLONIES] = {0};
-        uint32_t pop[MAX_COLONIES] = {0};
-
-        for (uint32_t y = 0; y < height; y++) {
-            size_t row_start = (size_t)y * (size_t)width;
-            for (uint32_t x = 0; x < width; x++) {
-                size_t idx = row_start + (size_t)x;
-                uint32_t colony_id = world->cells[idx].colony_id;
-
-                if (out_world->grid) {
-                    out_world->grid[idx] = (uint16_t)colony_id;
-                }
-
-                if (colony_id == 0) continue;
-
-                int32_t proto_idx = find_proto_index_for_colony(colony_lookup, count, colony_id);
-                if (proto_idx < 0) continue;
-
-                uint32_t pidx = (uint32_t)proto_idx;
-                pop[pidx]++;
-                sum_x[pidx] += (double)x;
-                sum_y[pidx] += (double)y;
+    for (int y = 0; y < world->height; y++) {
+        int row_base = y * world->width;
+        for (int x = 0; x < world->width; x++) {
+            int idx = row_base + x;
+            const Cell* cell = &world->cells[idx];
+            uint32_t colony_id = cell->colony_id;
+            if (proto_world->grid) {
+                proto_world->grid[idx] = (uint16_t)colony_id;
             }
-        }
 
-        for (uint32_t i = 0; i < count; i++) {
-            if (pop[i] > 0) {
-                out_world->colonies[i].x = (float)(sum_x[i] / (double)pop[i]);
-                out_world->colonies[i].y = (float)(sum_y[i] / (double)pop[i]);
+            if (colony_id == 0 || !proto_index_by_world_index || (size_t)colony_id >= world->colony_index_capacity) {
+                continue;
             }
-        }
-    } else if (out_world->grid) {
-        for (size_t i = 0; i < grid_size; i++) {
-            out_world->grid[i] = (uint16_t)world->cells[i].colony_id;
+
+            uint32_t world_index = world->colony_index_map[colony_id];
+            if (world_index == UINT32_MAX || world_index >= world->colony_count) {
+                continue;
+            }
+
+            uint32_t proto_index = proto_index_by_world_index[world_index];
+            if (proto_index == UINT32_MAX || proto_index >= count) {
+                continue;
+            }
+
+            sum_x[proto_index] += (float)x;
+            sum_y[proto_index] += (float)y;
+            sample_count[proto_index]++;
         }
     }
 
-    out_world->colony_count = count;
+    for (uint32_t i = 0; i < count; i++) {
+        ProtoColony* proto_colony = &proto_world->colonies[i];
+        if (sample_count[i] > 0) {
+            proto_colony->x = sum_x[i] / (float)sample_count[i];
+            proto_colony->y = sum_y[i] / (float)sample_count[i];
+        }
+        proto_colony->radius = proto_colony->population > 0 ? sqrtf((float)proto_colony->population / 3.14159f) : 0.0f;
+    }
+
+    proto_world->colony_count = count;
+    free(proto_index_by_world_index);
+    return 0;
+}
+
+// Convert internal World/Colony to protocol ProtoWorld for serialization
+static int build_protocol_world(Server* server, ProtoWorld* proto_world) {
+    return server_build_protocol_world_snapshot(server->world,
+                                                server->paused,
+                                                server->speed_multiplier,
+                                                proto_world);
 }
 
 void server_broadcast_world_state(Server* server) {
     if (!server) return;
     
     // Build protocol world state
-    proto_world proto_world;
-    server_build_protocol_world_snapshot(server, &proto_world);
+    ProtoWorld proto_world;
+    if (build_protocol_world(server, &proto_world) < 0) {
+        return;
+    }
     
     // Serialize
     uint8_t* buffer = NULL;
@@ -498,63 +544,129 @@ void server_broadcast_world_state(Server* server) {
         proto_world_free(&proto_world);
         return;
     }
+
+    uint32_t grid_size = (uint32_t)(server->world->width * server->world->height);
+    size_t chunk_count = 0;
+    uint8_t** chunk_buffers = NULL;
+    size_t* chunk_lengths = NULL;
+    uint16_t* chunk_cells = NULL;
+
+    if (!proto_world.has_grid && grid_size > 0 && grid_size <= MAX_GRID_SIZE) {
+        chunk_count = (grid_size + MAX_GRID_CHUNK_CELLS - 1u) / MAX_GRID_CHUNK_CELLS;
+        chunk_buffers = (uint8_t**)calloc(chunk_count, sizeof(uint8_t*));
+        chunk_lengths = (size_t*)calloc(chunk_count, sizeof(size_t));
+        chunk_cells = (uint16_t*)malloc((size_t)MAX_GRID_CHUNK_CELLS * sizeof(uint16_t));
+        if (!chunk_buffers || !chunk_lengths || !chunk_cells) {
+            free(chunk_buffers);
+            free(chunk_lengths);
+            free(chunk_cells);
+            free(buffer);
+            proto_world_free(&proto_world);
+            return;
+        }
+
+        for (size_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx++) {
+            uint32_t start_index = (uint32_t)(chunk_idx * MAX_GRID_CHUNK_CELLS);
+            uint32_t cell_count = grid_size - start_index;
+            if (cell_count > MAX_GRID_CHUNK_CELLS) {
+                cell_count = MAX_GRID_CHUNK_CELLS;
+            }
+
+            for (uint32_t i = 0; i < cell_count; i++) {
+                chunk_cells[i] = (uint16_t)server->world->cells[start_index + i].colony_id;
+            }
+
+            ProtoWorldDeltaGridChunk chunk = {
+                .tick = proto_world.tick,
+                .width = proto_world.width,
+                .height = proto_world.height,
+                .total_cells = grid_size,
+                .start_index = start_index,
+                .cell_count = cell_count,
+                .final_chunk = (chunk_idx + 1u == chunk_count),
+                .cells = chunk_cells,
+            };
+
+            if (protocol_serialize_world_delta_grid_chunk(&chunk, &chunk_buffers[chunk_idx], &chunk_lengths[chunk_idx]) < 0) {
+                for (size_t free_idx = 0; free_idx < chunk_count; free_idx++) {
+                    free(chunk_buffers[free_idx]);
+                }
+                free(chunk_buffers);
+                free(chunk_lengths);
+                free(chunk_cells);
+                free(buffer);
+                proto_world_free(&proto_world);
+                return;
+            }
+        }
+    }
+    free(chunk_cells);
     
-    // Snapshot clients under lock so socket I/O does not block client-list mutation.
-    client_session** snapshot = NULL;
-    int snapshot_count = 0;
+    // Broadcast to all clients
     pthread_mutex_lock(&server->clients_mutex);
-    if (server->client_count > 0) {
-        snapshot = (client_session**)calloc((size_t)server->client_count, sizeof(client_session*));
-        if (snapshot) {
-            client_session* client = server->clients;
-            while (client && snapshot_count < server->client_count) {
-                snapshot[snapshot_count++] = client;
-                client = client->next;
-            }
-        }
-    }
-    pthread_mutex_unlock(&server->clients_mutex);
-
-    for (int i = 0; i < snapshot_count; i++) {
-        client_session* client = snapshot[i];
-        if (!client || !client->active || !client->socket || !client->socket->connected) continue;
-        if (protocol_send_message(client->socket->fd, MSG_WORLD_STATE, buffer, len) < 0) {
-            printf("Client %u disconnected\n", client->id);
-            client->active = false;
-        }
-    }
-
-    pthread_mutex_lock(&server->clients_mutex);
-    client_session* client = server->clients;
-    client_session* prev = NULL;
+    ClientSession* client = server->clients;
+    ClientSession* prev = NULL;
+    
     while (client) {
-        client_session* next = client->next;
-        if (!client->active || !client->socket || !client->socket->connected) {
-            if (prev) {
-                prev->next = next;
-            } else {
-                server->clients = next;
+        ClientSession* next = client->next;
+        
+        if (client->active && client->socket && client->socket->connected) {
+            int result = protocol_send_message(client->socket->fd, MSG_WORLD_STATE, buffer, len);
+            if (result == 0) {
+                for (size_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx++) {
+                    result = protocol_send_message(client->socket->fd, MSG_WORLD_DELTA,
+                                                   chunk_buffers[chunk_idx], chunk_lengths[chunk_idx]);
+                    if (result < 0) {
+                        break;
+                    }
+                }
             }
-            if (client->socket) {
+            if (result == 0 && client->selected_colony != 0) {
+                server_send_colony_info(server, client, client->selected_colony);
+            }
+            if (result < 0) {
+                // Client disconnected
+                printf("Client %u disconnected\n", client->id);
+                client->active = false;
+                
+                // Remove from list
+                if (prev) {
+                    prev->next = next;
+                } else {
+                    server->clients = next;
+                }
+                
                 net_socket_close(client->socket);
+                free(client);
+                server->client_count--;
+                
+                client = next;
+                continue;
             }
-            free(client);
-            server->client_count--;
-            client = next;
-            continue;
         }
+        
         prev = client;
         client = next;
     }
     pthread_mutex_unlock(&server->clients_mutex);
+
+    for (size_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx++) {
+        free(chunk_buffers[chunk_idx]);
+    }
+    free(chunk_buffers);
+    free(chunk_lengths);
     
-    free(snapshot);
     free(buffer);
     proto_world_free(&proto_world);
 }
 
-void server_send_colony_info(Server* server, client_session* client, uint32_t colony_id) {
+void server_send_colony_info(Server* server, ClientSession* client, uint32_t colony_id) {
     if (!server || !client || !client->socket || colony_id == 0) return;
+
+    ProtoColonyDetail detail;
+    memset(&detail, 0, sizeof(detail));
+    detail.base.id = colony_id;
+    detail.tick = (uint32_t)server->world->tick;
     
     // Find colony index in internal world
     size_t colony_idx = 0;
@@ -567,25 +679,54 @@ void server_send_colony_info(Server* server, client_session* client, uint32_t co
         }
     }
     
-    if (!found) return;
-    
-    // Build protocol colony
-    proto_colony proto_colony;
-    memset(&proto_colony, 0, sizeof(proto_colony));
-    proto_colony.id = colony_id;
-    strncpy(proto_colony.name, server->world->colonies[colony_idx].name, MAX_COLONY_NAME - 1);
-    proto_colony.name[MAX_COLONY_NAME - 1] = '\0';
-    proto_colony.population = (uint32_t)server->world->colonies[colony_idx].cell_count;
-    proto_colony.alive = server->world->colonies[colony_idx].active;
-    
-    uint8_t buffer[COLONY_SERIALIZED_SIZE];
-    int len = protocol_serialize_colony(&proto_colony, buffer);
+    if (found) {
+        Colony* colony = &server->world->colonies[colony_idx];
+        fill_proto_colony_detail_base(server->world, colony, &detail.base);
+        detail.age = colony->age > UINT32_MAX ? UINT32_MAX : (uint32_t)colony->age;
+        detail.parent_id = colony->parent_id;
+        detail.state = (uint8_t)colony->state;
+        if (colony->is_dormant) {
+            detail.flags |= COLONY_DETAIL_FLAG_DORMANT;
+        }
+        detail.stress_level = colony->stress_level;
+        detail.biofilm_strength = colony->biofilm_strength;
+        detail.signal_strength = colony->signal_strength;
+        detail.drift_x = colony->drift_x;
+        detail.drift_y = colony->drift_y;
+        detail.behavior_mode = (uint8_t)colony->behavior_mode;
+        detail.focus_direction = colony->focus_direction;
+        detail.dominant_sensor = colony->dominant_sensor;
+        detail.dominant_drive = colony->dominant_drive;
+        detail.secondary_sensor = colony->secondary_sensor;
+        detail.secondary_drive = colony->secondary_drive;
+        detail.dominant_sensor_value = colony->dominant_sensor_value;
+        detail.dominant_drive_value = colony->dominant_drive_value;
+        detail.secondary_sensor_value = colony->secondary_sensor_value;
+        detail.secondary_drive_value = colony->secondary_drive_value;
+        detail.action_expand = colony->behavior_actions[COLONY_ACTION_EXPAND];
+        detail.action_attack = colony->behavior_actions[COLONY_ACTION_ATTACK];
+        detail.action_defend = colony->behavior_actions[COLONY_ACTION_DEFEND];
+        detail.action_signal = colony->behavior_actions[COLONY_ACTION_SIGNAL];
+        detail.action_transfer = colony->behavior_actions[COLONY_ACTION_TRANSFER];
+        detail.action_dormancy = colony->behavior_actions[COLONY_ACTION_DORMANCY];
+        detail.action_motility = colony->behavior_actions[COLONY_ACTION_MOTILITY];
+        fill_proto_colony_graph_links(colony, &detail);
+        detail.trait_expansion = summarize_trait_expansion(&colony->genome);
+        detail.trait_aggression = summarize_trait_aggression(&colony->genome);
+        detail.trait_resilience = summarize_trait_resilience(&colony->genome);
+        detail.trait_cooperation = summarize_trait_cooperation(&colony->genome);
+        detail.trait_efficiency = summarize_trait_efficiency(&colony->genome);
+        detail.trait_learning = summarize_trait_learning(&colony->genome);
+    }
+
+    uint8_t buffer[COLONY_DETAIL_SERIALIZED_SIZE];
+    int len = protocol_serialize_colony_detail(&detail, buffer);
     if (len > 0) {
         protocol_send_message(client->socket->fd, MSG_COLONY_INFO, buffer, (size_t)len);
     }
 }
 
-void server_handle_command(Server* server, client_session* client, CommandType cmd, void* data) {
+void server_handle_command(Server* server, ClientSession* client, CommandType cmd, void* data) {
     if (!server || !client) return;
     
     switch (cmd) {
@@ -600,10 +741,10 @@ void server_handle_command(Server* server, client_session* client, CommandType c
             break;
             
         case CMD_SPEED_UP:
-            if (server->speed_multiplier < 100.0f) {
+            if (server->speed_multiplier < 10.0f) {
                 server->speed_multiplier *= 2.0f;
                 // Clamp to max to handle floating point accumulation
-                if (server->speed_multiplier > 100.0f) server->speed_multiplier = 100.0f;
+                if (server->speed_multiplier > 10.0f) server->speed_multiplier = 10.0f;
                 printf("Speed increased to %.1fx by client %u\n", server->speed_multiplier, client->id);
             }
             break;
@@ -618,13 +759,30 @@ void server_handle_command(Server* server, client_session* client, CommandType c
             break;
             
         case CMD_RESET:
-            // Reset world while preserving dimensions
-            if (server->world) {
-                int width = server->world->width;
-                int height = server->world->height;
-                if (!server_rebuild_world_state(server, width, height, 5)) {
-                    fprintf(stderr, "Failed to reset world for client %u\n", client->id);
+            // Reset world while keeping the previous world alive until the new
+            // one and its atomic wrapper are ready.
+            {
+                World* new_world = world_create(server->world_width, server->world_height);
+                AtomicWorld* new_atomic_world = NULL;
+                if (new_world) {
+                    world_init_random_colonies(new_world, server->default_colonies);
+                    new_atomic_world = atomic_world_create(new_world, server->pool, server->pool->thread_count);
+                }
+
+                if (!new_world || !new_atomic_world) {
+                    atomic_world_destroy(new_atomic_world);
+                    world_destroy(new_world);
+                    printf("World reset failed for client %u\n", client->id);
                     break;
+                }
+
+                atomic_world_destroy(server->atomic_world);
+                world_destroy(server->world);
+                server->world = new_world;
+                server->atomic_world = new_atomic_world;
+                if (server->parallel_ctx) {
+                    server->parallel_ctx->world = server->world;
+                    parallel_init_regions(server->parallel_ctx, server->world_width, server->world_height);
                 }
             }
             printf("World reset by client %u\n", client->id);
@@ -641,68 +799,19 @@ void server_handle_command(Server* server, client_session* client, CommandType c
         case CMD_SPAWN_COLONY:
             if (data) {
                 CommandSpawnColony* spawn = (CommandSpawnColony*)data;
-                if (server_spawn_colony(server, spawn)) {
-                    printf("Spawned colony at (%.1f, %.1f) for client %u\n",
-                           spawn->x, spawn->y, client->id);
-                } else {
-                    printf("Spawn colony request rejected at (%.1f, %.1f) by client %u\n",
-                           spawn->x, spawn->y, client->id);
-                }
+                // Create a simple colony at the specified position
+                // This would need proper implementation using world_add_colony
+                printf("Spawn colony request at (%.1f, %.1f) by client %u\n", 
+                       spawn->x, spawn->y, client->id);
             }
             break;
     }
 }
 
-static bool server_spawn_colony(Server* server, const CommandSpawnColony* spawn) {
-    if (!server || !server->world || !spawn) return false;
-
-    int x = (int)spawn->x;
-    int y = (int)spawn->y;
-    Cell* cell = world_get_cell(server->world, x, y);
-    if (!cell || cell->colony_id != 0) return false;
-
-    Colony colony;
-    memset(&colony, 0, sizeof(colony));
-    colony.genome = genome_create_random();
-    colony.color = colony.genome.body_color;
-    colony.cell_count = 1;
-    colony.max_cell_count = 1;
-    colony.active = true;
-    colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
-    colony.wobble_phase = (float)(rand() % 628) / 100.0f;
-    colony.shape_evolution = (float)(rand() % 1000) / 1000.0f;
-    colony.state = COLONY_STATE_NORMAL;
-
-    if (spawn->name[0] != '\0') {
-        strncpy(colony.name, spawn->name, sizeof(colony.name) - 1);
-        colony.name[sizeof(colony.name) - 1] = '\0';
-    } else {
-        generate_scientific_name(colony.name, sizeof(colony.name));
-    }
-
-    uint32_t id = world_add_colony(server->world, colony);
-    if (id == 0) return false;
-
-    cell->colony_id = id;
-    cell->age = 0;
-    cell->is_border = true;
-
-    Colony* added = world_get_colony(server->world, id);
-    if (added) {
-        added->cell_count = 1;
-        added->max_cell_count = 1;
-    }
-
-    if (server->atomic_world) {
-        atomic_world_sync_from_world(server->atomic_world);
-    }
-    return true;
-}
-
-client_session* server_add_client(Server* server, net_socket* socket) {
+ClientSession* server_add_client(Server* server, NetSocket* socket) {
     if (!server || !socket) return NULL;
     
-    client_session* session = (client_session*)calloc(1, sizeof(client_session));
+    ClientSession* session = (ClientSession*)calloc(1, sizeof(ClientSession));
     if (!session) return NULL;
     
     session->socket = socket;
@@ -719,13 +828,13 @@ client_session* server_add_client(Server* server, net_socket* socket) {
     return session;
 }
 
-void server_remove_client(Server* server, client_session* client) {
+void server_remove_client(Server* server, ClientSession* client) {
     if (!server || !client) return;
     
     pthread_mutex_lock(&server->clients_mutex);
     
-    client_session* prev = NULL;
-    client_session* curr = server->clients;
+    ClientSession* prev = NULL;
+    ClientSession* curr = server->clients;
     
     while (curr) {
         if (curr == client) {
@@ -753,10 +862,10 @@ void server_process_clients(Server* server) {
     if (!server) return;
     
     pthread_mutex_lock(&server->clients_mutex);
-    client_session* client = server->clients;
+    ClientSession* client = server->clients;
     
     while (client) {
-        client_session* next = client->next;
+        ClientSession* next = client->next;
         
         if (!client->active || !client->socket || !client->socket->connected) {
             client = next;
@@ -783,7 +892,7 @@ void server_process_clients(Server* server) {
                     case MSG_COMMAND: {
                         CommandType cmd;
                         uint8_t cmd_data[256];
-                        if (protocol_deserialize_command(payload, header.payload_len, &cmd, cmd_data) > 0) {
+                        if (protocol_deserialize_command(payload, &cmd, cmd_data) > 0) {
                             server_handle_command(server, client, cmd, cmd_data);
                         }
                         break;

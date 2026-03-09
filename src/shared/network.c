@@ -12,8 +12,8 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-net_server* net_server_create(uint16_t port) {
-    net_server* server = (net_server*)malloc(sizeof(net_server));
+NetServer* net_server_create(uint16_t port) {
+    NetServer* server = (NetServer*)malloc(sizeof(NetServer));
     if (!server) return NULL;
     
     server->fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -58,25 +58,17 @@ net_server* net_server_create(uint16_t port) {
     return server;
 }
 
-void net_server_stop(net_server* server) {
+void net_server_destroy(NetServer* server) {
     if (!server) return;
-
-    server->listening = false;
+    
     if (server->fd >= 0) {
-        shutdown(server->fd, SHUT_RDWR);
         close(server->fd);
-        server->fd = -1;
     }
-}
-
-void net_server_destroy(net_server* server) {
-    if (!server) return;
-
-    net_server_stop(server);
+    server->listening = false;
     free(server);
 }
 
-net_socket* net_server_accept(net_server* server) {
+NetSocket* net_server_accept(NetServer* server) {
     if (!server || !server->listening) return NULL;
     
     struct sockaddr_in client_addr;
@@ -87,7 +79,7 @@ net_socket* net_server_accept(net_server* server) {
         return NULL;
     }
     
-    net_socket* socket = (net_socket*)malloc(sizeof(net_socket));
+    NetSocket* socket = (NetSocket*)malloc(sizeof(NetSocket));
     if (!socket) {
         close(client_fd);
         return NULL;
@@ -102,7 +94,7 @@ net_socket* net_server_accept(net_server* server) {
     return socket;
 }
 
-net_socket* net_client_connect(const char* host, uint16_t port) {
+NetSocket* net_client_connect(const char* host, uint16_t port) {
     if (!host) return NULL;
     
     struct addrinfo hints, *result;
@@ -129,7 +121,7 @@ net_socket* net_client_connect(const char* host, uint16_t port) {
         return NULL;
     }
     
-    net_socket* socket = (net_socket*)malloc(sizeof(net_socket));
+    NetSocket* socket = (NetSocket*)malloc(sizeof(NetSocket));
     if (!socket) {
         close(fd);
         freeaddrinfo(result);
@@ -146,7 +138,7 @@ net_socket* net_client_connect(const char* host, uint16_t port) {
     return socket;
 }
 
-void net_socket_close(net_socket* socket) {
+void net_socket_close(NetSocket* socket) {
     if (!socket) return;
     
     if (socket->fd >= 0) {
@@ -156,7 +148,7 @@ void net_socket_close(net_socket* socket) {
     free(socket);
 }
 
-int net_send(net_socket* socket, const uint8_t* data, size_t len) {
+int net_send(NetSocket* socket, const uint8_t* data, size_t len) {
     if (!socket || !socket->connected || socket->fd < 0) return -1;
     if (!data || len == 0) return 0;
     
@@ -182,7 +174,7 @@ int net_send(net_socket* socket, const uint8_t* data, size_t len) {
     return (int)sent;
 }
 
-int net_recv(net_socket* socket, uint8_t* buffer, size_t max_len) {
+int net_recv(NetSocket* socket, uint8_t* buffer, size_t max_len) {
     if (!socket || !socket->connected || socket->fd < 0) return -1;
     if (!buffer || max_len == 0) return 0;
     
@@ -201,7 +193,7 @@ int net_recv(net_socket* socket, uint8_t* buffer, size_t max_len) {
     return (int)n;
 }
 
-bool net_has_data(net_socket* socket) {
+bool net_has_data(NetSocket* socket) {
     if (!socket || !socket->connected || socket->fd < 0) return false;
     
     fd_set readfds;
@@ -214,7 +206,7 @@ bool net_has_data(net_socket* socket) {
     return result > 0 && FD_ISSET(socket->fd, &readfds);
 }
 
-void net_set_nonblocking(net_socket* socket, bool nonblocking) {
+void net_set_nonblocking(NetSocket* socket, bool nonblocking) {
     if (!socket || socket->fd < 0) return;
     
     int flags = fcntl(socket->fd, F_GETFL, 0);
@@ -229,7 +221,7 @@ void net_set_nonblocking(net_socket* socket, bool nonblocking) {
     fcntl(socket->fd, F_SETFL, flags);
 }
 
-void net_set_nodelay(net_socket* socket, bool nodelay) {
+void net_set_nodelay(NetSocket* socket, bool nodelay) {
     if (!socket || socket->fd < 0) return;
     
     int flag = nodelay ? 1 : 0;

@@ -65,41 +65,30 @@ static Genome create_test_genome(float spread, float mutation, float aggr, float
     g.defense_priority = spread;
     // Survival strategies
     g.dormancy_threshold = spread;
-    g.dormancy_resistance = spread;
-    g.persister_entry_stress = spread;
-    g.persister_exit_stress = spread;
-    g.persister_entry_rate = spread;
-    g.persister_exit_rate = spread;
-    g.sporulation_threshold = spread;
     g.biofilm_investment = spread;
-    g.biofilm_tendency = spread;
     g.motility = spread;
-    g.motility_direction = spread * 2.0f - 1.0f;
-    g.specialization = spread;
     g.efficiency = spread;
     // Neural network
     for (int i = 0; i < 8; i++) g.hidden_weights[i] = spread * 2.0f - 1.0f;  // Scale to -1 to 1 range
     g.learning_rate = spread;
     g.memory_factor = spread;
+    for (int i = 0; i < COLONY_SENSOR_COUNT; i++) g.behavior_sensor_gains[i] = spread;
+    for (int drive = 0; drive < COLONY_DRIVE_COUNT; drive++) {
+        g.behavior_drive_biases[drive] = spread * 2.0f - 1.0f;
+        for (int sensor = 0; sensor < COLONY_SENSOR_COUNT; sensor++) {
+            g.behavior_drive_weights[drive][sensor] = spread * 2.0f - 1.0f;
+        }
+    }
+    for (int action = 0; action < COLONY_ACTION_COUNT; action++) {
+        g.behavior_action_biases[action] = spread * 2.0f - 1.0f;
+        for (int drive = 0; drive < COLONY_DRIVE_COUNT; drive++) {
+            g.behavior_action_weights[action][drive] = spread * 2.0f - 1.0f;
+        }
+    }
     // Environmental sensing (missing fields)
     g.toxin_sensitivity = spread;
     g.quorum_threshold = spread;
-    uint8_t color = (uint8_t)(spread * 255.0f);
-    g.body_color = (Color){color, color, color};
-    g.border_color = (Color){(uint8_t)(255 - color), color, (uint8_t)(color / 2)};
     return g;
-}
-
-static Colony create_hgt_test_colony(float gene_transfer_rate, float plasmid_fraction) {
-    Colony colony;
-    memset(&colony, 0, sizeof(Colony));
-    colony.genome = create_test_genome(0.0f, gene_transfer_rate, 0.0f, 1.0f, 1.0f);
-    colony.genome.gene_transfer_rate = gene_transfer_rate;
-    colony.hgt_plasmid_fraction = plasmid_fraction;
-    colony.hgt_fitness_scale = 1.0f;
-    colony.active = true;
-    colony.cell_count = 1;
-    return colony;
 }
 
 // ============================================================================
@@ -218,7 +207,7 @@ TEST(genome_create_random_produces_values_in_valid_ranges) {
     for (int i = 0; i < 100; i++) {
         Genome g = genome_create_random();
         ASSERT_TRUE(g.spread_rate >= 0.0f && g.spread_rate <= 1.0f);
-        ASSERT_TRUE(g.mutation_rate >= 0.0f && g.mutation_rate <= 0.5f);  // mutation_rate range increased for dynamic sim
+        ASSERT_TRUE(g.mutation_rate >= 0.0f && g.mutation_rate <= 0.1f);  // mutation_rate is 0-0.1
         ASSERT_TRUE(g.aggression >= 0.0f && g.aggression <= 1.0f);
         ASSERT_TRUE(g.resilience >= 0.0f && g.resilience <= 1.0f);
         ASSERT_TRUE(g.metabolism >= 0.0f && g.metabolism <= 1.0f);
@@ -275,8 +264,7 @@ TEST(genome_distance_returns_one_for_maximally_different) {
     Genome b = create_test_genome(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
     
     float dist = genome_distance(&a, &b);
-    ASSERT_TRUE(dist > 0.5f);
-    ASSERT_TRUE(isfinite(dist));
+    ASSERT_FLOAT_EQ(dist, 1.0f, 0.0001f);
 }
 
 TEST(genome_distance_returns_half_for_halfway_different) {
@@ -284,8 +272,8 @@ TEST(genome_distance_returns_half_for_halfway_different) {
     Genome b = create_test_genome(0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     
     float dist = genome_distance(&a, &b);
-    ASSERT_TRUE(dist > 0.2f);
-    ASSERT_TRUE(dist < 0.9f);
+    // Tolerance widened to account for discrete max_tracked field rounding
+    ASSERT_FLOAT_EQ(dist, 0.5f, 0.01f);
 }
 
 TEST(genome_merge_with_equal_weights_returns_average) {
@@ -448,105 +436,6 @@ TEST(simulation_tick_increments_world_tick_counter) {
     world_destroy(world);
 }
 
-TEST(hgt_donor_recipient_contact_produces_transconjugants) {
-    World* world = world_create(6, 3);
-    ASSERT_NOT_NULL(world);
-
-    HGTKinetics kinetics = world->hgt_kinetics;
-    kinetics.contact_rate = 1.0f;
-    kinetics.donor_transfer_rate = 1.0f;
-    kinetics.transconjugant_transfer_rate = 1.0f;
-    kinetics.recipient_uptake_rate = 1.0f;
-    kinetics.transfer_efficiency = 0.8f;
-    kinetics.enable_plasmid_cost = false;
-    kinetics.enable_plasmid_loss = false;
-    world_set_hgt_kinetics(world, &kinetics);
-
-    Colony donor = create_hgt_test_colony(1.0f, 1.0f);
-    Colony recipient = create_hgt_test_colony(0.0f, 0.0f);
-    uint32_t donor_id = world_add_colony(world, donor);
-    uint32_t recipient_id = world_add_colony(world, recipient);
-
-    world_get_cell(world, 2, 1)->colony_id = donor_id;
-    world_get_cell(world, 3, 1)->colony_id = recipient_id;
-
-    for (int i = 0; i < 10; i++) {
-        simulation_spread(world);
-    }
-
-    Colony* recipient_colony = world_get_colony(world, recipient_id);
-    ASSERT_NOT_NULL(recipient_colony);
-    ASSERT_TRUE(recipient_colony->hgt_plasmid_fraction > 0.0f);
-    ASSERT_TRUE(world->hgt_metrics.transfer_events_total > 0);
-    ASSERT_TRUE(world->hgt_metrics.transconjugant_events_total > 0);
-
-    world_destroy(world);
-}
-
-TEST(hgt_transconjugant_rate_controls_secondary_transfer) {
-    World* world = world_create(8, 3);
-    ASSERT_NOT_NULL(world);
-
-    HGTKinetics kinetics = world->hgt_kinetics;
-    kinetics.contact_rate = 1.0f;
-    kinetics.donor_transfer_rate = 0.0f;
-    kinetics.transconjugant_transfer_rate = 1.0f;
-    kinetics.recipient_uptake_rate = 1.0f;
-    kinetics.transfer_efficiency = 0.8f;
-    kinetics.enable_plasmid_cost = false;
-    kinetics.enable_plasmid_loss = false;
-    world_set_hgt_kinetics(world, &kinetics);
-
-    Colony transconjugant = create_hgt_test_colony(1.0f, 1.0f);
-    transconjugant.hgt_is_transconjugant = true;
-    Colony recipient = create_hgt_test_colony(0.0f, 0.0f);
-    uint32_t transconjugant_id = world_add_colony(world, transconjugant);
-    uint32_t recipient_id = world_add_colony(world, recipient);
-
-    world_get_cell(world, 3, 1)->colony_id = transconjugant_id;
-    world_get_cell(world, 4, 1)->colony_id = recipient_id;
-
-    for (int i = 0; i < 10; i++) {
-        simulation_spread(world);
-    }
-
-    Colony* recipient_colony = world_get_colony(world, recipient_id);
-    ASSERT_NOT_NULL(recipient_colony);
-    ASSERT_TRUE(recipient_colony->hgt_plasmid_fraction > 0.0f);
-
-    world_destroy(world);
-}
-
-TEST(hgt_optional_cost_and_loss_reduce_fitness_and_plasmid) {
-    World* world = world_create(6, 6);
-    ASSERT_NOT_NULL(world);
-
-    HGTKinetics kinetics = world->hgt_kinetics;
-    kinetics.enable_plasmid_cost = true;
-    kinetics.enable_plasmid_loss = true;
-    kinetics.plasmid_cost_per_fraction = 0.4f;
-    kinetics.plasmid_loss_rate = 0.2f;
-    world_set_hgt_kinetics(world, &kinetics);
-
-    Colony colony = create_hgt_test_colony(0.0f, 1.0f);
-    colony.genome.efficiency = 1.0f;
-    colony.biofilm_strength = 1.0f;
-    uint32_t id = world_add_colony(world, colony);
-
-    world_get_cell(world, 3, 3)->colony_id = id;
-    world_get_colony(world, id)->cell_count = 1;
-
-    simulation_update_hgt_kinetics(world);
-
-    Colony* updated = world_get_colony(world, id);
-    ASSERT_NOT_NULL(updated);
-    ASSERT_TRUE(updated->hgt_plasmid_fraction < 1.0f);
-    ASSERT_TRUE(updated->hgt_fitness_scale < 1.0f);
-    ASSERT_TRUE(world->hgt_metrics.plasmid_loss_events_total > 0);
-
-    world_destroy(world);
-}
-
 // ============================================================================
 // Main
 // ============================================================================
@@ -581,9 +470,6 @@ int main(void) {
     RUN_TEST(connected_components_finds_separate_blocks);
     RUN_TEST(simulation_spread_expands_colony_cells);
     RUN_TEST(simulation_tick_increments_world_tick_counter);
-    RUN_TEST(hgt_donor_recipient_contact_produces_transconjugants);
-    RUN_TEST(hgt_transconjugant_rate_controls_secondary_transfer);
-    RUN_TEST(hgt_optional_cost_and_loss_reduce_fitness_and_plasmid);
     
     printf("\n=====================\n");
     printf("All tests passed!\n");

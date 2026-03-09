@@ -12,11 +12,14 @@
 #include "../shared/types.h"
 #include "threadpool.h"
 
+struct AtomicWorld;
+
 /**
  * Work item for region-based processing.
  */
 typedef struct {
-    struct AtomicWorldStruct* aworld;
+    struct AtomicWorld* aworld;
+    int region_index;
     int start_x, start_y;
     int end_x, end_y;
     int thread_id;
@@ -32,7 +35,7 @@ typedef struct {
  * The atomic grid allows lock-free parallel spreading.
  * Colony stats are updated atomically during the spread phase.
  */
-typedef struct AtomicWorldStruct {
+typedef struct AtomicWorld {
     DoubleBufferedGrid grid;         // Double-buffered atomic cells
     AtomicColonyStats* colony_stats; // Per-colony atomic counters
     size_t max_colonies;             // Capacity of colony_stats array
@@ -44,22 +47,50 @@ typedef struct AtomicWorldStruct {
     ThreadPool* pool;
     int thread_count;
     
-    // Base seed for deterministic parallel RNG (mixed with tick/cell/direction)
-    uint32_t deterministic_seed;
-    
-    // Preallocated region work items to avoid per-tick malloc
-    AtomicRegionWork* region_work;
-    int region_work_count;
-} AtomicWorld;
+    // RNG seeds per thread for deterministic parallel RNG
+    uint32_t* thread_seeds;
 
-typedef struct {
-    double age_ms;
-    double spread_ms;
-    double sync_to_world_ms;
-    double serial_ms;
-    double sync_from_world_ms;
-    double total_ms;
-} AtomicTickBreakdown;
+    // Precomputed region work items for parallel phases
+    AtomicRegionWork* region_work;
+    int region_count;
+
+    // Reusable argument vector for batched task submission
+    void** submit_args;
+
+    // Per-region spread deltas to reduce atomic contention
+    int32_t* spread_deltas;          // [region_count * max_colonies]
+    uint32_t* spread_touched_ids;    // [region_count * max_colonies]
+    uint32_t* spread_touched_counts; // [region_count]
+    int spread_slot_capacity;
+    int spread_slots_used;
+
+    // Active-frontier tracking for sparse spread processing
+    int* spread_frontier_indices;     // [width * height] active source cell indices
+    int spread_frontier_count;
+    bool spread_frontier_enabled;
+
+    // Dedicated phase workers for low-overhead atomic phases
+    pthread_t* phase_threads;
+    AtomicRegionWork* phase_worker_args;
+    int phase_worker_count;
+    int* worker_region_start;
+    int* worker_region_end;
+    pthread_mutex_t phase_mutex;
+    pthread_cond_t phase_cond;
+    pthread_cond_t phase_done_cond;
+    uint32_t phase_generation;
+    int phase_done_count;
+    int active_phase;
+    int phase_region_stride;
+    bool phase_shutdown;
+    bool phase_system_ready;
+
+    // Run expensive serial maintenance every N ticks.
+    int serial_interval;
+
+    // Disable frontier when active source density exceeds this percentage.
+    int frontier_dense_pct;
+} AtomicWorld;
 
 // ============================================================================
 // Initialization / Cleanup
@@ -106,15 +137,32 @@ void atomic_world_sync_to_world(AtomicWorld* aworld);
 void atomic_tick(AtomicWorld* aworld);
 
 /**
- * Run one simulation tick and capture per-phase timing.
- */
-void atomic_tick_with_breakdown(AtomicWorld* aworld, AtomicTickBreakdown* breakdown);
-
-/**
  * Parallel spread phase only.
  * Each cell tries to spread to neighbors using atomic CAS.
  */
 void atomic_spread(AtomicWorld* aworld);
+
+/**
+ * Run spread phase and apply accumulated spread deltas.
+ * Useful for profiling spread-only throughput.
+ */
+void atomic_spread_step(AtomicWorld* aworld);
+
+/**
+ * Apply accumulated spread deltas and return total applied claims.
+ * Useful for profiling spread pipeline breakdown.
+ */
+int64_t atomic_spread_apply_deltas(AtomicWorld* aworld);
+
+/**
+ * Enable/disable active-frontier spread mode (default: enabled).
+ */
+void atomic_set_spread_frontier_enabled(AtomicWorld* aworld, bool enabled);
+
+/**
+ * Return current frontier source-cell count used for spread scheduling.
+ */
+int atomic_get_spread_frontier_count(AtomicWorld* aworld);
 
 /**
  * Parallel age phase only.

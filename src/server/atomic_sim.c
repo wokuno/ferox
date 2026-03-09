@@ -8,212 +8,846 @@
 #include "atomic_sim.h"
 #include "genetics.h"
 #include "simulation.h"
-#include "simulation_common.h"
 #include "../shared/utils.h"
-#include "../shared/names.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
-#include <time.h>
 
-#define QS_SIGNAL_MEMORY 0.82f
+// Direction offsets for 8-connectivity spreading  
+static const int DX8[] = {0, 1, 1, 1, 0, -1, -1, -1};
+static const int DY8[] = {-1, -1, 0, 1, 1, 1, 0, -1};
+
+enum {
+    ATOMIC_PHASE_IDLE = 0,
+    ATOMIC_PHASE_AGE = 1,
+    ATOMIC_PHASE_SPREAD = 2,
+    ATOMIC_PHASE_SPREAD_FRONTIER = 3
+};
 
 // ============================================================================
-// Lock-Free Parallel Simulation Engine
+// Thread-local RNG for deterministic parallel processing
 // ============================================================================
-// 
-// This module implements a lock-free parallel simulation using C11 atomics.
-// The algorithm is designed for multi-threaded execution with minimal
-// synchronization overhead, and is structured to be adaptable for future
-// GPU/MPI/SHMEM acceleration.
-//
-// PARALLEL EXECUTION MODEL:
-// =========================
-// The simulation follows a three-phase pattern per tick:
-//   1. AGE PHASE:   All cells age in parallel (no dependencies)
-//   2. SPREAD PHASE: Colonies spread to neighbors using CAS operations
-//   3. SERIAL PHASE: Complex operations (nutrients, combat, mutations)
-//
-// LOCK-FREE CAS (Compare-And-Swap) LOGIC:
-// =======================================
-// The core of the parallel spread uses atomic CAS operations to safely
-// claim empty cells without locks:
-//
-//   atomic_cell_try_claim(neighbor, expected_value, new_value)
-//   
-//   This atomically performs:
-//     if (neighbor->colony_id == expected_value) {
-//         neighbor->colony_id = new_value;
-//         return true;
-//     }
-//     return false;
-//
-// WHY CAS IS ESSENTIAL:
-// - Without locks, multiple threads could try to claim the same empty cell
-// - CAS ensures exactly one thread succeeds; others fail and retry elsewhere
-// - This "optimistic concurrency" avoids lock contention entirely
-// - The " ABA problem" is avoided by checking colony_id is still 0 (empty)
-//
-// RACE CONDITION HANDLING:
-// =======================
-// Consider two threads T1 and T2 both trying to spread to cell X (empty):
-//   T1: reads X.colony_id = 0
-//   T2: reads X.colony_id = 0   (both see empty)
-//   T1: CAS(X, 0, colony_A) -> succeeds, X now belongs to colony A
-//   T2: CAS(X, 0, colony_B) -> fails because X.colony_id is now A
-//   T2: loop continues, tries other directions
-//
-// This ensures no cell is claimed by two colonies - deterministic result
-// regardless of thread scheduling.
-//
-// CELL AGING:
-// ===========
-// Cells age each tick to create temporal dynamics. Age affects:
-// - Death probability (older cells more likely to die)
-// - Visual representation (older cells appear different)
-// Age is applied atomically: atomic_cell_age() increments age with
-// saturation at 255 (max uint8_t value).
 
-static inline uint32_t mix_u32(uint32_t value) {
-    value ^= value >> 16;
-    value *= 0x7feb352du;
-    value ^= value >> 15;
-    value *= 0x846ca68bu;
-    value ^= value >> 16;
-    return value;
+static inline uint32_t xorshift32(uint32_t* state) {
+    uint32_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    return x;
 }
 
-static inline float deterministic_float(
-    uint32_t base_seed,
-    uint64_t tick,
-    uint32_t cell_idx,
+static inline float rand_float_local(uint32_t* state) {
+    return (float)(xorshift32(state) & 0x7FFFFFFF) / (float)0x7FFFFFFF;
+}
+
+static int atomic_parse_env_int(const char* name, int default_value, int min_value, int max_value) {
+    const char* raw = getenv(name);
+    if (!raw || !*raw) {
+        return default_value;
+    }
+
+    char* end = NULL;
+    long value = strtol(raw, &end, 10);
+    if (end == raw || (end && *end != '\0')) {
+        return default_value;
+    }
+
+    if (value < min_value) value = min_value;
+    if (value > max_value) value = max_value;
+    return (int)value;
+}
+
+static bool atomic_parse_env_bool(const char* name, bool default_value) {
+    const char* raw = getenv(name);
+    if (!raw || !*raw) {
+        return default_value;
+    }
+
+    if (strcmp(raw, "1") == 0 || strcmp(raw, "true") == 0 || strcmp(raw, "yes") == 0 || strcmp(raw, "on") == 0) {
+        return true;
+    }
+    if (strcmp(raw, "0") == 0 || strcmp(raw, "false") == 0 || strcmp(raw, "no") == 0 || strcmp(raw, "off") == 0) {
+        return false;
+    }
+
+    return default_value;
+}
+
+static bool calculate_social_vector(
+    World* world,
+    DoubleBufferedGrid* grid,
+    int cell_x,
+    int cell_y,
+    Colony* colony,
+    float* out_norm_dx,
+    float* out_norm_dy
+);
+
+static float calculate_social_influence_for_direction(
+    int spread_dx,
+    int spread_dy,
+    float social_factor,
+    float neighbor_norm_dx,
+    float neighbor_norm_dy
+);
+
+static void compute_region_grid(int width, int height, int thread_count, int* out_x, int* out_y) {
+    if (width <= 0 || height <= 0 || thread_count <= 0) {
+        *out_x = 1;
+        *out_y = 1;
+        return;
+    }
+
+    int tile_x = (width + 31) / 32;
+    int tile_y = (height + 31) / 32;
+    int max_regions = tile_x * tile_y;
+    if (max_regions < 1) {
+        max_regions = 1;
+    }
+
+    int target_regions = thread_count * 4;
+    if (target_regions < thread_count) {
+        target_regions = thread_count;
+    }
+    if (target_regions > max_regions) {
+        target_regions = max_regions;
+    }
+
+    double aspect = (double)width / (double)height;
+    int regions_x = (int)sqrt((double)target_regions * aspect);
+    if (regions_x < 1) {
+        regions_x = 1;
+    }
+    if (regions_x > width) {
+        regions_x = width;
+    }
+
+    int regions_y = (target_regions + regions_x - 1) / regions_x;
+    if (regions_y < 1) {
+        regions_y = 1;
+    }
+    if (regions_y > height) {
+        regions_y = height;
+    }
+
+    while (regions_x * regions_y < target_regions && regions_x < width) {
+        regions_x++;
+    }
+
+    *out_x = regions_x;
+    *out_y = regions_y;
+}
+
+static int atomic_alloc_spread_tracking(AtomicWorld* aworld, size_t max_colonies) {
+    int slot_capacity = aworld->region_count;
+    if (aworld->thread_count > slot_capacity) {
+        slot_capacity = aworld->thread_count;
+    }
+    if (slot_capacity < 1) {
+        slot_capacity = 1;
+    }
+
+    size_t total_slots = (size_t)slot_capacity * max_colonies;
+
+    int32_t* deltas = (int32_t*)calloc(total_slots, sizeof(int32_t));
+    uint32_t* touched_ids = (uint32_t*)calloc(total_slots, sizeof(uint32_t));
+    uint32_t* touched_counts = (uint32_t*)calloc((size_t)slot_capacity, sizeof(uint32_t));
+
+    if (!deltas || !touched_ids || !touched_counts) {
+        free(deltas);
+        free(touched_ids);
+        free(touched_counts);
+        return -1;
+    }
+
+    free(aworld->spread_deltas);
+    free(aworld->spread_touched_ids);
+    free(aworld->spread_touched_counts);
+
+    aworld->spread_deltas = deltas;
+    aworld->spread_touched_ids = touched_ids;
+    aworld->spread_touched_counts = touched_counts;
+    aworld->spread_slot_capacity = slot_capacity;
+    aworld->spread_slots_used = aworld->region_count;
+    return 0;
+}
+
+static int64_t atomic_apply_spread_deltas_internal(AtomicWorld* aworld) {
+    if (!aworld || !aworld->spread_deltas || !aworld->spread_touched_ids || !aworld->spread_touched_counts) {
+        return 0;
+    }
+
+    int64_t total_applied = 0;
+
+    int slots_used = aworld->spread_slots_used;
+    if (slots_used < 0 || slots_used > aworld->spread_slot_capacity) {
+        slots_used = aworld->spread_slot_capacity;
+    }
+
+    for (int slot = 0; slot < slots_used; slot++) {
+        size_t slot_base = (size_t)slot * aworld->max_colonies;
+        int32_t* region_deltas = &aworld->spread_deltas[slot_base];
+        uint32_t* region_touched = &aworld->spread_touched_ids[slot_base];
+        uint32_t touched_count = aworld->spread_touched_counts[slot];
+
+        for (uint32_t i = 0; i < touched_count; i++) {
+            uint32_t colony_id = region_touched[i];
+            int32_t delta = region_deltas[colony_id];
+            if (delta <= 0) {
+                region_deltas[colony_id] = 0;
+                continue;
+            }
+
+            AtomicColonyStats* stats = &aworld->colony_stats[colony_id];
+            int64_t new_count = atomic_fetch_add(&stats->cell_count, (int64_t)delta) + (int64_t)delta;
+            int64_t old_max = atomic_load_explicit(&stats->max_cell_count, memory_order_relaxed);
+            while (new_count > old_max) {
+                if (atomic_compare_exchange_weak(&stats->max_cell_count, &old_max, new_count)) {
+                    break;
+                }
+            }
+
+            total_applied += (int64_t)delta;
+
+            region_deltas[colony_id] = 0;
+        }
+
+        aworld->spread_touched_counts[slot] = 0;
+    }
+
+    return total_applied;
+}
+
+static bool atomic_cell_has_empty_neighbor(const AtomicCell* cells, int width, int height, int idx) {
+    int x = idx % width;
+    int y = idx / width;
+
+    for (int d = 0; d < 8; d++) {
+        int nx = x + DX8[d];
+        int ny = y + DY8[d];
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+            continue;
+        }
+
+        size_t nidx = (size_t)ny * (size_t)width + (size_t)nx;
+        if (atomic_load_explicit(&cells[nidx].colony_id, memory_order_relaxed) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static float atomic_direction_alignment(int dx, int dy, float drift_x, float drift_y) {
+    float dir_x = (float)dx;
+    float dir_y = (float)dy;
+    float dir_len = sqrtf(dir_x * dir_x + dir_y * dir_y);
+    float drift_len = sqrtf(drift_x * drift_x + drift_y * drift_y);
+    if (dir_len < 0.0001f || drift_len < 0.0001f) {
+        return 0.0f;
+    }
+
+    return (dir_x * drift_x + dir_y * drift_y) / (dir_len * drift_len);
+}
+
+static void atomic_count_neighbor_mix(
+    const AtomicCell* cells,
+    int width,
+    int height,
+    int x,
+    int y,
     uint32_t colony_id,
-    uint32_t lane
+    int* friendly,
+    int* enemy,
+    int* empty,
+    int* total
 ) {
-    uint32_t mixed = base_seed;
-    mixed ^= (uint32_t)tick;
-    mixed ^= (uint32_t)(tick >> 32) * 0x9e3779b9u;
-    mixed ^= cell_idx * 0x85ebca6bu;
-    mixed ^= colony_id * 0xc2b2ae35u;
-    mixed ^= lane * 0x27d4eb2du;
-    return (float)(mix_u32(mixed) & 0x00FFFFFFu) / 16777216.0f;
-}
+    if (friendly) *friendly = 0;
+    if (enemy) *enemy = 0;
+    if (empty) *empty = 0;
+    if (total) *total = 0;
 
-static void atomic_region_layout(const AtomicWorld* aworld, int* regions_x, int* regions_y) {
-    if (aworld->thread_count <= 1) {
-        *regions_x = 1;
-        *regions_y = 1;
-    } else if (aworld->thread_count == 2) {
-        *regions_x = 2;
-        *regions_y = 1;
-    } else if (aworld->thread_count <= 4) {
-        *regions_x = aworld->thread_count;
-        *regions_y = 1;
-    } else {
-        *regions_x = 4;
-        *regions_y = 4;
+    for (int d = 0; d < 8; d++) {
+        int nx = x + DX8[d];
+        int ny = y + DY8[d];
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+            continue;
+        }
+
+        size_t nidx = (size_t)ny * (size_t)width + (size_t)nx;
+        uint32_t neighbor_colony = atomic_load_explicit(&cells[nidx].colony_id, memory_order_relaxed);
+        if (total) (*total)++;
+        if (neighbor_colony == 0) {
+            if (empty) (*empty)++;
+        } else if (neighbor_colony == colony_id) {
+            if (friendly) (*friendly)++;
+        } else {
+            if (enemy) (*enemy)++;
+        }
     }
 }
 
-static inline float monod_saturation(float substrate, float half_saturation) {
-    if (substrate <= 0.0f) return 0.0f;
-    if (half_saturation <= 0.0f) return 1.0f;
-    return substrate / (half_saturation + substrate);
+static float atomic_calculate_behavioral_spread_modifier(
+    AtomicWorld* aworld,
+    Colony* colony,
+    uint32_t colony_id,
+    int source_x,
+    int source_y,
+    int target_x,
+    int target_y,
+    int dir_index,
+    int source_friendly,
+    int source_enemy,
+    int source_empty,
+    int source_total
+) {
+    World* world = aworld->world;
+    int target_idx = target_y * world->width + target_x;
+    float modifier = 1.0f;
+
+    float nutrient = world->nutrients ? world->nutrients[target_idx] : 0.5f;
+    float toxin = world->toxins ? world->toxins[target_idx] : 0.0f;
+    modifier *= (1.0f + colony->genome.nutrient_sensitivity * (nutrient - 0.45f) * 0.8f);
+    modifier *= (1.0f - colony->genome.toxin_sensitivity * toxin * 0.9f);
+
+    if (world->signals && world->signal_source && world->signal_source[target_idx] != 0) {
+        float signal = world->signals[target_idx];
+        if (world->signal_source[target_idx] == colony_id) {
+            modifier *= (1.0f + colony->genome.signal_sensitivity * signal * 0.25f);
+        } else {
+            modifier *= (1.0f - colony->genome.signal_sensitivity * signal * 0.12f * (1.0f - colony->genome.merge_affinity));
+        }
+    }
+
+    if (world->alarm_signals && world->alarm_source && world->alarm_signals[target_idx] > 0.001f) {
+        float alarm = world->alarm_signals[target_idx];
+        if (world->alarm_source[target_idx] == colony_id) {
+            float reinforcement = colony->genome.aggression - colony->genome.defense_priority;
+            modifier *= (1.0f + alarm * reinforcement * 0.20f);
+            modifier *= (1.0f - alarm * fmaxf(0.0f, colony->genome.defense_priority - colony->genome.aggression) * 0.25f);
+        } else {
+            modifier *= (1.0f - alarm * (0.18f + colony->genome.signal_sensitivity * 0.22f));
+        }
+    }
+
+    if (source_total > 0) {
+        float local_density = (float)source_friendly / (float)source_total;
+        if (local_density > colony->genome.quorum_threshold) {
+            float density_penalty = (local_density - colony->genome.quorum_threshold) * (1.0f - colony->genome.density_tolerance);
+            modifier *= (1.0f - density_penalty);
+        }
+    }
+
+    if (colony->is_dormant || colony->state == COLONY_STATE_DORMANT) {
+        modifier *= 0.2f + nutrient * (0.45f + colony->genome.dormancy_resistance * 0.2f);
+    } else if (colony->state == COLONY_STATE_STRESSED) {
+        modifier *= (0.85f + colony->genome.aggression * 0.25f);
+    }
+
+    modifier *= (0.75f + colony->behavior_actions[COLONY_ACTION_EXPAND] * 0.60f);
+    modifier *= (1.0f - colony->behavior_actions[COLONY_ACTION_DORMANCY] * 0.45f);
+
+    modifier *= (1.0f - colony->biofilm_strength * colony->genome.biofilm_investment * 0.12f);
+    modifier *= (0.9f + colony->success_history[dir_index] * (0.15f + colony->genome.learning_rate * 0.15f));
+
+    float drift_alignment = atomic_direction_alignment(target_x - source_x, target_y - source_y, colony->drift_x, colony->drift_y);
+    modifier *= (1.0f + drift_alignment * colony->genome.motility * (0.2f + colony->behavior_actions[COLONY_ACTION_MOTILITY] * 0.35f));
+
+    if (source_enemy > 0) {
+        float frontier_bias = colony->genome.specialization * (colony->genome.aggression + colony->genome.defense_priority * 0.5f - 0.5f);
+        modifier *= (1.0f + frontier_bias * 0.3f);
+        modifier *= (0.9f + colony->behavior_actions[COLONY_ACTION_ATTACK] * 0.55f);
+        modifier *= (0.95f + colony->behavior_actions[COLONY_ACTION_DEFEND] * 0.20f);
+    } else if (source_empty == 0 && source_total > 0 && source_friendly * 2 >= source_total) {
+        modifier *= (1.0f - colony->genome.specialization * 0.1f);
+        modifier *= (0.92f + colony->behavior_actions[COLONY_ACTION_SIGNAL] * 0.18f);
+    }
+
+    return utils_clamp_f(modifier, 0.15f, 2.5f);
 }
 
-static inline float monod_growth_multiplier(const World* world, float substrate) {
-    if (!world || !world->monod.enabled) return 1.0f;
+static void atomic_rebuild_spread_frontier(AtomicWorld* aworld) {
+    if (!aworld || !aworld->spread_frontier_indices) {
+        return;
+    }
 
-    float saturation = monod_saturation(substrate, world->monod.half_saturation);
-    float coupling = utils_clamp_f(world->monod.growth_coupling, 0.0f, 1.0f);
-    return (1.0f - coupling) + coupling * saturation;
+    int width = aworld->grid.width;
+    int height = aworld->grid.height;
+    int cell_count = width * height;
+    if (cell_count <= 0) {
+        aworld->spread_frontier_count = 0;
+        return;
+    }
+
+    AtomicCell* current = grid_current(&aworld->grid);
+
+    int frontier_count = 0;
+    for (int idx = 0; idx < cell_count; idx++) {
+        uint32_t colony_id = atomic_load_explicit(&current[idx].colony_id, memory_order_relaxed);
+        if (colony_id == 0) {
+            continue;
+        }
+
+        if (!atomic_cell_has_empty_neighbor(current, width, height, idx)) {
+            continue;
+        }
+
+        aworld->spread_frontier_indices[frontier_count++] = idx;
+    }
+
+    aworld->spread_frontier_count = frontier_count;
 }
 
-typedef struct {
-    float social_factor;
-    float nearest_norm_dx;
-    float nearest_norm_dy;
-    uint8_t has_social_effect;
-} SocialInfluenceContext;
+static inline void atomic_record_spread_delta(
+    AtomicWorld* aworld,
+    int32_t* slot_deltas,
+    uint32_t* slot_touched,
+    uint32_t* touched_count,
+    uint32_t colony_id
+) {
+    if (colony_id >= aworld->max_colonies) {
+        return;
+    }
 
-static const float DIR8_NORM_DX[8] = {
-    0.0f, 0.70710677f, 1.0f, 0.70710677f,
-    0.0f, -0.70710677f, -1.0f, -0.70710677f
-};
-
-static const float DIR8_NORM_DY[8] = {
-    -1.0f, -0.70710677f, 0.0f, 0.70710677f,
-    1.0f, 0.70710677f, 0.0f, -0.70710677f
-};
-
-static double atomic_now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+    if (slot_deltas[colony_id] == 0 && *touched_count < aworld->max_colonies) {
+        slot_touched[*touched_count] = colony_id;
+        (*touched_count)++;
+    }
+    slot_deltas[colony_id]++;
 }
+
+static void atomic_spread_from_cell(
+    AtomicWorld* aworld,
+    int x,
+    int y,
+    int32_t* slot_deltas,
+    uint32_t* slot_touched,
+    uint32_t* touched_count,
+    uint32_t* rng_state
+) {
+    World* world = aworld->world;
+    DoubleBufferedGrid* grid = &aworld->grid;
+    int width = grid->width;
+    int height = grid->height;
+    AtomicCell* cells = grid_current(grid);
+    AtomicCell* cell = &cells[y * width + x];
+
+    uint32_t colony_id = atomic_load_explicit(&cell->colony_id, memory_order_relaxed);
+    if (colony_id == 0 || colony_id >= aworld->max_colonies) {
+        return;
+    }
+
+    uint8_t age = atomic_load_explicit(&cell->age, memory_order_relaxed);
+    if (age == 0) {
+        return;
+    }
+
+    Colony* colony = NULL;
+    if ((size_t)colony_id < world->colony_index_capacity) {
+        uint32_t idx = world->colony_index_map[colony_id];
+        if (idx != UINT32_MAX && idx < world->colony_count) {
+            Colony* candidate = &world->colonies[idx];
+            if (candidate->id == colony_id && candidate->active) {
+                colony = candidate;
+            }
+        }
+    }
+    if (!colony) {
+        return;
+    }
+
+    float social_neighbor_dx = 0.0f;
+    float social_neighbor_dy = 0.0f;
+    bool has_social_neighbor = calculate_social_vector(
+        world,
+        grid,
+        x,
+        y,
+        colony,
+        &social_neighbor_dx,
+        &social_neighbor_dy
+    );
+    float social_factor = colony->genome.social_factor;
+    int source_friendly = 0;
+    int source_enemy = 0;
+    int source_empty = 0;
+    int source_total = 0;
+    atomic_count_neighbor_mix(cells, width, height, x, y, colony_id,
+                              &source_friendly, &source_enemy, &source_empty, &source_total);
+
+    for (int d = 0; d < 8; d++) {
+        int dx = DX8[d];
+        int dy = DY8[d];
+        int nx = x + dx;
+        int ny = y + dy;
+
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+            continue;
+        }
+
+        AtomicCell* neighbor = &cells[ny * width + nx];
+
+        uint32_t neighbor_colony = atomic_load_explicit(&neighbor->colony_id, memory_order_relaxed);
+        float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * colony->genome.spread_weights[d];
+        spread_prob *= atomic_calculate_behavioral_spread_modifier(
+            aworld,
+            colony,
+            colony_id,
+            x,
+            y,
+            nx,
+            ny,
+            d,
+            source_friendly,
+            source_enemy,
+            source_empty,
+            source_total
+        );
+
+        if (has_social_neighbor) {
+            spread_prob *= calculate_social_influence_for_direction(
+                dx,
+                dy,
+                social_factor,
+                social_neighbor_dx,
+                social_neighbor_dy
+            );
+        }
+
+        if (neighbor_colony == 0) {
+            if (rand_float_local(rng_state) < spread_prob) {
+                if (atomic_cell_try_claim(neighbor, 0, colony_id)) {
+                    atomic_store_explicit(&neighbor->age, 0, memory_order_relaxed);
+                    atomic_record_spread_delta(aworld, slot_deltas, slot_touched, touched_count, colony_id);
+                }
+            }
+        } else if (neighbor_colony != colony_id) {
+            continue;
+        }
+    }
+}
+
+static void* atomic_phase_worker(void* arg) {
+    AtomicRegionWork* worker = (AtomicRegionWork*)arg;
+    AtomicWorld* aworld = worker->aworld;
+    int worker_id = worker->thread_id;
+    if (!aworld || worker_id < 0 || worker_id >= aworld->phase_worker_count) {
+        return NULL;
+    }
+    uint32_t seen_generation = 0;
+
+    while (1) {
+        pthread_mutex_lock(&aworld->phase_mutex);
+        while (!aworld->phase_shutdown && seen_generation == aworld->phase_generation) {
+            pthread_cond_wait(&aworld->phase_cond, &aworld->phase_mutex);
+        }
+
+        if (aworld->phase_shutdown) {
+            pthread_mutex_unlock(&aworld->phase_mutex);
+            break;
+        }
+
+        seen_generation = aworld->phase_generation;
+        int phase = aworld->active_phase;
+        int start = aworld->worker_region_start[worker_id];
+        int end = aworld->worker_region_end[worker_id];
+        int stride = aworld->phase_region_stride;
+        if (stride < 1) {
+            stride = 1;
+        }
+        pthread_mutex_unlock(&aworld->phase_mutex);
+
+        if (phase == ATOMIC_PHASE_AGE) {
+            for (int i = start; i < end; i += stride) {
+                atomic_age_region(&aworld->region_work[i]);
+            }
+        } else if (phase == ATOMIC_PHASE_SPREAD) {
+            for (int i = start; i < end; i += stride) {
+                atomic_spread_region(&aworld->region_work[i]);
+            }
+        } else if (phase == ATOMIC_PHASE_SPREAD_FRONTIER) {
+            size_t slot_base = (size_t)worker_id * aworld->max_colonies;
+            int32_t* slot_deltas = &aworld->spread_deltas[slot_base];
+            uint32_t* slot_touched = &aworld->spread_touched_ids[slot_base];
+            uint32_t touched_count = 0;
+            uint32_t rng_state = aworld->thread_seeds[worker_id];
+
+            for (int i = start; i < end; i++) {
+                int idx = aworld->spread_frontier_indices[i];
+                int x = idx % aworld->grid.width;
+                int y = idx / aworld->grid.width;
+                atomic_spread_from_cell(
+                    aworld,
+                    x,
+                    y,
+                    slot_deltas,
+                    slot_touched,
+                    &touched_count,
+                    &rng_state
+                );
+            }
+
+            aworld->spread_touched_counts[worker_id] = touched_count;
+            aworld->thread_seeds[worker_id] = rng_state;
+        }
+
+        pthread_mutex_lock(&aworld->phase_mutex);
+        aworld->phase_done_count++;
+        if (aworld->phase_done_count >= aworld->phase_worker_count) {
+            pthread_cond_signal(&aworld->phase_done_cond);
+        }
+        pthread_mutex_unlock(&aworld->phase_mutex);
+    }
+
+    return NULL;
+}
+
+static int atomic_phase_system_create(AtomicWorld* aworld) {
+    if (!aworld || aworld->thread_count <= 0 || aworld->region_count <= 0) {
+        return -1;
+    }
+
+    aworld->phase_worker_count = aworld->thread_count;
+    if (aworld->phase_worker_count > aworld->region_count) {
+        aworld->phase_worker_count = aworld->region_count;
+    }
+    if (aworld->phase_worker_count < 1) {
+        return -1;
+    }
+
+    aworld->phase_threads = (pthread_t*)calloc((size_t)aworld->phase_worker_count, sizeof(pthread_t));
+    aworld->phase_worker_args = (AtomicRegionWork*)calloc((size_t)aworld->phase_worker_count, sizeof(AtomicRegionWork));
+    aworld->worker_region_start = (int*)calloc((size_t)aworld->phase_worker_count, sizeof(int));
+    aworld->worker_region_end = (int*)calloc((size_t)aworld->phase_worker_count, sizeof(int));
+    if (!aworld->phase_threads || !aworld->phase_worker_args || !aworld->worker_region_start || !aworld->worker_region_end) {
+        free(aworld->phase_threads);
+        free(aworld->phase_worker_args);
+        free(aworld->worker_region_start);
+        free(aworld->worker_region_end);
+        aworld->phase_threads = NULL;
+        aworld->phase_worker_args = NULL;
+        aworld->worker_region_start = NULL;
+        aworld->worker_region_end = NULL;
+        return -1;
+    }
+
+    if (pthread_mutex_init(&aworld->phase_mutex, NULL) != 0) {
+        free(aworld->phase_threads);
+        free(aworld->worker_region_start);
+        free(aworld->worker_region_end);
+        aworld->phase_threads = NULL;
+        aworld->worker_region_start = NULL;
+        aworld->worker_region_end = NULL;
+        return -1;
+    }
+    if (pthread_cond_init(&aworld->phase_cond, NULL) != 0) {
+        pthread_mutex_destroy(&aworld->phase_mutex);
+        free(aworld->phase_threads);
+        free(aworld->phase_worker_args);
+        free(aworld->worker_region_start);
+        free(aworld->worker_region_end);
+        aworld->phase_threads = NULL;
+        aworld->phase_worker_args = NULL;
+        aworld->worker_region_start = NULL;
+        aworld->worker_region_end = NULL;
+        return -1;
+    }
+    if (pthread_cond_init(&aworld->phase_done_cond, NULL) != 0) {
+        pthread_cond_destroy(&aworld->phase_cond);
+        pthread_mutex_destroy(&aworld->phase_mutex);
+        free(aworld->phase_threads);
+        free(aworld->phase_worker_args);
+        free(aworld->worker_region_start);
+        free(aworld->worker_region_end);
+        aworld->phase_threads = NULL;
+        aworld->phase_worker_args = NULL;
+        aworld->worker_region_start = NULL;
+        aworld->worker_region_end = NULL;
+        return -1;
+    }
+
+    for (int w = 0; w < aworld->phase_worker_count; w++) {
+        int start = (w * aworld->region_count) / aworld->phase_worker_count;
+        int end = ((w + 1) * aworld->region_count) / aworld->phase_worker_count;
+        aworld->worker_region_start[w] = start;
+        aworld->worker_region_end[w] = end;
+    }
+
+    aworld->phase_generation = 0;
+    aworld->phase_done_count = 0;
+    aworld->active_phase = ATOMIC_PHASE_IDLE;
+    aworld->phase_region_stride = 1;
+    aworld->phase_shutdown = false;
+
+    for (int w = 0; w < aworld->phase_worker_count; w++) {
+        aworld->phase_worker_args[w].aworld = aworld;
+        aworld->phase_worker_args[w].thread_id = w;
+        if (pthread_create(&aworld->phase_threads[w], NULL, atomic_phase_worker, &aworld->phase_worker_args[w]) != 0) {
+            aworld->phase_shutdown = true;
+            pthread_cond_broadcast(&aworld->phase_cond);
+            for (int j = 0; j < w; j++) {
+                pthread_join(aworld->phase_threads[j], NULL);
+            }
+            pthread_cond_destroy(&aworld->phase_done_cond);
+            pthread_cond_destroy(&aworld->phase_cond);
+            pthread_mutex_destroy(&aworld->phase_mutex);
+            free(aworld->phase_threads);
+            free(aworld->phase_worker_args);
+            free(aworld->worker_region_start);
+            free(aworld->worker_region_end);
+            aworld->phase_threads = NULL;
+            aworld->phase_worker_args = NULL;
+            aworld->worker_region_start = NULL;
+            aworld->worker_region_end = NULL;
+            return -1;
+        }
+    }
+
+    aworld->phase_system_ready = true;
+    return 0;
+}
+
+static void atomic_phase_system_destroy(AtomicWorld* aworld) {
+    if (!aworld || !aworld->phase_system_ready) {
+        return;
+    }
+
+    pthread_mutex_lock(&aworld->phase_mutex);
+    aworld->phase_shutdown = true;
+    pthread_cond_broadcast(&aworld->phase_cond);
+    pthread_mutex_unlock(&aworld->phase_mutex);
+
+    for (int w = 0; w < aworld->phase_worker_count; w++) {
+        pthread_join(aworld->phase_threads[w], NULL);
+    }
+
+    pthread_cond_destroy(&aworld->phase_done_cond);
+    pthread_cond_destroy(&aworld->phase_cond);
+    pthread_mutex_destroy(&aworld->phase_mutex);
+    aworld->phase_system_ready = false;
+}
+
+static void atomic_run_phase(AtomicWorld* aworld, int phase) {
+    if (!aworld || !aworld->phase_system_ready) {
+        return;
+    }
+
+    pthread_mutex_lock(&aworld->phase_mutex);
+    aworld->active_phase = phase;
+    aworld->phase_done_count = 0;
+    aworld->phase_generation++;
+    pthread_cond_broadcast(&aworld->phase_cond);
+
+    while (aworld->phase_done_count < aworld->phase_worker_count) {
+        pthread_cond_wait(&aworld->phase_done_cond, &aworld->phase_mutex);
+    }
+
+    aworld->active_phase = ATOMIC_PHASE_IDLE;
+    pthread_mutex_unlock(&aworld->phase_mutex);
+}
+
+static void atomic_phase_assign_ranges(AtomicWorld* aworld, int total_units) {
+    if (!aworld || !aworld->phase_system_ready || total_units < 0) {
+        return;
+    }
+
+    pthread_mutex_lock(&aworld->phase_mutex);
+    aworld->phase_region_stride = 1;
+    for (int w = 0; w < aworld->phase_worker_count; w++) {
+        int start = (w * total_units) / aworld->phase_worker_count;
+        int end = ((w + 1) * total_units) / aworld->phase_worker_count;
+        aworld->worker_region_start[w] = start;
+        aworld->worker_region_end[w] = end;
+    }
+    pthread_mutex_unlock(&aworld->phase_mutex);
+}
+
+static void atomic_phase_assign_interleaved(AtomicWorld* aworld, int total_units) {
+    if (!aworld || !aworld->phase_system_ready || total_units < 0) {
+        return;
+    }
+
+    pthread_mutex_lock(&aworld->phase_mutex);
+    aworld->phase_region_stride = aworld->phase_worker_count;
+    if (aworld->phase_region_stride < 1) {
+        aworld->phase_region_stride = 1;
+    }
+
+    for (int w = 0; w < aworld->phase_worker_count; w++) {
+        aworld->worker_region_start[w] = w;
+        aworld->worker_region_end[w] = total_units;
+    }
+    pthread_mutex_unlock(&aworld->phase_mutex);
+}
+
 // ============================================================================
 // Social/Chemotaxis behavior - neighbor detection and influence
 // ============================================================================
 
 /**
- * Calculate social influence multiplier for a spread direction.
+ * Calculate normalized direction toward nearest detected neighbor colony.
  * 
- * Uses scent field to detect nearby colonies and adjust spread probability:
- * - High aggression: attracted to enemy scent (hunt them)
- * - High defense: repelled by enemy scent (avoid conflict)
- * - Also considers social_factor for general neighbor attraction/repulsion
+ * Detects nearby colonies and adjusts spread probability:
+ * - Positive social_factor: bias toward nearest neighbors (attracted)
+ * - Negative social_factor: bias away from nearest neighbors (repelled)
  * 
- * Returns a multiplier 0.3-2.0 to apply to spread probability.
+ * Returns true when a usable neighbor direction is available.
  */
-static SocialInfluenceContext calculate_social_context(
+static bool calculate_social_vector(
     World* world,
     DoubleBufferedGrid* grid,
-    AtomicCell* current,
-    int cell_x,
-    int cell_y,
-    Colony* colony
+    int cell_x, int cell_y,
+    Colony* colony,
+    float* out_norm_dx,
+    float* out_norm_dy
 ) {
-    SocialInfluenceContext context;
-    context.social_factor = colony->genome.social_factor;
-    context.nearest_norm_dx = 0.0f;
-    context.nearest_norm_dy = 0.0f;
-    context.has_social_effect = 0;
-
-    if (fabsf(context.social_factor) <= 0.01f) {
-        return context;
+    const Genome* genome = &colony->genome;
+    const int width = world->width;
+    const int height = world->height;
+    AtomicCell* cells = grid_current(grid);
+    
+    // Skip if no social behavior
+    if (fabsf(genome->social_factor) < 0.01f) {
+        return false;
     }
-
-    int detect_radius = (int)(colony->genome.detection_range *
+    
+    // Calculate detection radius in cells (scale by world size)
+    int detect_radius = (int)(genome->detection_range * 
                               (world->width + world->height) / 4.0f);
     if (detect_radius < 5) detect_radius = 5;
-    if (detect_radius > 30) detect_radius = 30;
-
-    const int width = grid->width;
-    const int height = grid->height;
-    const uint32_t colony_id = colony->id;
-    int step = detect_radius / 4;
-    if (step < 2) step = 2;
-
-    float nearest_dx = 0.0f;
-    float nearest_dy = 0.0f;
+    if (detect_radius > 50) detect_radius = 50;
+    
+    // Find nearest different colonies (sample grid sparsely for performance)
+    float nearest_dx = 0, nearest_dy = 0;
     float nearest_dist_sq = (float)(detect_radius * detect_radius + 1);
     int found = 0;
+    int step = detect_radius / 4;
+    if (step < 2) step = 2;
+    
+    int min_y = cell_y - detect_radius;
+    if (min_y < 0) min_y = 0;
+    int max_y = cell_y + detect_radius;
+    if (max_y >= height) max_y = height - 1;
 
-    for (int dy = -detect_radius; dy <= detect_radius && found < colony->genome.max_tracked; dy += step) {
-        int check_y = cell_y + dy;
-        if (check_y < 0 || check_y >= height) continue;
-        int row_idx = check_y * width;
+    int min_x = cell_x - detect_radius;
+    if (min_x < 0) min_x = 0;
+    int max_x = cell_x + detect_radius;
+    if (max_x >= width) max_x = width - 1;
 
-        for (int dx = -detect_radius; dx <= detect_radius && found < colony->genome.max_tracked; dx += step) {
+    for (int check_y = min_y; check_y <= max_y && found < genome->max_tracked; check_y += step) {
+        int dy = check_y - cell_y;
+        int row_base = check_y * width;
+
+        for (int check_x = min_x; check_x <= max_x && found < genome->max_tracked; check_x += step) {
+            int dx = check_x - cell_x;
             if (dx == 0 && dy == 0) continue;
 
-            int check_x = cell_x + dx;
-            if (check_x < 0 || check_x >= width) continue;
-
-            uint32_t check_colony_id = atomic_load_explicit(&current[row_idx + check_x].colony_id, memory_order_relaxed);
-            if (check_colony_id == 0 || check_colony_id == colony_id) continue;
-
+            AtomicCell* check_cell = &cells[row_base + check_x];
+            uint32_t check_colony_id = atomic_load_explicit(&check_cell->colony_id, memory_order_relaxed);
+            if (check_colony_id == 0 || check_colony_id == colony->id) continue;
+            
             float dist_sq = (float)(dx * dx + dy * dy);
             if (dist_sq < nearest_dist_sq) {
                 nearest_dist_sq = dist_sq;
@@ -223,302 +857,49 @@ static SocialInfluenceContext calculate_social_context(
             }
         }
     }
-
-    if (found > 0) {
-        float inv_dist = 1.0f / sqrtf(nearest_dist_sq);
-        context.nearest_norm_dx = nearest_dx * inv_dist;
-        context.nearest_norm_dy = nearest_dy * inv_dist;
-        context.has_social_effect = 1;
+    
+    // If no neighbors found, no influence
+    if (found == 0) {
+        return false;
     }
+    
+    // Normalize direction to nearest colony
+    float dist = sqrtf(nearest_dist_sq);
+    if (dist < 1.0f) dist = 1.0f;
+    *out_norm_dx = nearest_dx / dist;
+    *out_norm_dy = nearest_dy / dist;
 
-    return context;
+    return true;
 }
 
-static float calculate_social_influence(
-    World* world,
-    const SocialInfluenceContext* context,
-    int cell_x, int cell_y,
-    int spread_dx, int spread_dy,
-    int direction,
-    Colony* colony
+static float calculate_social_influence_for_direction(
+    int spread_dx,
+    int spread_dy,
+    float social_factor,
+    float neighbor_norm_dx,
+    float neighbor_norm_dy
 ) {
-    const Genome* genome = &colony->genome;
-    float influence = 1.0f;
-    
-    // Check scent at target location
-    int nx = cell_x + spread_dx;
-    int ny = cell_y + spread_dy;
-    if (nx >= 0 && nx < world->width && ny >= 0 && ny < world->height && world->signals) {
-        int idx = ny * world->width + nx;
-        float scent = world->signals[idx];
-        uint32_t source = world->signal_source ? world->signal_source[idx] : 0;
-        
-        if (scent > 0.01f && source > 0) {
-            if (source == colony->id) {
-                // Self-scent: avoid overcrowding unless high density tolerance
-                influence *= 1.0f - scent * (1.0f - genome->density_tolerance) * 0.3f;
-            } else {
-                // Enemy scent: react based on aggression vs defense
-                float aggression = genome->aggression;
-                float defense = genome->defense_priority;
-                float sensitivity = genome->signal_sensitivity;
-                
-                // reaction > 0: attracted to enemy (aggressive hunting)
-                // reaction < 0: repelled by enemy (defensive avoidance)
-                float reaction = (aggression - defense) * sensitivity;
-                influence *= 1.0f + reaction * scent * 0.6f;
-            }
-        }
+    // Normalize spread direction
+    float spread_len = sqrtf((float)(spread_dx * spread_dx + spread_dy * spread_dy));
+    if (spread_len < 0.1f) {
+        return 1.0f;
     }
+    float spread_norm_dx = (float)spread_dx / spread_len;
+    float spread_norm_dy = (float)spread_dy / spread_len;
     
-    // Also check direct neighbor detection for immediate threats
-    if (context->has_social_effect) {
-        float spread_norm_dx;
-        float spread_norm_dy;
-        if (direction >= 0 && direction < 8) {
-            spread_norm_dx = DIR8_NORM_DX[direction];
-            spread_norm_dy = DIR8_NORM_DY[direction];
-        } else {
-            float inv_spread_len = 1.0f / sqrtf((float)(spread_dx * spread_dx + spread_dy * spread_dy));
-            spread_norm_dx = (float)spread_dx * inv_spread_len;
-            spread_norm_dy = (float)spread_dy * inv_spread_len;
-        }
-
-        float dot = spread_norm_dx * context->nearest_norm_dx +
-                    spread_norm_dy * context->nearest_norm_dy;
-        influence *= 1.0f + context->social_factor * dot * 0.4f;
-    }
+    // Dot product: positive if spreading toward neighbor, negative if away
+    float dot = spread_norm_dx * neighbor_norm_dx + spread_norm_dy * neighbor_norm_dy;
+    
+    // Apply social factor:
+    // Positive social_factor + positive dot = boost (attracted, moving toward)
+    // Negative social_factor + positive dot = reduce (repelled, want to move away)
+    float influence = 1.0f + social_factor * dot * 0.4f;
     
     // Clamp to reasonable range
-    if (influence < 0.3f) influence = 0.3f;
-    if (influence > 2.0f) influence = 2.0f;
+    if (influence < 0.5f) influence = 0.5f;
+    if (influence > 1.5f) influence = 1.5f;
     
     return influence;
-}
-
-// ============================================================================
-// Long-run dynamics helpers (serial, post-parallel)
-// ============================================================================
-
-static void atomic_apply_cell_turnover(World* world) {
-    if (!world) return;
-
-    for (int i = 0; i < world->width * world->height; i++) {
-        Cell* cell = &world->cells[i];
-        if (cell->colony_id == 0) continue;
-
-        Colony* colony = world_get_colony(world, cell->colony_id);
-        if (!colony || !colony->active) continue;
-        float trait_survival_cost = calculate_survival_cost_multiplier(colony);
-
-        float death_chance = 0.0015f;
-
-        // Larger colonies are harder to supply internally.
-        death_chance += utils_clamp_f((float)colony->cell_count / 60000.0f, 0.0f, 0.012f);
-
-        if (world->nutrients) {
-            float nutrient = world->nutrients[i];
-            if (nutrient < 0.25f) {
-                death_chance += (0.25f - nutrient) * 0.08f *
-                                (1.0f - colony->genome.efficiency * 0.7f);
-            }
-        }
-
-        if (world->toxins) {
-            float toxin = world->toxins[i];
-            if (toxin > 0.25f) {
-                death_chance += (toxin - 0.25f) * 0.10f *
-                                (1.0f - colony->genome.toxin_resistance);
-            }
-        }
-
-        // Interior decay pressure to keep colonies breathing/churning.
-        if (!cell->is_border && colony->cell_count > 80) {
-            death_chance *= 1.25f;
-        }
-
-        // Persister-like dormancy: better survival, weaker expansion elsewhere.
-        death_chance *= colony_turnover_factor(colony);
-
-        if (cell->age > 140) {
-            death_chance += ((float)cell->age - 140.0f) * 0.0008f;
-        }
-
-        death_chance *= trait_survival_cost;
-
-        death_chance = utils_clamp_f(death_chance, 0.0f, 0.35f);
-        if (rand_float() < death_chance) {
-            if (world->nutrients) {
-                world->nutrients[i] = utils_clamp_f(world->nutrients[i] + 0.2f, 0.0f, 1.0f);
-            }
-            cell->colony_id = 0;
-            cell->age = 0;
-            cell->is_border = false;
-        }
-    }
-}
-
-static void atomic_spawn_dynamic_colonies(World* world) {
-    if (!world) return;
-
-    int active_colonies = 0;
-    int total_cells = 0;
-    for (size_t i = 0; i < world->colony_count; i++) {
-        if (world->colonies[i].active) {
-            active_colonies++;
-            total_cells += (int)world->colonies[i].cell_count;
-        }
-    }
-
-    int world_size = world->width * world->height;
-    float empty_ratio = 1.0f - (float)total_cells / (float)world_size;
-    bool force_spawn = active_colonies < 4;
-
-    float spawn_chance = 0.04f + empty_ratio * 0.20f;
-    if (active_colonies < 12) spawn_chance += 0.18f;
-
-    if ((active_colonies < 240 && rand_float() < spawn_chance) || force_spawn) {
-        for (int attempts = 0; attempts < 80; attempts++) {
-            int x = rand() % world->width;
-            int y = rand() % world->height;
-            Cell* cell = world_get_cell(world, x, y);
-            if (!cell || cell->colony_id != 0) continue;
-
-            Colony colony;
-            memset(&colony, 0, sizeof(Colony));
-            colony.genome = genome_create_random();
-            colony.color = colony.genome.body_color;
-            colony.cell_count = 1;
-            colony.max_cell_count = 1;
-            colony.active = true;
-            colony.parent_id = 0;
-            colony.hgt_plasmid_fraction = utils_clamp_f(colony.genome.gene_transfer_rate * 0.25f, 0.0f, 0.35f);
-            colony.hgt_is_transconjugant = false;
-            colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
-            colony.wobble_phase = (float)(rand() % 628) / 100.0f;
-            colony.shape_evolution = (float)(rand() % 1000) / 1000.0f;
-            colony.state = COLONY_STATE_NORMAL;
-            colony.is_dormant = false;
-            colony.is_persister = false;
-            colony.stress_level = 0.0f;
-            colony.biofilm_strength = 0.0f;
-            colony.drift_x = 0.0f;
-            colony.drift_y = 0.0f;
-            colony.signal_strength = 0.0f;
-            colony.last_population = 1;
-            generate_scientific_name(colony.name, sizeof(colony.name));
-
-            uint32_t id = world_add_colony(world, colony);
-            if (id > 0) {
-                cell->colony_id = id;
-                cell->age = 0;
-                cell->is_border = true;
-            }
-            break;
-        }
-    }
-}
-
-static void atomic_update_colony_behavior(World* world) {
-    if (!world) return;
-
-    size_t signal_capacity = world->colony_count;
-    float* signal_sums = NULL;
-    uint32_t* signal_counts = NULL;
-    if (world->signals && signal_capacity > 0) {
-        signal_sums = (float*)calloc(signal_capacity, sizeof(float));
-        signal_counts = (uint32_t*)calloc(signal_capacity, sizeof(uint32_t));
-        if (signal_sums && signal_counts) {
-            int grid_total = world->width * world->height;
-            for (int i = 0; i < grid_total; i++) {
-                uint32_t cid = world->cells[i].colony_id;
-                Colony* owner = world_get_colony(world, cid);
-                if (owner) {
-                    size_t owner_idx = (size_t)(owner - world->colonies);
-                    if (owner_idx < signal_capacity) {
-                        signal_sums[owner_idx] += world->signals[i];
-                        signal_counts[owner_idx] += 1;
-                    }
-                }
-            }
-        } else {
-            free(signal_sums);
-            free(signal_counts);
-            signal_sums = NULL;
-            signal_counts = NULL;
-        }
-    }
-
-    for (size_t i = 0; i < world->colony_count; i++) {
-        Colony* colony = &world->colonies[i];
-        if (!colony->active) continue;
-        if (colony->cell_count == 0) {
-            colony->active = false;
-            continue;
-        }
-
-        float colony_density = (float)colony->cell_count / (float)(world->width * world->height);
-        float scaled_density = utils_clamp_f(colony_density * 900.0f, 0.0f, 1.0f);
-        float local_signal = 0.0f;
-        if (signal_sums && signal_counts && signal_counts[i] > 0) {
-            local_signal = signal_sums[i] / (float)signal_counts[i];
-        }
-
-        float ai_drive = local_signal * (0.65f + colony->genome.signal_sensitivity * 0.35f);
-        float density_drive = scaled_density * colony->genome.signal_emission * 0.25f;
-        float ai_input = ai_drive + density_drive;
-        if (colony->is_dormant) ai_input *= 0.7f;
-        ai_input *= colony_signal_activity_factor(colony);
-        colony->signal_strength = utils_clamp_f(
-            colony->signal_strength * QS_SIGNAL_MEMORY + ai_input * (1.0f - QS_SIGNAL_MEMORY),
-            0.0f, 1.0f
-        );
-
-        float quorum_activation = 0.0f;
-        float threshold = colony->genome.quorum_threshold;
-        if (colony->signal_strength > threshold) {
-            quorum_activation = utils_clamp_f(
-                (colony->signal_strength - threshold) / (1.0f - threshold + 0.001f),
-                0.0f, 1.0f
-            );
-        }
-
-        if (quorum_activation > 0.0f && colony->genome.biofilm_tendency > 0.3f) {
-            colony->biofilm_strength = utils_clamp_f(
-                colony->biofilm_strength + 0.002f + quorum_activation * 0.004f,
-                0.0f, 1.0f
-            );
-        }
-
-        colony->stress_level = utils_clamp_f(colony->stress_level - 0.002f, 0.0f, 1.0f);
-
-        if (colony->genome.biofilm_investment > 0.3f) {
-            float target_biofilm = colony->genome.biofilm_investment * colony->genome.biofilm_tendency;
-            if (colony->biofilm_strength < target_biofilm) {
-                colony->biofilm_strength = utils_clamp_f(colony->biofilm_strength + 0.01f, 0.0f, 1.0f);
-            }
-        }
-        colony->biofilm_strength = utils_clamp_f(colony->biofilm_strength - 0.002f, 0.0f, 1.0f);
-
-        if (colony->stress_level > colony->genome.sporulation_threshold &&
-            colony->genome.dormancy_threshold > 0.3f) {
-            colony->state = COLONY_STATE_DORMANT;
-            colony->is_dormant = true;
-        } else if (colony->stress_level > 0.5f) {
-            colony->state = COLONY_STATE_STRESSED;
-            colony->is_dormant = false;
-        } else {
-            colony->state = COLONY_STATE_NORMAL;
-            colony->is_dormant = false;
-        }
-        colony_update_persister_switching(colony);
-
-        colony->shape_evolution += 0.002f;
-        if (colony->shape_evolution > 100.0f) colony->shape_evolution -= 100.0f;
-    }
-
-    free(signal_sums);
-    free(signal_counts);
 }
 
 // ============================================================================
@@ -537,6 +918,8 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
     aworld->world = world;
     aworld->pool = pool;
     aworld->thread_count = thread_count;
+    aworld->serial_interval = atomic_parse_env_int("FEROX_ATOMIC_SERIAL_INTERVAL", 5, 1, 32);
+    aworld->frontier_dense_pct = atomic_parse_env_int("FEROX_ATOMIC_FRONTIER_DENSE_PCT", 15, 5, 90);
     
     int grid_size = world->width * world->height;
     
@@ -566,23 +949,97 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
         return NULL;
     }
     
-    aworld->deterministic_seed =
-        mix_u32(0x9e3779b9u ^
-                ((uint32_t)world->width * 0x85ebca6bu) ^
-                ((uint32_t)world->height * 0xc2b2ae35u));
-    
-    // Preallocate region work items
     int regions_x = 1;
     int regions_y = 1;
-    atomic_region_layout(aworld, &regions_x, &regions_y);
-    aworld->region_work_count = regions_x * regions_y;
-    aworld->region_work = (AtomicRegionWork*)calloc(aworld->region_work_count, sizeof(AtomicRegionWork));
-    if (!aworld->region_work) {
+    compute_region_grid(aworld->grid.width, aworld->grid.height, aworld->thread_count, &regions_x, &regions_y);
+    aworld->region_count = regions_x * regions_y;
+
+    int seed_count = aworld->region_count;
+    if (seed_count < aworld->thread_count) {
+        seed_count = aworld->thread_count;
+    }
+    aworld->thread_seeds = (uint32_t*)malloc((size_t)seed_count * sizeof(uint32_t));
+    if (!aworld->thread_seeds) {
         free(aworld->colony_stats);
         free(aworld->grid.buffers[0]);
         free(aworld->grid.buffers[1]);
         free(aworld);
         return NULL;
+    }
+
+    for (int i = 0; i < seed_count; i++) {
+        aworld->thread_seeds[i] = (uint32_t)(12345 + i * 7919);
+    }
+
+    aworld->region_work = (AtomicRegionWork*)calloc((size_t)aworld->region_count, sizeof(AtomicRegionWork));
+    if (!aworld->region_work) {
+        free(aworld->thread_seeds);
+        free(aworld->colony_stats);
+        free(aworld->grid.buffers[0]);
+        free(aworld->grid.buffers[1]);
+        free(aworld);
+        return NULL;
+    }
+
+    aworld->submit_args = (void**)calloc((size_t)aworld->region_count, sizeof(void*));
+    if (!aworld->submit_args) {
+        free(aworld->region_work);
+        free(aworld->thread_seeds);
+        free(aworld->colony_stats);
+        free(aworld->grid.buffers[0]);
+        free(aworld->grid.buffers[1]);
+        free(aworld);
+        return NULL;
+    }
+
+    if (atomic_alloc_spread_tracking(aworld, aworld->max_colonies) != 0) {
+        free(aworld->submit_args);
+        free(aworld->region_work);
+        free(aworld->thread_seeds);
+        free(aworld->colony_stats);
+        free(aworld->grid.buffers[0]);
+        free(aworld->grid.buffers[1]);
+        free(aworld);
+        return NULL;
+    }
+
+    int cell_count = aworld->grid.width * aworld->grid.height;
+    aworld->spread_frontier_indices = (int*)malloc((size_t)cell_count * sizeof(int));
+    if (!aworld->spread_frontier_indices) {
+        free(aworld->spread_frontier_indices);
+        free(aworld->spread_touched_counts);
+        free(aworld->spread_touched_ids);
+        free(aworld->spread_deltas);
+        free(aworld->submit_args);
+        free(aworld->region_work);
+        free(aworld->thread_seeds);
+        free(aworld->colony_stats);
+        free(aworld->grid.buffers[0]);
+        free(aworld->grid.buffers[1]);
+        free(aworld);
+        return NULL;
+    }
+    aworld->spread_frontier_enabled = atomic_parse_env_bool("FEROX_ATOMIC_USE_FRONTIER", true);
+    aworld->spread_frontier_count = 0;
+
+    int region_width = aworld->grid.width / regions_x;
+    int region_height = aworld->grid.height / regions_y;
+    for (int ry = 0; ry < regions_y; ry++) {
+        for (int rx = 0; rx < regions_x; rx++) {
+            int idx = ry * regions_x + rx;
+            AtomicRegionWork* work = &aworld->region_work[idx];
+            work->aworld = aworld;
+            work->region_index = idx;
+            work->start_x = rx * region_width;
+            work->start_y = ry * region_height;
+            work->end_x = (rx == regions_x - 1) ? aworld->grid.width : (rx + 1) * region_width;
+            work->end_y = (ry == regions_y - 1) ? aworld->grid.height : (ry + 1) * region_height;
+            work->thread_id = idx;
+        }
+    }
+
+    if (atomic_phase_system_create(aworld) != 0) {
+        aworld->phase_system_ready = false;
     }
     
     // Sync from world
@@ -594,7 +1051,19 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
 void atomic_world_destroy(AtomicWorld* aworld) {
     if (!aworld) return;
     
+    atomic_phase_system_destroy(aworld);
+
+    free(aworld->worker_region_end);
+    free(aworld->worker_region_start);
+    free(aworld->phase_worker_args);
+    free(aworld->phase_threads);
+    free(aworld->spread_frontier_indices);
+    free(aworld->spread_deltas);
+    free(aworld->spread_touched_ids);
+    free(aworld->spread_touched_counts);
+    free(aworld->submit_args);
     free(aworld->region_work);
+    free(aworld->thread_seeds);
     free(aworld->colony_stats);
     free(aworld->grid.buffers[0]);
     free(aworld->grid.buffers[1]);
@@ -627,6 +1096,10 @@ void atomic_world_sync_from_world(AtomicWorld* aworld) {
             free(aworld->colony_stats);
             aworld->colony_stats = new_stats;
             aworld->max_colonies = new_max;
+
+            if (atomic_alloc_spread_tracking(aworld, aworld->max_colonies) != 0) {
+                fprintf(stderr, "Warning: Failed to resize spread tracking buffers (max=%zu)\n", aworld->max_colonies);
+            }
         } else {
             // Allocation failed - this is critical, log error
             // Continue with existing array but skip colonies with IDs >= max_colonies
@@ -639,31 +1112,25 @@ void atomic_world_sync_from_world(AtomicWorld* aworld) {
     
     // Clear only cell_count (NOT max - max should never decrease)
     for (size_t i = 0; i < aworld->max_colonies; i++) {
-        atomic_store(&aworld->colony_stats[i].cell_count, 0);
+        atomic_store_explicit(&aworld->colony_stats[i].cell_count, 0, memory_order_relaxed);
     }
     
-    // Copy cell data only where changed and count populations
+    // Copy cell data and count populations
     for (int i = 0; i < world->width * world->height; i++) {
         Cell* cell = &world->cells[i];
         
-        uint32_t cur_colony = atomic_load(&current[i].colony_id);
-        uint8_t cur_age = atomic_load(&current[i].age);
-        uint8_t cur_border = current[i].is_border;
-        uint8_t cell_border = cell->is_border ? 1 : 0;
+        atomic_store_explicit(&current[i].colony_id, cell->colony_id, memory_order_relaxed);
+        atomic_store_explicit(&current[i].age, cell->age, memory_order_relaxed);
+        current[i].is_border = cell->is_border ? 1 : 0;
         
-        if (cur_colony != cell->colony_id || cur_age != cell->age || cur_border != cell_border) {
-            atomic_store(&current[i].colony_id, cell->colony_id);
-            atomic_store(&current[i].age, cell->age);
-            current[i].is_border = cell_border;
-            
-            atomic_store(&next[i].colony_id, cell->colony_id);
-            atomic_store(&next[i].age, cell->age);
-            next[i].is_border = cell_border;
-        }
+        // Also init next buffer
+        atomic_store_explicit(&next[i].colony_id, cell->colony_id, memory_order_relaxed);
+        atomic_store_explicit(&next[i].age, cell->age, memory_order_relaxed);
+        next[i].is_border = cell->is_border ? 1 : 0;
         
         // Count population
         if (cell->colony_id != 0 && cell->colony_id < aworld->max_colonies) {
-            atomic_fetch_add(&aworld->colony_stats[cell->colony_id].cell_count, 1);
+            atomic_fetch_add_explicit(&aworld->colony_stats[cell->colony_id].cell_count, 1, memory_order_relaxed);
         }
     }
     
@@ -671,13 +1138,15 @@ void atomic_world_sync_from_world(AtomicWorld* aworld) {
     for (size_t i = 0; i < world->colony_count; i++) {
         Colony* colony = &world->colonies[i];
         if (colony->id < aworld->max_colonies) {
-            int64_t current_max = atomic_load(&aworld->colony_stats[colony->id].max_cell_count);
+            int64_t current_max = atomic_load_explicit(&aworld->colony_stats[colony->id].max_cell_count, memory_order_relaxed);
             int64_t world_max = (int64_t)colony->max_cell_count;
             if (world_max > current_max) {
-                atomic_store(&aworld->colony_stats[colony->id].max_cell_count, world_max);
+                atomic_store_explicit(&aworld->colony_stats[colony->id].max_cell_count, world_max, memory_order_relaxed);
             }
         }
     }
+
+    atomic_rebuild_spread_frontier(aworld);
 }
 
 void atomic_world_sync_to_world(AtomicWorld* aworld) {
@@ -686,28 +1155,20 @@ void atomic_world_sync_to_world(AtomicWorld* aworld) {
     World* world = aworld->world;
     AtomicCell* current = grid_current(&aworld->grid);
     
-    // Copy cell data back only where changed
+    // Copy cell data back
     for (int i = 0; i < world->width * world->height; i++) {
-        uint32_t atomic_colony = atomic_load(&current[i].colony_id);
-        uint8_t atomic_age = atomic_load(&current[i].age);
-        bool atomic_border = current[i].is_border != 0;
-        
-        if (world->cells[i].colony_id != atomic_colony ||
-            world->cells[i].age != atomic_age ||
-            world->cells[i].is_border != atomic_border) {
-            world->cells[i].colony_id = atomic_colony;
-            world->cells[i].age = atomic_age;
-            world->cells[i].is_border = atomic_border;
-        }
+        world->cells[i].colony_id = atomic_load_explicit(&current[i].colony_id, memory_order_relaxed);
+        world->cells[i].age = atomic_load_explicit(&current[i].age, memory_order_relaxed);
+        world->cells[i].is_border = current[i].is_border != 0;
     }
     
     // Update colony stats
     for (size_t i = 0; i < world->colony_count; i++) {
         Colony* colony = &world->colonies[i];
         if (colony->id < aworld->max_colonies) {
-            colony->cell_count = (size_t)atomic_load(&aworld->colony_stats[colony->id].cell_count);
+            colony->cell_count = (size_t)atomic_load_explicit(&aworld->colony_stats[colony->id].cell_count, memory_order_relaxed);
             
-            int64_t max = atomic_load(&aworld->colony_stats[colony->id].max_cell_count);
+            int64_t max = atomic_load_explicit(&aworld->colony_stats[colony->id].max_cell_count, memory_order_relaxed);
             if ((size_t)max > colony->max_cell_count) {
                 colony->max_cell_count = (size_t)max;
             }
@@ -736,116 +1197,45 @@ static void age_task_func(void* arg) {
 
 void atomic_spread_region(AtomicRegionWork* work) {
     AtomicWorld* aworld = work->aworld;
-    World* world = aworld->world;
-    DoubleBufferedGrid* grid = &aworld->grid;
-    AtomicCell* current = grid_current(grid);
-    const int width = grid->width;
-    const int height = grid->height;
+    size_t region_base = (size_t)work->region_index * aworld->max_colonies;
+    int32_t* region_deltas = &aworld->spread_deltas[region_base];
+    uint32_t* region_touched = &aworld->spread_touched_ids[region_base];
+    uint32_t touched_count = aworld->spread_touched_counts[work->region_index];
+    
+    // Thread-local RNG
+    uint32_t rng_state = aworld->thread_seeds[work->thread_id];
     
     // Process each cell in region
     for (int y = work->start_y; y < work->end_y; y++) {
-        int idx = y * width + work->start_x;
         for (int x = work->start_x; x < work->end_x; x++) {
-            AtomicCell* cell = &current[idx++];
-            
-            uint32_t colony_id = atomic_load_explicit(&cell->colony_id, memory_order_relaxed);
-            if (colony_id == 0) continue;  // Empty cell
-            
-            // Skip cells with colony IDs beyond our tracking capacity
-            // This can happen if colony_stats resize failed
-            if (colony_id >= aworld->max_colonies) continue;
-            
-            // Don't spread from cells with age=0 (just claimed this tick)
-            // This prevents cascade spreading within a single tick
-            uint8_t age = atomic_load_explicit(&cell->age, memory_order_relaxed);
-            if (age == 0) continue;
-            
-            // Get colony for spread parameters
-            Colony* colony = world_get_colony(world, colony_id);
-            if (!colony || !colony->active) continue;
-            
-            SocialInfluenceContext social_context = calculate_social_context(
-                world, grid, current, x, y, colony);
-
-            // Try to spread to neighbors using 8-connectivity
-            for (int d = 0; d < 8; d++) {
-                int dx = DX8[d];
-                int dy = DY8[d];
-                int nx = x + dx;
-                int ny = y + dy;
-                if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-
-                AtomicCell* neighbor = &current[ny * width + nx];
-                uint32_t neighbor_colony = atomic_load_explicit(&neighbor->colony_id, memory_order_relaxed);
-                
-                // Calculate base spread probability with diagonal correction
-                float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * width + x]);
-                float activity_factor = colony_spread_activity_factor(colony);
-                float spread_prob = colony->genome.spread_rate * 
-                                   colony->genome.metabolism *
-                                   colony->genome.spread_weights[d] *
-                                   DIR8_WEIGHT[d] *
-                                   growth_uptake *
-                                   activity_factor;  // 1/sqrt(2) for diagonals
-                
-                // Per-cell stochastic noise from deterministic seed/tick/cell/direction
-                uint32_t cell_idx = (uint32_t)(y * width + x);
-                uint32_t lane = (uint32_t)d * 2u;
-                float noise = 0.6f + deterministic_float(
-                    aworld->deterministic_seed,
-                    world->tick,
-                    cell_idx,
-                    colony_id,
-                    lane
-                ) * 0.8f;
-                spread_prob *= noise;
-                
-                // Apply social influence (chemotaxis toward/away from neighbors)
-                float social_mult = calculate_social_influence(
-                    world, &social_context, x, y, dx, dy, d, colony);
-                spread_prob *= social_mult;
-                
-                if (neighbor_colony == 0) {
-                    // Empty cell - try to spread
-                    float spread_roll = deterministic_float(
-                        aworld->deterministic_seed,
-                        world->tick,
-                        cell_idx,
-                        colony_id,
-                        lane + 1u
-                    );
-                    if (spread_roll < spread_prob) {
-                        // Atomic CAS: try to claim the cell
-                        // Only succeeds if cell is still empty
-                        if (atomic_cell_try_claim(neighbor, 0, colony_id)) {
-                            atomic_store(&neighbor->age, 0);
-                            // Update population counts atomically
-                            if (colony_id < aworld->max_colonies) {
-                                atomic_stats_add_cell(&aworld->colony_stats[colony_id]);
-                            }
-                        }
-                    }
-                } else if (neighbor_colony != colony_id) {
-                    // Colonies cannot directly attack each other
-                    // They compete by racing to fill empty space
-                    // This promotes coexistence and diverse ecosystems
-                    continue;
-                }
-            }
+            atomic_spread_from_cell(
+                aworld,
+                x,
+                y,
+                region_deltas,
+                region_touched,
+                &touched_count,
+                &rng_state
+            );
         }
     }
+
+    aworld->spread_touched_counts[work->region_index] = touched_count;
+    
+    // Save RNG state back (for reproducibility)
+    aworld->thread_seeds[work->thread_id] = rng_state;
 }
 
 void atomic_age_region(AtomicRegionWork* work) {
     DoubleBufferedGrid* grid = &work->aworld->grid;
-    AtomicCell* current = grid_current(grid);
-    const int width = grid->width;
-    
+    int width = grid->width;
+    AtomicCell* cells = grid_current(grid);
+
     for (int y = work->start_y; y < work->end_y; y++) {
-        int idx = y * width + work->start_x;
+        int row = y * width;
         for (int x = work->start_x; x < work->end_x; x++) {
-            AtomicCell* cell = &current[idx++];
-            if (atomic_load(&cell->colony_id) != 0) {
+            AtomicCell* cell = &cells[row + x];
+            if (atomic_load_explicit(&cell->colony_id, memory_order_relaxed) != 0) {
                 atomic_cell_age(cell);
             }
         }
@@ -856,60 +1246,93 @@ void atomic_age_region(AtomicRegionWork* work) {
 // Parallel Phases
 // ============================================================================
 
-static int prepare_region_tasks(AtomicWorld* aworld) {
-    int regions_x = 1;
-    int regions_y = 1;
-    atomic_region_layout(aworld, &regions_x, &regions_y);
-    int region_width = aworld->grid.width / regions_x;
-    int region_height = aworld->grid.height / regions_y;
-    
-    int task_idx = 0;
-    
-    for (int ry = 0; ry < regions_y; ry++) {
-        for (int rx = 0; rx < regions_x; rx++) {
-            AtomicRegionWork* work = &aworld->region_work[task_idx];
-            
-            work->aworld = aworld;
-            work->start_x = rx * region_width;
-            work->start_y = ry * region_height;
-            work->end_x = (rx == regions_x - 1) ? aworld->grid.width : (rx + 1) * region_width;
-            work->end_y = (ry == regions_y - 1) ? aworld->grid.height : (ry + 1) * region_height;
-            work->thread_id = task_idx % aworld->thread_count;
-            task_idx++;
-        }
-    }
-    return task_idx;
-}
-
 static void submit_region_tasks(AtomicWorld* aworld, void (*task_func)(void*)) {
-    int task_count = prepare_region_tasks(aworld);
-
-    if (aworld->thread_count == 1) {
-        for (int i = 0; i < task_count; i++) {
-            task_func(&aworld->region_work[i]);
-        }
+    if (!aworld || !aworld->region_work || aworld->region_count <= 0) {
         return;
     }
 
-    void* submit_args[16];
-    for (int i = 0; i < task_count; i++) {
-        submit_args[i] = &aworld->region_work[i];
+    for (int i = 0; i < aworld->region_count; i++) {
+        aworld->submit_args[i] = &aworld->region_work[i];
     }
-    threadpool_submit_batch(aworld->pool, task_func, submit_args, task_count);
+
+    threadpool_submit_batch(aworld->pool, task_func, aworld->submit_args, aworld->region_count);
 }
 
 void atomic_age(AtomicWorld* aworld) {
     if (!aworld) return;
+    if (aworld->phase_system_ready) {
+        atomic_phase_assign_ranges(aworld, aworld->region_count);
+        atomic_run_phase(aworld, ATOMIC_PHASE_AGE);
+        return;
+    }
+
     submit_region_tasks(aworld, age_task_func);
 }
 
 void atomic_spread(AtomicWorld* aworld) {
     if (!aworld) return;
+
+    aworld->spread_slots_used = aworld->region_count;
+
+    if (aworld->phase_system_ready) {
+        bool use_frontier = aworld->spread_frontier_enabled && aworld->spread_frontier_count > 0;
+        int total_cells = aworld->grid.width * aworld->grid.height;
+        if (use_frontier && total_cells > 0) {
+            int dense_cutoff = (total_cells * aworld->frontier_dense_pct) / 100;
+            if (dense_cutoff < 1) {
+                dense_cutoff = 1;
+            }
+            if (aworld->spread_frontier_count >= dense_cutoff) {
+                use_frontier = false;
+            }
+        }
+
+        if (use_frontier) {
+            aworld->spread_slots_used = aworld->phase_worker_count;
+            atomic_phase_assign_ranges(aworld, aworld->spread_frontier_count);
+            atomic_run_phase(aworld, ATOMIC_PHASE_SPREAD_FRONTIER);
+        } else {
+            aworld->spread_slots_used = aworld->region_count;
+            atomic_phase_assign_interleaved(aworld, aworld->region_count);
+            atomic_run_phase(aworld, ATOMIC_PHASE_SPREAD);
+        }
+        return;
+    }
+
     submit_region_tasks(aworld, spread_task_func);
+}
+
+void atomic_spread_step(AtomicWorld* aworld) {
+    if (!aworld) return;
+
+    atomic_spread(aworld);
+    atomic_barrier(aworld);
+    atomic_spread_apply_deltas(aworld);
+}
+
+int64_t atomic_spread_apply_deltas(AtomicWorld* aworld) {
+    return atomic_apply_spread_deltas_internal(aworld);
+}
+
+void atomic_set_spread_frontier_enabled(AtomicWorld* aworld, bool enabled) {
+    if (!aworld) {
+        return;
+    }
+    aworld->spread_frontier_enabled = enabled;
+}
+
+int atomic_get_spread_frontier_count(AtomicWorld* aworld) {
+    if (!aworld) {
+        return 0;
+    }
+    return aworld->spread_frontier_count;
 }
 
 void atomic_barrier(AtomicWorld* aworld) {
     if (!aworld) return;
+    if (aworld->phase_system_ready) {
+        return;
+    }
     threadpool_wait(aworld->pool);
 }
 
@@ -917,75 +1340,58 @@ void atomic_barrier(AtomicWorld* aworld) {
 // Main Tick Function
 // ============================================================================
 
-static void atomic_tick_internal(AtomicWorld* aworld, AtomicTickBreakdown* breakdown) {
+void atomic_tick(AtomicWorld* aworld) {
     if (!aworld || !aworld->world) return;
-
+    
     World* world = aworld->world;
-    const bool capture_breakdown = breakdown != NULL;
-    double tick_start = 0.0;
-    if (capture_breakdown) {
-        memset(breakdown, 0, sizeof(*breakdown));
-        tick_start = atomic_now_ms();
-    }
 
-    double phase_start = atomic_now_ms();
+    // Refresh environmental pressure, toxins, and signaling layers based on the
+    // current world state before the parallel spread phase reads them.
+    simulation_update_behavior_layers(world);
+
+    // === Parallel Phase ===
+    
+    // Age all cells in parallel
     atomic_age(aworld);
     atomic_barrier(aworld);
-    if (capture_breakdown) {
-        breakdown->age_ms = atomic_now_ms() - phase_start;
-    }
-
-    phase_start = atomic_now_ms();
-    atomic_spread(aworld);
-    atomic_barrier(aworld);
-    if (capture_breakdown) {
-        breakdown->spread_ms = atomic_now_ms() - phase_start;
-    }
-
-    phase_start = atomic_now_ms();
+    
+    // Spread colonies in parallel using atomic CAS
+    atomic_spread_step(aworld);
+    
+    // Sync atomic state back to regular world for output and/or serial maintenance.
     atomic_world_sync_to_world(aworld);
-    if (capture_breakdown) {
-        breakdown->sync_to_world_ms = atomic_now_ms() - phase_start;
-    }
 
-    phase_start = atomic_now_ms();
-    simulation_update_nutrients(world);
-    simulation_update_scents(world);
-    simulation_resolve_combat(world);
-    atomic_apply_cell_turnover(world);
-    simulation_mutate(world);
-    if (world->tick % 10 == 0) {
+    bool run_serial = (aworld->serial_interval <= 1) || ((int)(world->tick % (uint64_t)aworld->serial_interval) == 0);
+    if (run_serial) {
+        // Mutations (per-colony, serial)
+        simulation_mutate(world);
+
+        // Division detection (requires flood-fill, serial)
         simulation_check_divisions(world);
-    }
-    if (world->tick % 15 == 5) {
-        simulation_check_recombinations(world);
-    }
-    atomic_spawn_dynamic_colonies(world);
-    simulation_update_colony_stats(world);
-    atomic_update_colony_behavior(world);
-    if (capture_breakdown) {
-        breakdown->serial_ms = atomic_now_ms() - phase_start;
-    }
 
-    phase_start = atomic_now_ms();
-    atomic_world_sync_from_world(aworld);
-    if (capture_breakdown) {
-        breakdown->sync_from_world_ms = atomic_now_ms() - phase_start;
+        // Recombination (serial)
+        simulation_check_recombinations(world);
+
+        // Strategic combat and toxin warfare on the active runtime path.
+        simulation_resolve_combat(world);
+
+        // Recount after structural and combat changes.
+        simulation_recount_colony_cells(world);
+
+        // Contact-based adaptation between neighboring colonies.
+        simulation_apply_horizontal_gene_transfer(world);
+
+        // Keep colony state, biofilm, and movement dynamics current.
+        simulation_update_colony_dynamics(world);
+
+        // Sync structural changes back to atomic world.
+        atomic_world_sync_from_world(aworld);
+    } else {
+        // Keep colony state and behavior moving on non-maintenance ticks.
+        simulation_update_colony_dynamics(world);
     }
 
     world->tick++;
-
-    if (capture_breakdown) {
-        breakdown->total_ms = atomic_now_ms() - tick_start;
-    }
-}
-
-void atomic_tick(AtomicWorld* aworld) {
-    atomic_tick_internal(aworld, NULL);
-}
-
-void atomic_tick_with_breakdown(AtomicWorld* aworld, AtomicTickBreakdown* breakdown) {
-    atomic_tick_internal(aworld, breakdown);
 }
 
 // ============================================================================

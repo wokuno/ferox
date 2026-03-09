@@ -54,7 +54,7 @@ if [[ "$MODE" == "--help" ]] || [[ "$MODE" == "-?" ]]; then
     echo "  -h, --host HOST       Server host for client (default: localhost)"
     echo "  -w, --width WIDTH     World width (default: 400)"
     echo "  -H, --height HEIGHT   World height (default: 200)"
-    echo "  -t, --threads NUM     Thread count (default: 4)"
+    echo "  -t, --threads NUM     Thread count (default: auto)"
     echo "  -c, --colonies NUM    Initial colonies (default: 50)"
     echo "  -r, --tick-rate MS    Tick rate in ms (default: 100)"
     echo ""
@@ -67,9 +67,18 @@ PORT="${PORT:-8765}"
 HOST="${HOST:-localhost}"
 WORLD_WIDTH="${WORLD_WIDTH:-400}"
 WORLD_HEIGHT="${WORLD_HEIGHT:-200}"
-THREADS="${THREADS:-4}"
+THREADS="${THREADS:-auto}"
 COLONIES="${COLONIES:-50}"
-TICK_RATE="${TICK_RATE:-120}"
+TICK_RATE="${TICK_RATE:-100}"
+
+server_args() {
+    local args=()
+    args+=( -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" -c "$COLONIES" -r "$TICK_RATE" )
+    if [[ "$THREADS" != "auto" ]]; then
+        args+=( -t "$THREADS" )
+    fi
+    printf '%s\n' "${args[@]}"
+}
 
 # Parse additional arguments
 shift 2>/dev/null || true
@@ -122,61 +131,6 @@ check_executable() {
     fi
 }
 
-is_port_in_use() {
-    local port="$1"
-    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
-}
-
-stop_ferox_server_on_port() {
-    local port="$1"
-    local pids
-    pids="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
-    [[ -z "$pids" ]] && return 0
-
-    for pid in $pids; do
-        local cmd
-        cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-        if [[ "$cmd" == *ferox_server* ]]; then
-            echo "⚠️  Stopping existing ferox server on port $port (PID $pid)..."
-            if ! kill "$pid" 2>/dev/null; then
-                echo "❌ Failed to send SIGTERM to ferox server PID $pid"
-                echo "   Check process ownership/permissions and try again."
-                return 1
-            fi
-            for _ in {1..30}; do
-                if ! kill -0 "$pid" 2>/dev/null || ! lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q "^${pid}$"; then
-                    break
-                fi
-                sleep 0.1
-            done
-            if kill -0 "$pid" 2>/dev/null; then
-                echo "⚠️  PID $pid still alive after SIGTERM, sending SIGKILL..."
-                if ! kill -9 "$pid" 2>/dev/null; then
-                    echo "❌ Could not force-stop existing ferox server PID $pid"
-                    return 1
-                fi
-                for _ in {1..20}; do
-                    if ! kill -0 "$pid" 2>/dev/null || ! lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q "^${pid}$"; then
-                        break
-                    fi
-                    sleep 0.1
-                done
-                if kill -0 "$pid" 2>/dev/null && lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q "^${pid}$"; then
-                    echo "❌ Could not stop existing ferox server PID $pid"
-                    return 1
-                fi
-            fi
-        else
-            echo "❌ Port $port is in use by a non-ferox process."
-            echo "   Refusing to kill it automatically."
-            lsof -nP -iTCP:"$port" -sTCP:LISTEN || true
-            return 1
-        fi
-    done
-
-    return 0
-}
-
 # Cleanup function
 cleanup() {
     echo ""
@@ -203,17 +157,14 @@ echo ""
 case "$MODE" in
     server)
         check_executable "$SERVER_BIN"
-        if is_port_in_use "$PORT"; then
-            stop_ferox_server_on_port "$PORT" || exit 1
-        fi
         echo "🦠 Starting server on port $PORT..."
         echo "   World: ${WORLD_WIDTH}x${WORLD_HEIGHT}"
         echo "   Threads: $THREADS"
         echo "   Colonies: $COLONIES"
         echo "   Tick rate: ${TICK_RATE}ms"
         echo ""
-        "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
-                      -t "$THREADS" -c "$COLONIES" -r "$TICK_RATE"
+        mapfile -t args < <(server_args)
+        "$SERVER_BIN" "${args[@]}"
         ;;
     
     client)
@@ -241,22 +192,16 @@ case "$MODE" in
     gui+)
         check_executable "$SERVER_BIN"
         check_executable "$GUI_BIN"
-        if is_port_in_use "$PORT"; then
-            stop_ferox_server_on_port "$PORT" || exit 1
-        fi
-
+        
         echo "🦠 Starting server on port $PORT..."
         echo "   World: ${WORLD_WIDTH}x${WORLD_HEIGHT}"
         echo "   Threads: $THREADS"
         echo "   Colonies: $COLONIES"
         echo ""
         
-        # Start server in background, ignoring SIGINT so Ctrl+C on GUI
-        # doesn't kill the server (cleanup handles server shutdown)
-        ( trap '' INT
-          exec "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
-                        -t "$THREADS" -c "$COLONIES" -r "$TICK_RATE"
-        ) &
+        # Start server in background
+        mapfile -t args < <(server_args)
+        "$SERVER_BIN" "${args[@]}" &
         SERVER_PID=$!
         
         # Wait for server to start
@@ -272,32 +217,30 @@ case "$MODE" in
         echo "🖼️  Starting GUI client..."
         echo ""
         
-        # Start GUI client in foreground (blocks until user quits)
-        "$GUI_BIN" -h "$HOST" -p "$PORT" || true
+        # Start GUI client in foreground
+        "$GUI_BIN" -h "$HOST" -p "$PORT"
+        GUI_PID=$!
         
-        # Cleanup server after GUI exits
+        # Wait for GUI to exit
+        wait "$GUI_PID" 2>/dev/null || true
+        
+        # Cleanup
         cleanup
         ;;
     
     both)
         check_executable "$SERVER_BIN"
         check_executable "$CLIENT_BIN"
-        if is_port_in_use "$PORT"; then
-            stop_ferox_server_on_port "$PORT" || exit 1
-        fi
-
+        
         echo "🦠 Starting server on port $PORT..."
         echo "   World: ${WORLD_WIDTH}x${WORLD_HEIGHT}"
         echo "   Threads: $THREADS"
         echo "   Colonies: $COLONIES"
         echo ""
         
-        # Start server in background, ignoring SIGINT so Ctrl+C on client
-        # doesn't kill the server (cleanup handles server shutdown)
-        ( trap '' INT
-          exec "$SERVER_BIN" -p "$PORT" -w "$WORLD_WIDTH" -H "$WORLD_HEIGHT" \
-                        -t "$THREADS" -c "$COLONIES" -r "$TICK_RATE"
-        ) &
+        # Start server in background
+        mapfile -t args < <(server_args)
+        "$SERVER_BIN" "${args[@]}" &
         SERVER_PID=$!
         
         # Wait for server to start
@@ -313,10 +256,14 @@ case "$MODE" in
         echo "🖥️  Starting client..."
         echo ""
         
-        # Start client in foreground (blocks until user quits)
-        "$CLIENT_BIN" -h "$HOST" -p "$PORT" || true
+        # Start client in foreground
+        "$CLIENT_BIN" -h "$HOST" -p "$PORT"
+        CLIENT_PID=$!
         
-        # Cleanup server after client exits
+        # Wait for client to exit
+        wait "$CLIENT_PID" 2>/dev/null || true
+        
+        # Cleanup
         cleanup
         ;;
     

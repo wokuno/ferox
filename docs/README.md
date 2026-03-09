@@ -51,53 +51,64 @@
 ### Technical Features
 - **Lock-Free Parallel Simulation** - Atomic CAS-based spreading enables 28%+ CPU utilization with no lock contention
 - **GPU/MPI/SHMEM Ready** - Architecture designed for CUDA, OpenCL, and distributed computing acceleration
+- **Behavior Graph Runtime** - Colonies evaluate a weighted sensing -> drive -> action controller for smarter mode selection
 - **Client/Server Architecture** - Multiple clients can connect to observe the same simulation
 
 ### Clients
 - **Terminal Client** - Beautiful 24-bit color display with box-drawing characters
 - **GUI Client (SDL2)** - Grid-based rendering, zoom/pan, colony selection, continuous key input
 - **Real-time Controls** - Pause, speed up/down, select colonies for detailed info
+- **Selected Colony Stat Sheets** - CLI and GUI show state, mode, action outputs, and character summaries when tabbing through colonies
 
 ### Quality
-- **Comprehensive Test Suite** - 15 test suites with 200+ tests ensuring simulation correctness
+- **Comprehensive Test Suite** - Multi-layer test coverage across correctness, stress, and performance diagnostics
 
 ## Quick Start
 
 ### Building
 
 ```bash
-# Using CMake (recommended)
-cd ferox
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-
-# Or use the build script
-./scripts/build.sh
+# Configure + build (Release)
+./scripts/build.sh release
 ```
 
 ### Running
 
-**Using scripts (recommended):**
+**Start server + terminal client together:**
 ```bash
-./scripts/run.sh              # Server + terminal client
-./scripts/run.sh gui+         # Server + GUI client
-./scripts/run.sh demo         # Demo mode (no server)
+./scripts/run.sh
 ```
 
-**Manual execution:**
+**Start server + GUI client:**
 ```bash
-# Start the server
-./ferox_server -p 8765 -w 100 -H 50 -c 10
+./scripts/run.sh gui+
+```
 
-# Connect terminal client
-./ferox_client localhost 8765
+**Run only server:**
+```bash
+./build/src/server/ferox_server -p 8765 -w 100 -H 50 -c 10
+```
 
-# Connect GUI client (requires SDL2)
-./ferox_gui localhost 8765
+**Connect a client:**
+```bash
+./build/src/client/ferox_client localhost 8765
+```
 
-# Run demo mode (no server needed)
-./ferox_client --demo
+### Testing
+
+```bash
+# Run full CTest matrix
+ctest --test-dir build --output-on-failure
+
+# Run focused performance diagnostics
+ctest --test-dir build --output-on-failure -R "ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerfComponentAtomicTests"
+```
+
+### Performance Workflow
+
+```bash
+# Multi-iteration median summary (recommended)
+./scripts/perf_multi_iter.py -n 7 --profile balanced
 ```
 
 ### Keyboard Controls
@@ -122,19 +133,22 @@ Server binary defaults shown (scripts/run.sh may use different defaults):
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-p, --port` | 8080 | TCP port to listen on (0 for auto-assign) |
-| `-w, --width` | 100 | World grid width |
+| `-w, --width` | 200 | World grid width |
 | `-H, --height` | 100 | World grid height |
-| `-c, --colonies` | 5 | Initial colony count |
-| `-t, --threads` | 4 | Thread pool size |
+| `-c, --colonies` | 20 | Initial colony count |
+| `-t, --threads` | detected logical CPUs | Thread pool size |
 | `-r, --rate` | 100 | Milliseconds per tick |
-| `--nutrient-diffusion` | 0.00 | Nutrient diffusion coefficient (`0.0-0.25`) |
-| `--nutrient-decay` | 0.00 | Nutrient decay coefficient (`0.0-1.0`) |
-| `--toxin-diffusion` | 0.00 | Toxin diffusion coefficient (`0.0-0.25`) |
-| `--toxin-decay` | 0.05 | Toxin decay coefficient (`0.0-1.0`) |
-| `--signal-diffusion` | 0.075 | Signal diffusion coefficient (`0.0-0.25`) |
-| `--signal-decay` | 0.10 | Signal decay coefficient (`0.0-1.0`) |
+| `-a, --accelerator` | `auto` | Runtime target: `auto`, `cpu`, `apple`, or `amd` |
 
-Solver stability guardrail per field: `4 * diffusion + decay <= 1.0`.
+### Hardware Tuning Environment
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FEROX_ACCELERATOR` | `auto` | Select runtime target when CLI override is not provided |
+| `FEROX_THREADPOOL_PROFILE` | auto-tuned | Override threadpool scheduler profile |
+| `FEROX_ATOMIC_SERIAL_INTERVAL` | auto-tuned | Override serial maintenance cadence inside `atomic_tick` |
+| `FEROX_ATOMIC_FRONTIER_DENSE_PCT` | auto-tuned | Override spread frontier dense cutoff |
+| `FEROX_ATOMIC_USE_FRONTIER` | auto-tuned | Force frontier mode on or off |
 
 ### Client Options
 
@@ -234,13 +248,17 @@ ferox/
 - [Protocol](PROTOCOL.md) - Network protocol specification
 - [Genetics](GENETICS.md) - Genome structure and evolution
 - [Simulation](SIMULATION.md) - World update mechanics
-- [Science Benchmarks](SCIENCE_BENCHMARKS.md) - Canonical validation scenarios and pass bands
 - [API Reference](API.md) - Function documentation
-- [Science Bibliography](SCIENCE_BIBLIOGRAPHY.md) - DOI-backed research mapped to Ferox mechanics
 - [Testing](TESTING.md) - Test organization and coverage
-- [Statistical Regression](STATISTICAL_REGRESSION.md) - Multi-seed simulation drift checks and CI thresholds
+- [Performance Runbook](PERF_RUNBOOK.md) - Benchmark commands, profiles, and jitter control
+- [Hardware and Accelerators](HARDWARE_ACCELERATION.md) - Host detection, target selection, and tuning defaults
+- [Colony Intelligence](COLONY_INTELLIGENCE.md) - Current behavior model, gaps, and future graph vision
+- [Performance Targets](PERF_TARGETS.md) - Current median baselines and target thresholds
+- [Performance Backlog](PERFORMANCE_BACKLOG.md) - Prioritized optimization roadmap
+- [Performance History](PERFORMANCE_HISTORY.md) - Detailed record of changes, experiments, and outcomes
+- [Scaling and Behavior Plan](SCALING_AND_BEHAVIOR_PLAN.md) - Current rollout plan and linked GitHub issues
+- [Progress](PROGRESS.md) - Current project status and active workstreams
 - [Contributing](CONTRIBUTING.md) - Development guidelines
-- [Self-Hosted Runner Ops](RUNNER_OPS.md) - Operations and incident response for CI runner
 
 ## License
 

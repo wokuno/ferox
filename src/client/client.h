@@ -8,13 +8,18 @@
 #include "renderer.h"
 
 typedef struct Client {
-    net_socket* socket;
+    NetSocket* socket;
     Renderer* renderer;
-    proto_world local_world;       // Local copy of world state
+    ProtoWorld local_world;       // Local copy of world state
+    ProtoColonyDetail selected_detail;
     bool connected;
     bool running;
+    bool has_selected_detail;
     uint32_t selected_colony;
     uint32_t selected_index;  // Index in colony array for cycling
+    bool pending_grid_active;
+    uint32_t pending_grid_tick;
+    uint32_t pending_grid_next_index;
 } Client;
 
 // Create and destroy
@@ -34,10 +39,11 @@ void client_send_command(Client* client, CommandType cmd, void* data);
 // Message handling
 void client_handle_message(Client* client, MessageType type, const uint8_t* payload, size_t len);
 void client_update_world(Client* client, const uint8_t* data, size_t len);
+void client_apply_world_delta(Client* client, const uint8_t* data, size_t len);
 
 // Selection
 void client_select_next_colony(Client* client);
 void client_deselect_colony(Client* client);
-const proto_colony* client_get_selected_colony(Client* client);
+const ProtoColony* client_get_selected_colony(Client* client);
 
 #endif // CLIENT_H
