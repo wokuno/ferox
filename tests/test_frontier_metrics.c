@@ -57,7 +57,9 @@ TEST(frontier_fixture_reports_expected_diversity_and_entropy) {
     ASSERT(a != 0 && b != 0, "colonies created");
 
     world->cells[0].colony_id = a;
+    world->cells[0].is_border = true;
     world->cells[1].colony_id = b;
+    world->cells[1].is_border = true;
 
     FrontierTelemetry sample;
     ASSERT(frontier_telemetry_compute(world, 77, &sample), "telemetry computed");
@@ -84,7 +86,9 @@ TEST(lineage_entropy_collapses_when_frontier_is_single_root) {
     ASSERT(root != 0 && child_a != 0 && child_b != 0, "lineage tree created");
 
     world->cells[0].colony_id = child_a;
+    world->cells[0].is_border = true;
     world->cells[1].colony_id = child_b;
+    world->cells[1].is_border = true;
 
     FrontierTelemetry sample;
     ASSERT(frontier_telemetry_compute(world, 99, &sample), "telemetry computed");
@@ -92,6 +96,30 @@ TEST(lineage_entropy_collapses_when_frontier_is_single_root) {
     ASSERT_EQ(sample.active_lineages, 1u);
     ASSERT_NEAR(sample.lineage_diversity_proxy, 0.0f, 0.0001f);
     ASSERT_NEAR(sample.lineage_entropy_bits, 0.0f, 0.0001f);
+
+    world_destroy(world);
+}
+
+TEST(colony_stats_refresh_rebuilds_border_flags_for_telemetry) {
+    World* world = world_create(3, 1);
+    ASSERT(world != NULL, "world created");
+
+    uint32_t a = world_add_colony(world, make_colony(0));
+    uint32_t b = world_add_colony(world, make_colony(0));
+    ASSERT(a != 0 && b != 0, "colonies created");
+
+    world->cells[0].colony_id = a;
+    world->cells[1].colony_id = b;
+
+    simulation_update_colony_stats(world);
+
+    ASSERT(world->cells[0].is_border, "left colony cell marked as border");
+    ASSERT(world->cells[1].is_border, "right colony cell marked as border");
+
+    FrontierTelemetry sample;
+    ASSERT(frontier_telemetry_compute(world, 101, &sample), "telemetry computed");
+    ASSERT_EQ(sample.frontier_cells, 2u);
+    ASSERT_EQ(sample.frontier_sector_count, 2u);
 
     world_destroy(world);
 }
@@ -157,6 +185,7 @@ int run_frontier_metrics_tests(void) {
 
     RUN_TEST(frontier_fixture_reports_expected_diversity_and_entropy);
     RUN_TEST(lineage_entropy_collapses_when_frontier_is_single_root);
+    RUN_TEST(colony_stats_refresh_rebuilds_border_flags_for_telemetry);
     RUN_TEST(seed_replay_produces_stable_telemetry_series);
 
     printf("\nFrontier Metrics Tests: %d passed, %d failed\n", tests_passed, tests_failed);

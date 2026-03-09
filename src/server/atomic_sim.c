@@ -7,6 +7,7 @@
 
 #include "atomic_sim.h"
 #include "genetics.h"
+#include "phase_wait.h"
 #include "simulation.h"
 #include "simulation_common.h"
 #include "../shared/utils.h"
@@ -152,6 +153,16 @@ static double atomic_now_ms(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
 }
+
+struct AtomicPhaseWorkerCtx {
+    AtomicWorld* aworld;
+    int worker_id;
+};
+
+static void atomic_prepare_region_tasks(AtomicWorld* aworld);
+static bool atomic_start_phase_runner(AtomicWorld* aworld);
+static void atomic_stop_phase_runner(AtomicWorld* aworld);
+static void atomic_age_spread_region(AtomicRegionWork* work);
 // ============================================================================
 // Social/Chemotaxis behavior - neighbor detection and influence
 // ============================================================================
@@ -584,6 +595,18 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
         free(aworld);
         return NULL;
     }
+    aworld->region_submit_args = (void**)calloc(aworld->region_work_count, sizeof(void*));
+    if (!aworld->region_submit_args) {
+        free(aworld->region_work);
+        free(aworld->colony_stats);
+        free(aworld->grid.buffers[0]);
+        free(aworld->grid.buffers[1]);
+        free(aworld);
+        return NULL;
+    }
+
+    atomic_prepare_region_tasks(aworld);
+    atomic_start_phase_runner(aworld);
     
     // Sync from world
     atomic_world_sync_from_world(aworld);
@@ -593,7 +616,9 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
 
 void atomic_world_destroy(AtomicWorld* aworld) {
     if (!aworld) return;
-    
+
+    atomic_stop_phase_runner(aworld);
+    free(aworld->region_submit_args);
     free(aworld->region_work);
     free(aworld->colony_stats);
     free(aworld->grid.buffers[0]);
@@ -705,12 +730,13 @@ void atomic_world_sync_to_world(AtomicWorld* aworld) {
     for (size_t i = 0; i < world->colony_count; i++) {
         Colony* colony = &world->colonies[i];
         if (colony->id < aworld->max_colonies) {
-            colony->cell_count = (size_t)atomic_load(&aworld->colony_stats[colony->id].cell_count);
-            
-            int64_t max = atomic_load(&aworld->colony_stats[colony->id].max_cell_count);
-            if ((size_t)max > colony->max_cell_count) {
-                colony->max_cell_count = (size_t)max;
+            int64_t count = atomic_load(&aworld->colony_stats[colony->id].cell_count);
+            colony->cell_count = (size_t)count;
+
+            if ((size_t)count > colony->max_cell_count) {
+                colony->max_cell_count = (size_t)count;
             }
+            atomic_store(&aworld->colony_stats[colony->id].max_cell_count, (int64_t)colony->max_cell_count);
             
             // Mark inactive if dead
             if (colony->cell_count == 0 && colony->active) {
@@ -734,6 +760,16 @@ static void age_task_func(void* arg) {
     atomic_age_region(work);
 }
 
+static void atomic_age_spread_region(AtomicRegionWork* work) {
+    atomic_age_region(work);
+    atomic_spread_region(work);
+}
+
+static void age_spread_task_func(void* arg) {
+    AtomicRegionWork* work = (AtomicRegionWork*)arg;
+    atomic_age_spread_region(work);
+}
+
 void atomic_spread_region(AtomicRegionWork* work) {
     AtomicWorld* aworld = work->aworld;
     World* world = aworld->world;
@@ -747,6 +783,8 @@ void atomic_spread_region(AtomicRegionWork* work) {
         int idx = y * width + work->start_x;
         for (int x = work->start_x; x < work->end_x; x++) {
             AtomicCell* cell = &current[idx++];
+            AtomicCell* neighbors[8] = {0};
+            uint32_t neighbor_colonies[8] = {0};
             
             uint32_t colony_id = atomic_load_explicit(&cell->colony_id, memory_order_relaxed);
             if (colony_id == 0) continue;  // Empty cell
@@ -763,33 +801,50 @@ void atomic_spread_region(AtomicRegionWork* work) {
             // Get colony for spread parameters
             Colony* colony = world_get_colony(world, colony_id);
             if (!colony || !colony->active) continue;
-            
-            SocialInfluenceContext social_context = calculate_social_context(
-                world, grid, current, x, y, colony);
 
-            // Try to spread to neighbors using 8-connectivity
+            bool has_empty_neighbor = false;
             for (int d = 0; d < 8; d++) {
-                int dx = DX8[d];
-                int dy = DY8[d];
-                int nx = x + dx;
-                int ny = y + dy;
-                if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                int nx = x + DX8[d];
+                int ny = y + DY8[d];
+                if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+                    continue;
+                }
 
                 AtomicCell* neighbor = &current[ny * width + nx];
                 uint32_t neighbor_colony = atomic_load_explicit(&neighbor->colony_id, memory_order_relaxed);
-                
-                // Calculate base spread probability with diagonal correction
-                float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * width + x]);
-                float activity_factor = colony_spread_activity_factor(colony);
-                float spread_prob = colony->genome.spread_rate * 
-                                   colony->genome.metabolism *
-                                   colony->genome.spread_weights[d] *
-                                   DIR8_WEIGHT[d] *
-                                   growth_uptake *
-                                   activity_factor;  // 1/sqrt(2) for diagonals
-                
-                // Per-cell stochastic noise from deterministic seed/tick/cell/direction
-                uint32_t cell_idx = (uint32_t)(y * width + x);
+                neighbors[d] = neighbor;
+                neighbor_colonies[d] = neighbor_colony;
+                if (neighbor_colony == 0) {
+                    has_empty_neighbor = true;
+                }
+            }
+
+            if (!has_empty_neighbor) {
+                continue;
+            }
+
+            SocialInfluenceContext social_context = calculate_social_context(
+                world, grid, current, x, y, colony);
+            float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * width + x]);
+            float activity_factor = colony_spread_activity_factor(colony);
+            uint32_t cell_idx = (uint32_t)(y * width + x);
+
+            // Try to spread to neighbors using 8-connectivity
+            for (int d = 0; d < 8; d++) {
+                AtomicCell* neighbor = neighbors[d];
+                uint32_t neighbor_colony = neighbor_colonies[d];
+                if (!neighbor || neighbor_colony != 0) {
+                    continue;
+                }
+
+                int dx = DX8[d];
+                int dy = DY8[d];
+                float spread_prob = colony->genome.spread_rate *
+                                    colony->genome.metabolism *
+                                    colony->genome.spread_weights[d] *
+                                    DIR8_WEIGHT[d] *
+                                    growth_uptake *
+                                    activity_factor;
                 uint32_t lane = (uint32_t)d * 2u;
                 float noise = 0.6f + deterministic_float(
                     aworld->deterministic_seed,
@@ -804,32 +859,24 @@ void atomic_spread_region(AtomicRegionWork* work) {
                 float social_mult = calculate_social_influence(
                     world, &social_context, x, y, dx, dy, d, colony);
                 spread_prob *= social_mult;
-                
-                if (neighbor_colony == 0) {
-                    // Empty cell - try to spread
-                    float spread_roll = deterministic_float(
-                        aworld->deterministic_seed,
-                        world->tick,
-                        cell_idx,
-                        colony_id,
-                        lane + 1u
-                    );
-                    if (spread_roll < spread_prob) {
-                        // Atomic CAS: try to claim the cell
-                        // Only succeeds if cell is still empty
-                        if (atomic_cell_try_claim(neighbor, 0, colony_id)) {
-                            atomic_store(&neighbor->age, 0);
-                            // Update population counts atomically
-                            if (colony_id < aworld->max_colonies) {
-                                atomic_stats_add_cell(&aworld->colony_stats[colony_id]);
-                            }
+
+                float spread_roll = deterministic_float(
+                    aworld->deterministic_seed,
+                    world->tick,
+                    cell_idx,
+                    colony_id,
+                    lane + 1u
+                );
+                if (spread_roll < spread_prob) {
+                    // Atomic CAS: try to claim the cell
+                    // Only succeeds if cell is still empty
+                    if (atomic_cell_try_claim(neighbor, 0, colony_id)) {
+                        atomic_store(&neighbor->age, 0);
+                        // Update population counts atomically
+                        if (colony_id < aworld->max_colonies) {
+                            atomic_stats_add_cell(&aworld->colony_stats[colony_id]);
                         }
                     }
-                } else if (neighbor_colony != colony_id) {
-                    // Colonies cannot directly attack each other
-                    // They compete by racing to fill empty space
-                    // This promotes coexistence and diverse ecosystems
-                    continue;
                 }
             }
         }
@@ -856,7 +903,7 @@ void atomic_age_region(AtomicRegionWork* work) {
 // Parallel Phases
 // ============================================================================
 
-static int prepare_region_tasks(AtomicWorld* aworld) {
+static void atomic_prepare_region_tasks(AtomicWorld* aworld) {
     int regions_x = 1;
     int regions_y = 1;
     atomic_region_layout(aworld, &regions_x, &regions_y);
@@ -875,42 +922,159 @@ static int prepare_region_tasks(AtomicWorld* aworld) {
             work->end_x = (rx == regions_x - 1) ? aworld->grid.width : (rx + 1) * region_width;
             work->end_y = (ry == regions_y - 1) ? aworld->grid.height : (ry + 1) * region_height;
             work->thread_id = task_idx % aworld->thread_count;
+            aworld->region_submit_args[task_idx] = work;
             task_idx++;
         }
     }
-    return task_idx;
 }
 
-static void submit_region_tasks(AtomicWorld* aworld, void (*task_func)(void*)) {
-    int task_count = prepare_region_tasks(aworld);
+static void atomic_run_region_stride(AtomicWorld* aworld,
+                                     AtomicRegionTaskFunc task_func,
+                                     int worker_id,
+                                     int participant_count) {
+    for (int work_index = worker_id; work_index < aworld->region_work_count; work_index += participant_count) {
+        task_func(&aworld->region_work[work_index]);
+    }
+}
+
+static void* atomic_phase_worker_main(void* arg) {
+    AtomicPhaseWorkerCtx* worker = (AtomicPhaseWorkerCtx*)arg;
+    AtomicWorld* aworld = worker->aworld;
+    int observed_generation = atomic_load_explicit(&aworld->phase_generation, memory_order_relaxed);
+
+    for (;;) {
+        if (atomic_load_explicit(&aworld->phase_shutdown, memory_order_acquire)) {
+            return NULL;
+        }
+
+        int next_generation = atomic_load_explicit(&aworld->phase_generation, memory_order_acquire);
+        if (next_generation == observed_generation) {
+            phase_wait_eq(&aworld->phase_generation, observed_generation);
+            if (atomic_load_explicit(&aworld->phase_shutdown, memory_order_acquire)) {
+                return NULL;
+            }
+            next_generation = atomic_load_explicit(&aworld->phase_generation, memory_order_acquire);
+            if (next_generation == observed_generation) {
+                continue;
+            }
+        }
+
+        observed_generation = next_generation;
+        AtomicRegionTaskFunc task_func = aworld->phase_task_func;
+        if (task_func != NULL) {
+            atomic_run_region_stride(aworld, task_func, worker->worker_id, aworld->phase_worker_count + 1);
+        }
+        atomic_fetch_add_explicit(&aworld->phase_completed_workers, 1, memory_order_release);
+    }
+}
+
+static bool atomic_start_phase_runner(AtomicWorld* aworld) {
+    if (aworld->thread_count <= 1) {
+        return true;
+    }
+
+    aworld->phase_worker_count = aworld->thread_count - 1;
+    aworld->phase_threads = (pthread_t*)calloc((size_t)aworld->phase_worker_count, sizeof(pthread_t));
+    aworld->phase_workers = (AtomicPhaseWorkerCtx*)calloc((size_t)aworld->phase_worker_count,
+                                                          sizeof(AtomicPhaseWorkerCtx));
+    if (!aworld->phase_threads || !aworld->phase_workers) {
+        free(aworld->phase_threads);
+        free(aworld->phase_workers);
+        aworld->phase_threads = NULL;
+        aworld->phase_workers = NULL;
+        aworld->phase_worker_count = 0;
+        return false;
+    }
+
+    atomic_store_explicit(&aworld->phase_generation, 0, memory_order_relaxed);
+    atomic_store_explicit(&aworld->phase_completed_workers, 0, memory_order_relaxed);
+    atomic_store_explicit(&aworld->phase_shutdown, false, memory_order_relaxed);
+
+    for (int i = 0; i < aworld->phase_worker_count; i++) {
+        aworld->phase_workers[i].aworld = aworld;
+        aworld->phase_workers[i].worker_id = i + 1;
+        if (pthread_create(&aworld->phase_threads[i], NULL,
+                           atomic_phase_worker_main, &aworld->phase_workers[i]) != 0) {
+            atomic_store_explicit(&aworld->phase_shutdown, true, memory_order_release);
+            atomic_fetch_add_explicit(&aworld->phase_generation, 1, memory_order_release);
+            phase_wake_all(&aworld->phase_generation);
+            for (int j = 0; j < i; j++) {
+                pthread_join(aworld->phase_threads[j], NULL);
+            }
+            free(aworld->phase_threads);
+            free(aworld->phase_workers);
+            aworld->phase_threads = NULL;
+            aworld->phase_workers = NULL;
+            aworld->phase_worker_count = 0;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static void atomic_stop_phase_runner(AtomicWorld* aworld) {
+    if (!aworld || !aworld->phase_threads) {
+        return;
+    }
+
+    atomic_store_explicit(&aworld->phase_shutdown, true, memory_order_release);
+    atomic_fetch_add_explicit(&aworld->phase_generation, 1, memory_order_release);
+    phase_wake_all(&aworld->phase_generation);
+
+    for (int i = 0; i < aworld->phase_worker_count; i++) {
+        pthread_join(aworld->phase_threads[i], NULL);
+    }
+
+    free(aworld->phase_threads);
+    free(aworld->phase_workers);
+    aworld->phase_threads = NULL;
+    aworld->phase_workers = NULL;
+    aworld->phase_worker_count = 0;
+}
+
+static void submit_region_tasks(AtomicWorld* aworld,
+                                AtomicRegionTaskFunc phase_task_func,
+                                void (*fallback_task_func)(void*)) {
+    int task_count = aworld->region_work_count;
 
     if (aworld->thread_count == 1) {
         for (int i = 0; i < task_count; i++) {
-            task_func(&aworld->region_work[i]);
+            phase_task_func(&aworld->region_work[i]);
         }
         return;
     }
 
-    void* submit_args[16];
-    for (int i = 0; i < task_count; i++) {
-        submit_args[i] = &aworld->region_work[i];
+    if (aworld->phase_threads != NULL) {
+        aworld->phase_task_func = phase_task_func;
+        atomic_store_explicit(&aworld->phase_completed_workers, 0, memory_order_relaxed);
+        atomic_fetch_add_explicit(&aworld->phase_generation, 1, memory_order_release);
+        phase_wake_all(&aworld->phase_generation);
+        atomic_run_region_stride(aworld, phase_task_func, 0, aworld->phase_worker_count + 1);
+        int spin_count = 0;
+        while (atomic_load_explicit(&aworld->phase_completed_workers, memory_order_acquire) <
+               aworld->phase_worker_count) {
+            phase_wait_backoff(&spin_count);
+        }
+        return;
     }
-    threadpool_submit_batch(aworld->pool, task_func, submit_args, task_count);
+
+    threadpool_submit_batch(aworld->pool, fallback_task_func, aworld->region_submit_args, task_count);
+    threadpool_wait(aworld->pool);
 }
 
 void atomic_age(AtomicWorld* aworld) {
     if (!aworld) return;
-    submit_region_tasks(aworld, age_task_func);
+    submit_region_tasks(aworld, atomic_age_region, age_task_func);
 }
 
 void atomic_spread(AtomicWorld* aworld) {
     if (!aworld) return;
-    submit_region_tasks(aworld, spread_task_func);
+    submit_region_tasks(aworld, atomic_spread_region, spread_task_func);
 }
 
 void atomic_barrier(AtomicWorld* aworld) {
-    if (!aworld) return;
-    threadpool_wait(aworld->pool);
+    (void)aworld;
 }
 
 // ============================================================================
@@ -929,17 +1093,19 @@ static void atomic_tick_internal(AtomicWorld* aworld, AtomicTickBreakdown* break
     }
 
     double phase_start = atomic_now_ms();
-    atomic_age(aworld);
-    atomic_barrier(aworld);
     if (capture_breakdown) {
-        breakdown->age_ms = atomic_now_ms() - phase_start;
-    }
+        atomic_age(aworld);
+        if (capture_breakdown) {
+            breakdown->age_ms = atomic_now_ms() - phase_start;
+        }
 
-    phase_start = atomic_now_ms();
-    atomic_spread(aworld);
-    atomic_barrier(aworld);
-    if (capture_breakdown) {
-        breakdown->spread_ms = atomic_now_ms() - phase_start;
+        phase_start = atomic_now_ms();
+        atomic_spread(aworld);
+        if (capture_breakdown) {
+            breakdown->spread_ms = atomic_now_ms() - phase_start;
+        }
+    } else {
+        submit_region_tasks(aworld, atomic_age_spread_region, age_spread_task_func);
     }
 
     phase_start = atomic_now_ms();

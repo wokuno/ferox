@@ -16,6 +16,7 @@ extern int run_simulation_stress_tests(void);
 extern int run_simulation_logic_tests(void);
 extern int run_simd_eval_tests(void);
 extern int run_performance_eval_tests(void);
+extern int run_perf_component_tests(void);
 extern int run_threadpool_stress_tests(void);
 extern int run_protocol_edge_tests(void);
 extern int run_names_exhaustive_tests(void);
@@ -39,7 +40,7 @@ int main(int argc, char* argv[]) {
     // Initialize random seed for reproducibility
     rng_seed(42);
     
-    TestSuiteResult results[12];
+    TestSuiteResult results[13];
     int suite_index = 0;
     int total_failures = 0;
     
@@ -101,6 +102,14 @@ int main(int argc, char* argv[]) {
     }
     
     // 7. Thread Pool Stress Tests
+    if (!specific_suite || strcmp(specific_suite, "perf-components") == 0) {
+        results[suite_index].name = "Performance Components";
+        results[suite_index].failures = run_perf_component_tests();
+        results[suite_index].run = 1;
+        suite_index++;
+    }
+
+    // 8. Thread Pool Stress Tests
     if (!specific_suite || strcmp(specific_suite, "threadpool") == 0) {
         results[suite_index].name = "Thread Pool Stress";
         results[suite_index].failures = run_threadpool_stress_tests();
@@ -108,7 +117,7 @@ int main(int argc, char* argv[]) {
         suite_index++;
     }
     
-    // 8. Protocol Edge Tests
+    // 9. Protocol Edge Tests
     if (!specific_suite || strcmp(specific_suite, "protocol") == 0) {
         results[suite_index].name = "Protocol Edge";
         results[suite_index].failures = run_protocol_edge_tests();
@@ -116,7 +125,7 @@ int main(int argc, char* argv[]) {
         suite_index++;
     }
     
-    // 9. Names Exhaustive Tests
+    // 10. Names Exhaustive Tests
     if (!specific_suite || strcmp(specific_suite, "names") == 0) {
         results[suite_index].name = "Names Exhaustive";
         results[suite_index].failures = run_names_exhaustive_tests();
@@ -124,7 +133,7 @@ int main(int argc, char* argv[]) {
         suite_index++;
     }
     
-    // 10. Colors Exhaustive Tests
+    // 11. Colors Exhaustive Tests
     if (!specific_suite || strcmp(specific_suite, "colors") == 0) {
         results[suite_index].name = "Colors Exhaustive";
         results[suite_index].failures = run_colors_exhaustive_tests();
@@ -132,7 +141,7 @@ int main(int argc, char* argv[]) {
         suite_index++;
     }
     
-    // 11. Growth Shape Tests
+    // 12. Growth Shape Tests
     if (!specific_suite || strcmp(specific_suite, "growth") == 0) {
         results[suite_index].name = "Growth Shapes";
         results[suite_index].failures = run_growth_shapes_tests();

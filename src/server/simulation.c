@@ -27,6 +27,12 @@ void colony_update_persister_switching(Colony* colony);
 // Direction offsets for 4-connectivity (N, E, S, W)
 static const int DX[] = {0, 1, 0, -1};
 static const int DY[] = {-1, 0, 1, 0};
+static const int CARDINAL_DIR8_INDEX[] = {DIR_N, DIR_E, DIR_S, DIR_W};
+
+#define COMBAT_CACHE_ENEMY_MASK 0x0Fu
+#define COMBAT_CACHE_FRIENDLY_SHIFT 4u
+#define COMBAT_CACHE_FRIENDLY_MASK 0x0Fu
+#define COMBAT_CACHE_TICK_SHIFT 8u
 
 static inline Colony* lookup_active_colony(World* world, uint32_t id) {
     if (!world || id == 0 || id >= world->colony_by_id_capacity) {
@@ -183,18 +189,164 @@ static inline float get_cell_eps_density(World* world, int idx) {
 
     Colony* colony = lookup_active_colony(world, colony_id);
     if (!colony) return 0.0f;
+    if (colony->biofilm_strength <= 0.0f) return 0.0f;
 
     float eps = colony->biofilm_strength * (0.35f + colony->genome.biofilm_investment * 0.65f);
     return utils_clamp_f(eps, 0.0f, 1.0f);
 }
 
+static bool world_has_eps_barrier(const World* world) {
+    if (!world || !world->colonies) {
+        return false;
+    }
+
+    for (size_t i = 0; i < world->colony_count; i++) {
+        const Colony* colony = &world->colonies[i];
+        if (!colony->active) continue;
+        if (colony->biofilm_strength > 0.0f) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool build_cell_eps_cache(World* world, float* eps_cache, int total_cells) {
+    if (!world || !eps_cache || total_cells <= 0) return false;
+    if (!world_has_eps_barrier(world)) return false;
+
+    bool has_eps = false;
+
+    for (int i = 0; i < total_cells; i++) {
+        float eps = get_cell_eps_density(world, i);
+        eps_cache[i] = eps;
+        has_eps = has_eps || eps > 0.0f;
+    }
+
+    return has_eps;
+}
+
+static inline float fast_eps_power(float value, float exponent) {
+    if (value <= 0.0f) return 0.0f;
+
+    if (fabsf(exponent - 1.0f) < 0.0001f) {
+        return value;
+    }
+    if (fabsf(exponent - 1.5f) < 0.0001f) {
+        return value * sqrtf(value);
+    }
+    if (fabsf(exponent - 2.0f) < 0.0001f) {
+        return value * value;
+    }
+    if (fabsf(exponent - 3.0f) < 0.0001f) {
+        return value * value * value;
+    }
+    if (fabsf(exponent - 4.0f) < 0.0001f) {
+        float squared = value * value;
+        return squared * squared;
+    }
+
+    return powf(value, exponent);
+}
+
 static inline float effective_diffusivity_scale(float eps_a, float eps_b) {
     float avg_eps = 0.5f * (eps_a + eps_b);
-    float attenuation = 1.0f - g_transport_params.eps_attenuation * powf(avg_eps, g_transport_params.eps_exponent);
+    float attenuation = 1.0f - g_transport_params.eps_attenuation *
+                        fast_eps_power(avg_eps, g_transport_params.eps_exponent);
     attenuation = utils_clamp_f(attenuation,
                                 g_transport_params.min_relative_diffusivity,
                                 1.0f);
     return attenuation;
+}
+
+static inline float clamp_unit_interval(float value) {
+    if (value < 0.0f) return 0.0f;
+    if (value > 1.0f) return 1.0f;
+    return value;
+}
+
+typedef struct {
+    int idx;
+    uint8_t enemy_mask;
+    uint8_t friendly_count;
+} ContestedBorder;
+
+static inline uint32_t combat_cache_tick_tag(uint64_t tick) {
+    return (uint32_t)(tick & 0x00FFFFFFu);
+}
+
+static inline uint32_t pack_combat_cache(uint32_t tick_tag,
+                                         int friendly_count,
+                                         uint8_t enemy_mask) {
+    uint32_t encoded_friendly = (uint32_t)(friendly_count + 1) & COMBAT_CACHE_FRIENDLY_MASK;
+    return (tick_tag << COMBAT_CACHE_TICK_SHIFT) |
+           (encoded_friendly << COMBAT_CACHE_FRIENDLY_SHIFT) |
+           ((uint32_t)enemy_mask & COMBAT_CACHE_ENEMY_MASK);
+}
+
+static inline int combat_cached_friendly_count(uint32_t packed_cache, uint32_t tick_tag) {
+    if ((packed_cache >> COMBAT_CACHE_TICK_SHIFT) != tick_tag) {
+        return -1;
+    }
+
+    uint32_t encoded = (packed_cache >> COMBAT_CACHE_FRIENDLY_SHIFT) & COMBAT_CACHE_FRIENDLY_MASK;
+    if (encoded == 0) {
+        return -1;
+    }
+
+    return (int)encoded - 1;
+}
+
+static bool append_contested_border(ContestedBorder** borders,
+                                    int* count,
+                                    int* capacity,
+                                    int idx,
+                                    uint8_t enemy_mask,
+                                    int friendly_count) {
+    if (!borders || !count || !capacity) {
+        return false;
+    }
+
+    if (*count >= *capacity) {
+        int new_capacity = (*capacity > 0) ? (*capacity * 2) : 128;
+        ContestedBorder* resized = (ContestedBorder*)realloc(
+            *borders, (size_t)new_capacity * sizeof(ContestedBorder));
+        if (!resized) {
+            return false;
+        }
+        *borders = resized;
+        *capacity = new_capacity;
+    }
+
+    (*borders)[*count].idx = idx;
+    (*borders)[*count].enemy_mask = enemy_mask;
+    (*borders)[*count].friendly_count = (uint8_t)friendly_count;
+    (*count)++;
+    return true;
+}
+
+static uint8_t detect_enemy_neighbor_mask(const Cell* cells,
+                                          int width,
+                                          int height,
+                                          int x,
+                                          int y,
+                                          uint32_t colony_id) {
+    uint8_t mask = 0;
+
+    for (int d = 0; d < 4; d++) {
+        int nx = x + DX[d];
+        int ny = y + DY[d];
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+            continue;
+        }
+
+        uint32_t neighbor_id = cells[ny * width + nx].colony_id;
+        if (neighbor_id != 0 && neighbor_id != colony_id) {
+            mask |= (uint8_t)(1u << d);
+        }
+    }
+
+    return mask;
 }
 
 static void diffuse_scalar_field(World* world, float* field, float* scratch, float base_diffusivity) {
@@ -202,38 +354,224 @@ static void diffuse_scalar_field(World* world, float* field, float* scratch, flo
 
     const int width = world->width;
     const int height = world->height;
+    const int total_cells = width * height;
+    float* eps_cache = world->scratch_eps;
+    if (!eps_cache) return;
 
-    for (int y = 0; y < height; y++) {
-        int row = y * width;
-        for (int x = 0; x < width; x++) {
-            int idx = row + x;
-            float center = field[idx];
-            float center_eps = get_cell_eps_density(world, idx);
-            float flux_sum = 0.0f;
+    bool has_eps = build_cell_eps_cache(world, eps_cache, total_cells);
 
-            if (y > 0) {
-                int ni = idx - width;
-                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
-                flux_sum += (field[ni] - center) * scale;
-            }
-            if (x + 1 < width) {
-                int ni = idx + 1;
-                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
-                flux_sum += (field[ni] - center) * scale;
-            }
-            if (y + 1 < height) {
-                int ni = idx + width;
-                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
-                flux_sum += (field[ni] - center) * scale;
-            }
-            if (x > 0) {
-                int ni = idx - 1;
-                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
-                flux_sum += (field[ni] - center) * scale;
-            }
+    if (width < 3 || height < 3) {
+        if (!has_eps) {
+            for (int y = 0; y < height; y++) {
+                int row = y * width;
+                for (int x = 0; x < width; x++) {
+                    int idx = row + x;
+                    float center = field[idx];
+                    float flux_sum = 0.0f;
 
-            scratch[idx] = utils_clamp_f(center + base_diffusivity * flux_sum, 0.0f, 1.0f);
+                    if (y > 0) flux_sum += field[idx - width] - center;
+                    if (x + 1 < width) flux_sum += field[idx + 1] - center;
+                    if (y + 1 < height) flux_sum += field[idx + width] - center;
+                    if (x > 0) flux_sum += field[idx - 1] - center;
+
+                    scratch[idx] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+                }
+            }
+        } else {
+            for (int y = 0; y < height; y++) {
+                int row = y * width;
+                for (int x = 0; x < width; x++) {
+                    int idx = row + x;
+                    float center = field[idx];
+                    float center_eps = eps_cache[idx];
+                    float flux_sum = 0.0f;
+
+                    if (y > 0) {
+                        int ni = idx - width;
+                        float scale = effective_diffusivity_scale(center_eps, eps_cache[ni]);
+                        flux_sum += (field[ni] - center) * scale;
+                    }
+                    if (x + 1 < width) {
+                        int ni = idx + 1;
+                        float scale = effective_diffusivity_scale(center_eps, eps_cache[ni]);
+                        flux_sum += (field[ni] - center) * scale;
+                    }
+                    if (y + 1 < height) {
+                        int ni = idx + width;
+                        float scale = effective_diffusivity_scale(center_eps, eps_cache[ni]);
+                        flux_sum += (field[ni] - center) * scale;
+                    }
+                    if (x > 0) {
+                        int ni = idx - 1;
+                        float scale = effective_diffusivity_scale(center_eps, eps_cache[ni]);
+                        flux_sum += (field[ni] - center) * scale;
+                    }
+
+                    scratch[idx] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+                }
+            }
         }
+
+        memcpy(field, scratch, (size_t)total_cells * sizeof(float));
+        return;
+    }
+
+    if (!has_eps) {
+        const float* top = field;
+        float* top_dst = scratch;
+        top_dst[0] = clamp_unit_interval(top[0] + base_diffusivity * (top[1] + field[width] - 2.0f * top[0]));
+        for (int x = 1; x < width - 1; x++) {
+            float center = top[x];
+            float flux_sum = top[x - 1] + top[x + 1] + field[width + x] - 3.0f * center;
+            top_dst[x] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+        }
+        top_dst[width - 1] = clamp_unit_interval(
+            top[width - 1] +
+            base_diffusivity * (top[width - 2] + field[2 * width - 1] - 2.0f * top[width - 1]));
+
+        for (int y = 1; y < height - 1; y++) {
+            const float* prev = field + (y - 1) * width;
+            const float* curr = field + y * width;
+            const float* next = field + (y + 1) * width;
+            float* dst = scratch + y * width;
+
+            float center = curr[0];
+            float flux_sum = prev[0] + curr[1] + next[0] - 3.0f * center;
+            dst[0] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+
+            for (int x = 1; x < width - 1; x++) {
+                center = curr[x];
+                flux_sum = prev[x] + curr[x + 1] + next[x] + curr[x - 1] - 4.0f * center;
+                dst[x] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+            }
+
+            center = curr[width - 1];
+            flux_sum = prev[width - 1] + next[width - 1] + curr[width - 2] - 3.0f * center;
+            dst[width - 1] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+        }
+
+        const float* bottom = field + (height - 1) * width;
+        const float* above_bottom = field + (height - 2) * width;
+        float* bottom_dst = scratch + (height - 1) * width;
+        bottom_dst[0] = clamp_unit_interval(
+            bottom[0] + base_diffusivity * (above_bottom[0] + bottom[1] - 2.0f * bottom[0]));
+        for (int x = 1; x < width - 1; x++) {
+            float center = bottom[x];
+            float flux_sum = above_bottom[x] + bottom[x + 1] + bottom[x - 1] - 3.0f * center;
+            bottom_dst[x] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+        }
+        bottom_dst[width - 1] = clamp_unit_interval(
+            bottom[width - 1] +
+            base_diffusivity * (above_bottom[width - 1] + bottom[width - 2] - 2.0f * bottom[width - 1]));
+
+        memcpy(field, scratch, (size_t)total_cells * sizeof(float));
+        return;
+    }
+
+    const float* top = field;
+    const float* top_eps = eps_cache;
+    float* top_dst = scratch;
+    {
+        float center = top[0];
+        float center_eps = top_eps[0];
+        float flux_sum = 0.0f;
+        flux_sum += (top[1] - center) * effective_diffusivity_scale(center_eps, top_eps[1]);
+        flux_sum += (field[width] - center) * effective_diffusivity_scale(center_eps, eps_cache[width]);
+        top_dst[0] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+    }
+    for (int x = 1; x < width - 1; x++) {
+        float center = top[x];
+        float center_eps = top_eps[x];
+        float flux_sum = 0.0f;
+        flux_sum += (top[x - 1] - center) * effective_diffusivity_scale(center_eps, top_eps[x - 1]);
+        flux_sum += (top[x + 1] - center) * effective_diffusivity_scale(center_eps, top_eps[x + 1]);
+        flux_sum += (field[width + x] - center) * effective_diffusivity_scale(center_eps, eps_cache[width + x]);
+        top_dst[x] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+    }
+    {
+        int x = width - 1;
+        float center = top[x];
+        float center_eps = top_eps[x];
+        float flux_sum = 0.0f;
+        flux_sum += (top[x - 1] - center) * effective_diffusivity_scale(center_eps, top_eps[x - 1]);
+        flux_sum += (field[width + x] - center) * effective_diffusivity_scale(center_eps, eps_cache[width + x]);
+        top_dst[x] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+    }
+
+    for (int y = 1; y < height - 1; y++) {
+        const float* prev = field + (y - 1) * width;
+        const float* curr = field + y * width;
+        const float* next = field + (y + 1) * width;
+        const float* prev_eps = eps_cache + (y - 1) * width;
+        const float* curr_eps = eps_cache + y * width;
+        const float* next_eps = eps_cache + (y + 1) * width;
+        float* dst = scratch + y * width;
+
+        float center = curr[0];
+        float center_eps = curr_eps[0];
+        float flux_sum = 0.0f;
+        flux_sum += (prev[0] - center) * effective_diffusivity_scale(center_eps, prev_eps[0]);
+        flux_sum += (curr[1] - center) * effective_diffusivity_scale(center_eps, curr_eps[1]);
+        flux_sum += (next[0] - center) * effective_diffusivity_scale(center_eps, next_eps[0]);
+        dst[0] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+
+        for (int x = 1; x < width - 1; x++) {
+            center = curr[x];
+            center_eps = curr_eps[x];
+            flux_sum = 0.0f;
+            flux_sum += (prev[x] - center) * effective_diffusivity_scale(center_eps, prev_eps[x]);
+            flux_sum += (curr[x + 1] - center) * effective_diffusivity_scale(center_eps, curr_eps[x + 1]);
+            flux_sum += (next[x] - center) * effective_diffusivity_scale(center_eps, next_eps[x]);
+            flux_sum += (curr[x - 1] - center) * effective_diffusivity_scale(center_eps, curr_eps[x - 1]);
+            dst[x] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+        }
+
+        center = curr[width - 1];
+        center_eps = curr_eps[width - 1];
+        flux_sum = 0.0f;
+        flux_sum += (prev[width - 1] - center) * effective_diffusivity_scale(center_eps, prev_eps[width - 1]);
+        flux_sum += (next[width - 1] - center) * effective_diffusivity_scale(center_eps, next_eps[width - 1]);
+        flux_sum += (curr[width - 2] - center) * effective_diffusivity_scale(center_eps, curr_eps[width - 2]);
+        dst[width - 1] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+    }
+
+    const float* bottom = field + (height - 1) * width;
+    const float* above_bottom = field + (height - 2) * width;
+    const float* bottom_eps = eps_cache + (height - 1) * width;
+    const float* above_bottom_eps = eps_cache + (height - 2) * width;
+    float* bottom_dst = scratch + (height - 1) * width;
+    {
+        float center = bottom[0];
+        float center_eps = bottom_eps[0];
+        float flux_sum = 0.0f;
+        flux_sum += (above_bottom[0] - center) *
+                    effective_diffusivity_scale(center_eps, above_bottom_eps[0]);
+        flux_sum += (bottom[1] - center) *
+                    effective_diffusivity_scale(center_eps, bottom_eps[1]);
+        bottom_dst[0] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+    }
+    for (int x = 1; x < width - 1; x++) {
+        float center = bottom[x];
+        float center_eps = bottom_eps[x];
+        float flux_sum = 0.0f;
+        flux_sum += (above_bottom[x] - center) *
+                    effective_diffusivity_scale(center_eps, above_bottom_eps[x]);
+        flux_sum += (bottom[x + 1] - center) *
+                    effective_diffusivity_scale(center_eps, bottom_eps[x + 1]);
+        flux_sum += (bottom[x - 1] - center) *
+                    effective_diffusivity_scale(center_eps, bottom_eps[x - 1]);
+        bottom_dst[x] = clamp_unit_interval(center + base_diffusivity * flux_sum);
+    }
+    {
+        int x = width - 1;
+        float center = bottom[x];
+        float center_eps = bottom_eps[x];
+        float flux_sum = 0.0f;
+        flux_sum += (above_bottom[x] - center) *
+                    effective_diffusivity_scale(center_eps, above_bottom_eps[x]);
+        flux_sum += (bottom[x - 1] - center) *
+                    effective_diffusivity_scale(center_eps, bottom_eps[x - 1]);
+        bottom_dst[x] = clamp_unit_interval(center + base_diffusivity * flux_sum);
     }
 
     memcpy(field, scratch, (size_t)(width * height) * sizeof(float));
@@ -419,7 +757,11 @@ static float calculate_local_density(World* world, int x, int y, uint32_t colony
 }
 
 // Calculate environmental spread modifier for a target cell
-static float calculate_env_spread_modifier(World* world, Colony* colony, int tx, int ty, int sx, int sy) {
+static float calculate_env_spread_modifier(World* world,
+                                           Colony* colony,
+                                           int tx,
+                                           int ty,
+                                           float local_density) {
     int target_idx = ty * world->width + tx;
     float modifier = 1.0f;
     
@@ -438,7 +780,6 @@ static float calculate_env_spread_modifier(World* world, Colony* colony, int tx,
     modifier *= (1.0f + colony->genome.edge_affinity * (edge_factor - 0.5f));
     
     // Quorum sensing: reduce spread probability if local density exceeds threshold
-    float local_density = calculate_local_density(world, sx, sy, colony->id);
     if (local_density > colony->genome.quorum_threshold) {
         float density_penalty = (local_density - colony->genome.quorum_threshold) * 
                                 (1.0f - colony->genome.density_tolerance);
@@ -621,36 +962,6 @@ static int count_friendly_neighbors(World* world, int x, int y, uint32_t colony_
     return count;
 }
 
-// Count enemy neighbors around a cell (for pressure calculation)
-static int count_enemy_neighbors(World* world, int x, int y, uint32_t colony_id) {
-    if (!world || !world->cells) return 0;
-
-    int count = 0;
-
-    int min_y = y - 1;
-    int max_y = y + 1;
-    if (min_y < 0) min_y = 0;
-    if (max_y >= world->height) max_y = world->height - 1;
-
-    int min_x = x - 1;
-    int max_x = x + 1;
-    if (min_x < 0) min_x = 0;
-    if (max_x >= world->width) max_x = world->width - 1;
-
-    for (int ny = min_y; ny <= max_y; ny++) {
-        int row = ny * world->width;
-        for (int nx = min_x; nx <= max_x; nx++) {
-            if (nx == x && ny == y) continue;
-            uint32_t id = world->cells[row + nx].colony_id;
-            if (id != 0 && id != colony_id) {
-                count++;
-            }
-        }
-    }
-
-    return count;
-}
-
 // Calculate local biomass density for cooperative propagation
 // Based on Ben-Jacob model: Db = D0 * b^k where k=1 (linear cooperative)
 // Higher local density = more mechanical pushing = faster spread
@@ -689,6 +1000,38 @@ static float calculate_biomass_pressure(World* world, int x, int y, uint32_t col
     return 1.0f + density * 0.5f;  // Up to 1.5x spread at full density
 }
 
+typedef struct {
+    int friendly_count;
+    int enemy_count;
+} TargetNeighborhoodStats;
+
+static TargetNeighborhoodStats analyze_target_neighborhood(const World* world,
+                                                           int tx,
+                                                           int ty,
+                                                           uint32_t colony_id) {
+    TargetNeighborhoodStats stats = {0, 0};
+    if (!world || !world->cells) {
+        return stats;
+    }
+
+    for (int d = 0; d < 8; d++) {
+        int nx = tx + DX8[d];
+        int ny = ty + DY8[d];
+        if (nx < 0 || nx >= world->width || ny < 0 || ny >= world->height) {
+            continue;
+        }
+
+        uint32_t neighbor_id = world->cells[ny * world->width + nx].colony_id;
+        if (neighbor_id == colony_id) {
+            stats.friendly_count++;
+        } else if (neighbor_id != 0) {
+            stats.enemy_count++;
+        }
+    }
+
+    return stats;
+}
+
 // Quorum activation level based on accumulated colony signal
 // 0 = below threshold, 1 = strongly above threshold
 static float get_quorum_activation(const Colony* colony) {
@@ -699,38 +1042,6 @@ static float get_quorum_activation(const Colony* colony) {
         (colony->signal_strength - threshold) / (1.0f - threshold + 0.001f),
         0.0f, 1.0f
     );
-}
-
-// Get directional weight for spread_weights (maps dx,dy to 8-direction weights)
-static float get_direction_weight(Genome* g, int dx, int dy) {
-    // Map dx,dy to direction index
-    // N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
-    if (dy == -1 && dx == 0) return g->spread_weights[0];  // N
-    if (dy == -1 && dx == 1) return g->spread_weights[1];  // NE
-    if (dy == 0  && dx == 1) return g->spread_weights[2];  // E
-    if (dy == 1  && dx == 1) return g->spread_weights[3];  // SE
-    if (dy == 1  && dx == 0) return g->spread_weights[4];  // S
-    if (dy == 1  && dx ==-1) return g->spread_weights[5];  // SW
-    if (dy == 0  && dx ==-1) return g->spread_weights[6];  // W
-    if (dy == -1 && dx ==-1) return g->spread_weights[7];  // NW
-    return 1.0f;
-}
-
-// Curvature smoothing: count how many of target cell's neighbors belong to colony.
-// Gentle bias toward filling concavities while allowing organic protrusions.
-static float calculate_curvature_boost(World* world, int tx, int ty, uint32_t colony_id) {
-    int same = 0;
-    for (int d = 0; d < 8; d++) {
-        int nx = tx + DX8[d], ny = ty + DY8[d];
-        if (nx >= 0 && nx < world->width && ny >= 0 && ny < world->height) {
-            if (world->cells[ny * world->width + nx].colony_id == colony_id) same++;
-        }
-    }
-    // 0 neighbors (protrusion): 0.85x — mild penalty, still allows finger-like growth
-    // 1 neighbor  (normal edge): 1.0x — neutral baseline
-    // 2 neighbors (filling gap): 1.15x — mild boost
-    // 3+ neighbors (deep concavity): up to 1.45x — strong fill incentive
-    return 0.85f + (float)same * 0.15f;
 }
 
 // Perception-based directional modifier.
@@ -797,7 +1108,11 @@ static float calculate_perception_modifier(World* world, int x, int y,
 
 void simulation_spread(World* world) {
     if (!world) return;
-    
+
+    const int width = world->width;
+    Cell* cells = world->cells;
+    float* nutrients = world->nutrients;
+
     // Create list of cells to colonize (avoid modifying while iterating)
     typedef struct { int x, y; uint32_t colony_id; } PendingCell;
     PendingCell* pending = NULL;
@@ -807,67 +1122,80 @@ void simulation_spread(World* world) {
     if (!pending) return;
     
     for (int y = 0; y < world->height; y++) {
-        for (int x = 0; x < world->width; x++) {
-            Cell* cell = world_get_cell(world, x, y);
-            if (!cell || cell->colony_id == 0) continue;
-            
+        int row = y * width;
+        for (int x = 0; x < width; x++) {
+            int idx = row + x;
+            Cell* cell = &cells[idx];
+            if (cell->colony_id == 0) continue;
+
             Colony* colony = world_get_colony(world, cell->colony_id);
             if (!colony) continue;
-            
+
+            float biomass_pressure = calculate_biomass_pressure(world, x, y, cell->colony_id);
+            float quorum_activation = get_quorum_activation(colony);
+            float quorum_boost = 1.0f + quorum_activation * colony->genome.motility * 0.8f;
+            float dormancy_factor = colony_spread_activity_factor(colony);
+            float trait_growth_cost = calculate_growth_cost_multiplier(colony);
+            float growth_uptake = monod_growth_multiplier(world, nutrients[idx]);
+            bool use_quorum_density = colony->genome.density_tolerance < 0.999f;
+            float local_density = use_quorum_density ? calculate_local_density(world, x, y, colony->id) : 0.0f;
+            bool use_env_modifier =
+                fabsf(colony->genome.nutrient_sensitivity) > 0.0001f ||
+                fabsf(colony->genome.toxin_sensitivity) > 0.0001f ||
+                fabsf(colony->genome.edge_affinity) > 0.0001f ||
+                (use_quorum_density && colony->genome.quorum_threshold < 0.999f);
+            bool use_scent = (colony->genome.density_tolerance < 0.999f) ||
+                             (fabsf((colony->genome.aggression - colony->genome.defense_priority) *
+                                    colony->genome.signal_sensitivity) > 0.0001f);
+            bool use_perception = colony->genome.detection_range >= 0.05f;
+
             // Try to spread to 8 neighbors (Moore neighborhood) for organic shapes
             // Diagonal moves use 1/√2 correction for isotropic growth
             for (int d = 0; d < 8; d++) {
                 int nx = x + DX8[d];
                 int ny = y + DY8[d];
-                
-                Cell* neighbor = world_get_cell(world, nx, ny);
-                if (!neighbor) continue;
-                
+
+                if (nx < 0 || nx >= width || ny < 0 || ny >= world->height) continue;
+
+                Cell* neighbor = &cells[ny * width + nx];
                 if (neighbor->colony_id == 0) {
                     // Empty cell - calculate spread probability with environmental sensing
-                    float env_modifier = calculate_env_spread_modifier(world, colony, nx, ny, x, y);
-                    
-                    // Directional preference from genome
-                    float dir_weight = get_direction_weight(&colony->genome, DX8[d], DY8[d]);
-                    
+                    float env_modifier = use_env_modifier ?
+                        calculate_env_spread_modifier(world, colony, nx, ny, local_density) :
+                        1.0f;
+
                     // Scent influence - react to nearby colonies
-                    float scent_modifier = get_scent_influence(world, x, y, DX8[d], DY8[d], 
-                                                                cell->colony_id, &colony->genome);
-                    
-                    // Cooperative biomass propagation (Ben-Jacob model)
-                    float biomass_pressure = calculate_biomass_pressure(world, x, y, cell->colony_id);
-                    
+                    float scent_modifier = use_scent ?
+                        get_scent_influence(world, x, y, DX8[d], DY8[d], cell->colony_id, &colony->genome) :
+                        1.0f;
+                    TargetNeighborhoodStats target_stats = analyze_target_neighborhood(world, nx, ny, cell->colony_id);
+
                     // Strategic spread: push harder towards open space, less where enemies are
-                    int enemy_count = count_enemy_neighbors(world, nx, ny, cell->colony_id);
                     float strategic_modifier = 1.0f;
-                    if (enemy_count > 0) {
+                    if (target_stats.enemy_count > 0) {
                         strategic_modifier *= (0.3f + colony->genome.aggression * 0.4f);
                     }
-                    
+
                     // Success history affects spread direction
                     float history_bonus = 1.0f + colony->success_history[d] * 0.3f;
-                    float quorum_activation = get_quorum_activation(colony);
-                    float quorum_boost = 1.0f + quorum_activation * colony->genome.motility * 0.8f;
-                    float dormancy_factor = colony_spread_activity_factor(colony);
-                    float trait_growth_cost = calculate_growth_cost_multiplier(colony);
-                    
+
                     // Curvature smoothing: prefer filling concavities for smooth edges
-                    float curvature = calculate_curvature_boost(world, nx, ny, cell->colony_id);
-                    
+                    float curvature = 0.85f + (float)target_stats.friendly_count * 0.15f;
+
                     // Diagonal isotropy correction: 1/√2 for diagonals
                     float iso_correction = DIR8_WEIGHT[d];
-                    
+
                     // Per-cell stochastic noise for organic/irregular edges (Eden model)
                     // Without this, all border cells grow at the same rate → flat fronts
                     float noise = 0.6f + rand_float() * 0.8f;  // 0.6-1.4x random variation
-                    
+
                     // Perception: look ahead in this direction for nutrients/threats/space
-                    float perception = calculate_perception_modifier(world, x, y, 
-                                                                      DX8[d], DY8[d], colony);
-                    float growth_uptake = monod_growth_multiplier(world, world->nutrients[y * world->width + x]);
-                    
+                    float perception = use_perception ?
+                        calculate_perception_modifier(world, x, y, DX8[d], DY8[d], colony) :
+                        1.0f;
+
                     float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * 
-                                        env_modifier * dir_weight * scent_modifier * 
+                                        env_modifier * colony->genome.spread_weights[d] * scent_modifier *
                                         strategic_modifier * history_bonus * biomass_pressure *
                                         quorum_boost * dormancy_factor * trait_growth_cost * curvature *
                                         iso_correction * noise * perception * growth_uptake *
@@ -1464,22 +1792,46 @@ void simulation_age_region(World* world, int start_x, int start_y,
 
 void simulation_update_colony_stats(World* world) {
     if (!world) return;
-    
+
+    const int width = world->width;
+    const int height = world->height;
+    Cell* cells = world->cells;
+
     // First recount all cells from grid to ensure accuracy
     for (size_t i = 0; i < world->colony_count; i++) {
         world->colonies[i].cell_count = 0;
     }
-    
-    for (int j = 0; j < world->width * world->height; j++) {
-        uint32_t cid = world->cells[j].colony_id;
-        if (cid != 0) {
-            Colony* col = world_get_colony(world, cid);
-            if (col) {
-                col->cell_count++;
+
+    for (int y = 0; y < height; y++) {
+        int row = y * width;
+        for (int x = 0; x < width; x++) {
+            int idx = row + x;
+            Cell* cell = &cells[idx];
+            uint32_t cid = cell->colony_id;
+            if (cid == 0) {
+                cell->is_border = false;
+                continue;
             }
+
+            Colony* colony = lookup_active_colony(world, cid);
+            if (colony) {
+                colony->cell_count++;
+            }
+
+            bool border = false;
+            if (y > 0 && cells[idx - width].colony_id != cid) {
+                border = true;
+            } else if (x + 1 < width && cells[idx + 1].colony_id != cid) {
+                border = true;
+            } else if (y + 1 < height && cells[idx + width].colony_id != cid) {
+                border = true;
+            } else if (x > 0 && cells[idx - 1].colony_id != cid) {
+                border = true;
+            }
+            cell->is_border = border;
         }
     }
-    
+
     // Now update stats
     for (size_t i = 0; i < world->colony_count; i++) {
         Colony* colony = &world->colonies[i];
@@ -1525,9 +1877,7 @@ void simulation_update_nutrients(World* world) {
             float consumption = NUTRIENT_DEPLETION_RATE;
             if (colony) {
                 consumption *= colony->genome.metabolism;
-                // High efficiency reduces consumption
                 consumption *= (1.0f - colony->genome.efficiency * 0.5f);
-                // Expensive traits increase maintenance demand.
                 consumption *= (1.0f + calculate_expensive_trait_load(&colony->genome) * 0.6f);
                 consumption *= monod_uptake_multiplier(world, nutrients[i]);
             }
@@ -1727,9 +2077,7 @@ void simulation_update_scents(World* world) {
             
             // Emit scent based on signal_emission trait
             float emission = colony->genome.signal_emission * 0.3f;
-            // Border cells emit more
             if (cell->is_border) emission *= 2.0f;
-            // Larger colonies emit more total scent
             emission *= (1.0f + (float)colony->cell_count / 500.0f);
             
             new_signals[idx] += emission;
@@ -1742,6 +2090,7 @@ void simulation_update_scents(World* world) {
         signal_decay = g_transport_params.signal_decay;
         signal_diffusion = g_transport_params.signal_neighbor_transfer;
     }
+    bool has_eps_barrier = world_has_eps_barrier(world);
 
     // Step 2: Diffuse existing scent with EPS-dependent effective diffusivity
     for (int y = 0; y < height; y++) {
@@ -1752,7 +2101,7 @@ void simulation_update_scents(World* world) {
             if (current < 0.001f) continue;
             
             uint32_t source = signal_source[idx];
-            float center_eps = get_cell_eps_density(world, idx);
+            float center_eps = has_eps_barrier ? get_cell_eps_density(world, idx) : 0.0f;
             float retained = current * (1.0f - signal_decay);
             float remaining = retained;
 
@@ -1761,27 +2110,31 @@ void simulation_update_scents(World* world) {
             int neighbor_count = 0;
             if (y > 0) {
                 int ni = idx - width;
-                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
                 neighbor_idx[neighbor_count] = ni;
-                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
+                neighbor_weight[neighbor_count++] = has_eps_barrier
+                    ? signal_diffusion * effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni))
+                    : signal_diffusion;
             }
             if (x + 1 < width) {
                 int ni = idx + 1;
-                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
                 neighbor_idx[neighbor_count] = ni;
-                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
+                neighbor_weight[neighbor_count++] = has_eps_barrier
+                    ? signal_diffusion * effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni))
+                    : signal_diffusion;
             }
             if (y + 1 < height) {
                 int ni = idx + width;
-                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
                 neighbor_idx[neighbor_count] = ni;
-                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
+                neighbor_weight[neighbor_count++] = has_eps_barrier
+                    ? signal_diffusion * effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni))
+                    : signal_diffusion;
             }
             if (x > 0) {
                 int ni = idx - 1;
-                float scale = effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni));
                 neighbor_idx[neighbor_count] = ni;
-                neighbor_weight[neighbor_count++] = signal_diffusion * scale;
+                neighbor_weight[neighbor_count++] = has_eps_barrier
+                    ? signal_diffusion * effective_diffusivity_scale(center_eps, get_cell_eps_density(world, ni))
+                    : signal_diffusion;
             }
 
             if (neighbor_count > 0) {
@@ -1875,6 +2228,8 @@ void simulation_resolve_combat(World* world) {
     const int width = world->width;
     const int height = world->height;
     Cell* cells = world->cells;
+    uint32_t* combat_cache = world->scratch_sources;
+    const uint32_t cache_tick = combat_cache_tick_tag(world->tick);
     
     // Decay/diffuse existing toxins.
     if (world->toxins) {
@@ -1883,6 +2238,9 @@ void simulation_resolve_combat(World* world) {
     
     typedef struct { int x, y; uint32_t winner; uint32_t loser; float strength; } CombatResult;
     CombatResult* results = NULL;
+    ContestedBorder* contested = NULL;
+    int contested_count = 0;
+    int contested_capacity = 0;
     int result_count = 0;
     int result_capacity = 128;
     results = (CombatResult*)malloc(result_capacity * sizeof(CombatResult));
@@ -1898,6 +2256,26 @@ void simulation_resolve_combat(World* world) {
             
             Colony* colony = lookup_active_colony(world, cell->colony_id);
             if (!colony || !colony->active) continue;
+
+            uint8_t enemy_mask = detect_enemy_neighbor_mask(cells, width, height, x, y, cell->colony_id);
+            int friendly_count = 0;
+            if (enemy_mask != 0) {
+                friendly_count = count_friendly_neighbors(world, x, y, cell->colony_id);
+                if (!append_contested_border(&contested,
+                                             &contested_count,
+                                             &contested_capacity,
+                                             idx,
+                                             enemy_mask,
+                                             friendly_count)) {
+                    free(contested);
+                    free(results);
+                    return;
+                }
+            }
+
+            if (combat_cache) {
+                combat_cache[idx] = pack_combat_cache(cache_tick, friendly_count, enemy_mask);
+            }
             
             // Border cells emit toxins based on toxin_production and quorum activation
             float quorum_activation = get_quorum_activation(colony);
@@ -1933,119 +2311,124 @@ void simulation_resolve_combat(World* world) {
                          g_transport_params.toxin_diffusivity);
     
     // Second pass: resolve combat at borders with strategic modifiers
-    for (int y = 0; y < height; y++) {
-        int row = y * width;
-        for (int x = 0; x < width; x++) {
-            int idx = row + x;
-            Cell* cell = &cells[idx];
-            if (cell->colony_id == 0 || !cell->is_border) continue;
-            
-            Colony* attacker = lookup_active_colony(world, cell->colony_id);
-            if (!attacker || !attacker->active) continue;
-            
-            // Skip if colony is in retreat mode (stressed and defensive)
-            if (attacker->stress_level > 0.7f && attacker->genome.defense_priority > 0.6f) {
-                continue; // Defensive colonies under stress don't attack
+    for (int i = 0; i < contested_count; i++) {
+        int idx = contested[i].idx;
+        int x = idx % width;
+        int y = idx / width;
+        Cell* cell = &cells[idx];
+        if (cell->colony_id == 0) continue;
+
+        Colony* attacker = lookup_active_colony(world, cell->colony_id);
+        if (!attacker || !attacker->active) continue;
+
+        // Skip if colony is in retreat mode (stressed and defensive)
+        if (attacker->stress_level > 0.7f && attacker->genome.defense_priority > 0.6f) {
+            continue;
+        }
+
+        const int attacker_friendly = (int)contested[i].friendly_count;
+        const float flanking_bonus = 1.0f + (attacker_friendly * 0.15f);
+        const float attacker_base = attacker->genome.aggression * 1.2f;
+        const float attacker_toxin_bonus = attacker->genome.toxin_production * 0.4f;
+        const float attacker_nutrient_factor = world->nutrients
+            ? (0.6f + world->nutrients[idx] * 0.5f)
+            : 1.0f;
+        const float attacker_toxin_factor = world->nutrients
+            ? (1.0f - world->toxins[idx] * (1.0f - attacker->genome.toxin_resistance))
+            : 1.0f;
+        const float attacker_stress_factor = (attacker->stress_level > 0.5f)
+            ? (1.0f + attacker->genome.aggression * 0.3f)
+            : 1.0f;
+
+        for (int d = 0; d < 4; d++) {
+            if ((contested[i].enemy_mask & (1u << d)) == 0) continue;
+
+            int nx = x + DX[d];
+            int ny = y + DY[d];
+            int nidx = ny * width + nx;
+
+            Cell* neighbor = &cells[nidx];
+            if (neighbor->colony_id == 0 ||
+                neighbor->colony_id == cell->colony_id) continue;
+
+            Colony* defender = lookup_active_colony(world, neighbor->colony_id);
+            if (!defender || !defender->active) continue;
+
+            int defender_friendly = -1;
+            if (combat_cache) {
+                defender_friendly = combat_cached_friendly_count(combat_cache[nidx], cache_tick);
             }
-            
-            int attacker_friendly = count_friendly_neighbors(world, x, y, cell->colony_id);
-            
-            // Check neighbors for enemy cells
-            for (int d = 0; d < 4; d++) {
-                int nx = x + DX[d];
-                int ny = y + DY[d];
-                if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-                int nidx = ny * width + nx;
-                
-                Cell* neighbor = &cells[nidx];
-                if (neighbor->colony_id == 0 || 
-                    neighbor->colony_id == cell->colony_id) continue;
-                
-                Colony* defender = lookup_active_colony(world, neighbor->colony_id);
-                if (!defender || !defender->active) continue;
-                
-                // === STRATEGIC COMBAT CALCULATION ===
-                
-                // Base strength from genome
-                float attack_str = attacker->genome.aggression * 1.2f;
-                float defend_str = defender->genome.resilience * 1.0f;
-                
-                // 1. FLANKING BONUS: More friendly neighbors = stronger attack
-                float flanking_bonus = 1.0f + (attacker_friendly * 0.15f);
-                attack_str *= flanking_bonus;
-                
-                // 2. DEFENSIVE FORMATION: Defenders with high defense_priority are harder to crack
-                int defender_friendly = count_friendly_neighbors(world, nx, ny, neighbor->colony_id);
-                float defensive_bonus = 1.0f + (defender->genome.defense_priority * defender_friendly * 0.2f);
-                defend_str *= defensive_bonus;
-                
-                // 3. DIRECTIONAL PREFERENCE: Colonies fight harder in preferred directions
-                float dir_weight = get_direction_weight(&attacker->genome, DX[d], DY[d]);
-                attack_str *= (0.7f + dir_weight * 0.6f); // 0.7-1.3x based on preferred direction
-                
-                // 4. TOXIN WARFARE: Toxin production aids attack, resistance aids defense
-                attack_str += attacker->genome.toxin_production * 0.4f;
-                defend_str += defender->genome.toxin_resistance * 0.3f;
-                
-                // 5. BIOFILM DEFENSE: Defenders with biofilm are harder to defeat
-                defend_str *= (1.0f + defender->biofilm_strength * 0.3f);
-                
-                // 6. NUTRIENT ADVANTAGE: Well-fed cells fight better
-                if (world->nutrients) {
-                    attack_str *= (0.6f + world->nutrients[idx] * 0.5f);
-                    defend_str *= (0.6f + world->nutrients[nidx] * 0.5f);
-                    
-                    // Toxin damage reduces effectiveness
-                    attack_str *= (1.0f - world->toxins[idx] * (1.0f - attacker->genome.toxin_resistance));
-                    defend_str *= (1.0f - world->toxins[nidx] * (1.0f - defender->genome.toxin_resistance));
-                }
-                
-                // 7. MOMENTUM: Colonies that have been winning keep winning (success_history)
-                attack_str *= (0.8f + attacker->success_history[d] * 0.4f);
-                
-                // 8. STRESSED COLONIES FIGHT DIFFERENTLY
-                if (attacker->stress_level > 0.5f) {
-                    // Desperate attacks: higher risk, higher reward
-                    attack_str *= (1.0f + attacker->genome.aggression * 0.3f);
-                }
-                if (defender->stress_level > 0.5f && defender->genome.defense_priority < 0.4f) {
-                    // Stressed non-defensive colonies crumble
-                    defend_str *= 0.7f;
-                }
-                
-                // 9. SIZE MATTERS: Larger colonies have morale advantage
-                float size_ratio = (float)attacker->cell_count / (float)(defender->cell_count + 1);
-                if (size_ratio > 2.0f) attack_str *= 1.15f;  // 2x larger = bonus
-                if (size_ratio < 0.5f) attack_str *= 0.85f;  // 2x smaller = penalty
-                
-                // === COMBAT RESOLUTION ===
-                float attack_chance = attack_str / (attack_str + defend_str + 0.1f);
-                
-                // Per-cell spatial noise for ragged borders (prevents straight Voronoi lines)
-                float combat_noise = 0.5f + rand_float() * 1.0f;  // 0.5-1.5x
-                
-                if (rand_float() < attack_chance * combat_noise) {
-                    // Attacker wins - record result
-                    if (result_count >= result_capacity) {
-                        result_capacity *= 2;
-                        CombatResult* new_results = (CombatResult*)realloc(results, result_capacity * sizeof(CombatResult));
-                        if (!new_results) { free(results); return; }
-                        results = new_results;
+            if (defender_friendly < 0) {
+                defender_friendly = count_friendly_neighbors(world, nx, ny, neighbor->colony_id);
+            }
+
+            float attack_str = attacker_base * flanking_bonus;
+            float defend_str = defender->genome.resilience;
+
+            // 2. DEFENSIVE FORMATION: Defenders with high defense_priority are harder to crack
+            float defensive_bonus = 1.0f + (defender->genome.defense_priority * defender_friendly * 0.2f);
+            defend_str *= defensive_bonus;
+
+            // 3. DIRECTIONAL PREFERENCE: Colonies fight harder in preferred directions
+            float dir_weight = attacker->genome.spread_weights[CARDINAL_DIR8_INDEX[d]];
+            attack_str *= (0.7f + dir_weight * 0.6f);
+
+            // 4. TOXIN WARFARE: Toxin production aids attack, resistance aids defense
+            attack_str += attacker_toxin_bonus;
+            defend_str += defender->genome.toxin_resistance * 0.3f;
+
+            // 5. BIOFILM DEFENSE: Defenders with biofilm are harder to defeat
+            defend_str *= (1.0f + defender->biofilm_strength * 0.3f);
+
+            // 6. NUTRIENT ADVANTAGE: Well-fed cells fight better
+            if (world->nutrients) {
+                defend_str *= (0.6f + world->nutrients[nidx] * 0.5f);
+                defend_str *= (1.0f - world->toxins[nidx] * (1.0f - defender->genome.toxin_resistance));
+            }
+            attack_str *= attacker_nutrient_factor * attacker_toxin_factor;
+
+            // 7. MOMENTUM: Colonies that have been winning keep winning (success_history)
+            attack_str *= (0.8f + attacker->success_history[d] * 0.4f);
+            attack_str *= attacker_stress_factor;
+
+            // 8. STRESSED COLONIES FIGHT DIFFERENTLY
+            if (defender->stress_level > 0.5f && defender->genome.defense_priority < 0.4f) {
+                // Stressed non-defensive colonies crumble
+                defend_str *= 0.7f;
+            }
+
+            // 9. SIZE MATTERS: Larger colonies have morale advantage
+            float size_ratio = (float)attacker->cell_count / (float)(defender->cell_count + 1);
+            if (size_ratio > 2.0f) attack_str *= 1.15f;  // 2x larger = bonus
+            if (size_ratio < 0.5f) attack_str *= 0.85f;  // 2x smaller = penalty
+
+            // === COMBAT RESOLUTION ===
+            float attack_chance = attack_str / (attack_str + defend_str + 0.1f);
+
+            // Per-cell spatial noise for ragged borders (prevents straight Voronoi lines)
+            float combat_noise = 0.5f + rand_float() * 1.0f;  // 0.5-1.5x
+
+            if (rand_float() < attack_chance * combat_noise) {
+                // Attacker wins - record result
+                if (result_count >= result_capacity) {
+                    result_capacity *= 2;
+                    CombatResult* new_results = (CombatResult*)realloc(results, result_capacity * sizeof(CombatResult));
+                    if (!new_results) {
+                        free(contested);
+                        free(results);
+                        return;
                     }
-                    results[result_count++] = (CombatResult){nx, ny, cell->colony_id, neighbor->colony_id, attack_str};
-                    
-                    // Update success history for learning
-                    if (d < 8) {
-                        attacker->success_history[d] = utils_clamp_f(
-                            attacker->success_history[d] + 0.05f * attacker->genome.learning_rate, 0.0f, 1.0f);
-                    }
-                } else if (rand_float() < 0.3f) {
-                    // Defender successfully defends - slight penalty to attacker's direction
-                    if (d < 8) {
-                        attacker->success_history[d] = utils_clamp_f(
-                            attacker->success_history[d] - 0.02f * attacker->genome.learning_rate, 0.0f, 1.0f);
-                    }
+                    results = new_results;
                 }
+                results[result_count++] = (CombatResult){nx, ny, cell->colony_id, neighbor->colony_id, attack_str};
+
+                // Update success history for learning
+                attacker->success_history[d] = utils_clamp_f(
+                    attacker->success_history[d] + 0.05f * attacker->genome.learning_rate, 0.0f, 1.0f);
+            } else if (rand_float() < 0.3f) {
+                // Defender successfully defends - slight penalty to attacker's direction
+                attacker->success_history[d] = utils_clamp_f(
+                    attacker->success_history[d] - 0.02f * attacker->genome.learning_rate, 0.0f, 1.0f);
             }
         }
     }
@@ -2080,6 +2463,7 @@ void simulation_resolve_combat(World* world) {
         }
     }
     
+    free(contested);
     free(results);
 }
 

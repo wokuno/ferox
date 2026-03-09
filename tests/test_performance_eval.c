@@ -283,7 +283,7 @@ TEST(server_broadcast_path_breakdown_eval) {
     const int scale = get_perf_scale();
     const int iters = 80 * scale;
 
-    Server* server = server_create(0, 320, 180, 4);
+    Server* server = server_create_headless(320, 180, 4);
     ASSERT_NOT_NULL(server);
 
     rng_seed(1337);

@@ -3,6 +3,7 @@ add_library(ferox_server_lib STATIC
     frontier_metrics.c
     genetics.c
     parallel.c
+    phase_wait.c
     server.c
     simulation.c
     simulation_common.c

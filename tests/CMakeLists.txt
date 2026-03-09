@@ -133,6 +133,13 @@ target_compile_definitions(test_performance_eval PRIVATE STANDALONE_TEST)
 add_test(NAME PerformanceEvalTests COMMAND test_performance_eval)
 set_tests_properties(PerformanceEvalTests PROPERTIES TIMEOUT 180)
 
+# Focused component-level performance evaluation tests
+add_executable(test_perf_components test_perf_components.c)
+target_link_libraries(test_perf_components PRIVATE ferox_server_lib)
+target_compile_definitions(test_perf_components PRIVATE STANDALONE_TEST)
+add_test(NAME PerformanceComponentTests COMMAND test_perf_components)
+set_tests_properties(PerformanceComponentTests PROPERTIES TIMEOUT 180)
+
 # Combat system tests
 add_executable(test_combat_system test_combat_system.c)
 target_link_libraries(test_combat_system PRIVATE ferox_server_lib)
@@ -204,6 +211,7 @@ add_executable(test_runner test_runner.c
     test_simulation_logic.c
     test_simd_eval.c
     test_performance_eval.c
+    test_perf_components.c
     test_visual_stability.c
     test_threadpool_stress.c
     test_protocol_edge.c

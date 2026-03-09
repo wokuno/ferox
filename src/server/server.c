@@ -26,39 +26,18 @@ static void* accept_thread_func(void* arg);
 static void* simulation_thread_func(void* arg);
 static bool server_rebuild_world_state(Server* server, int width, int height, int initial_colonies);
 static bool server_spawn_colony(Server* server, const CommandSpawnColony* spawn);
+static Server* server_create_internal(uint16_t port,
+                                      int world_width,
+                                      int world_height,
+                                      int thread_count,
+                                      bool create_listener);
 
 typedef struct {
     uint32_t colony_id;
     uint16_t proto_idx;
 } colony_proto_index;
 
-static int compare_colony_proto_index(const void* a, const void* b) {
-    const colony_proto_index* ia = (const colony_proto_index*)a;
-    const colony_proto_index* ib = (const colony_proto_index*)b;
-    if (ia->colony_id < ib->colony_id) return -1;
-    if (ia->colony_id > ib->colony_id) return 1;
-    return 0;
-}
-
-static int32_t find_proto_index_for_colony(const colony_proto_index* lookup, uint32_t count, uint32_t colony_id) {
-    uint32_t lo = 0;
-    uint32_t hi = count;
-
-    while (lo < hi) {
-        uint32_t mid = lo + (hi - lo) / 2;
-        uint32_t mid_id = lookup[mid].colony_id;
-        if (mid_id == colony_id) {
-            return (int32_t)lookup[mid].proto_idx;
-        }
-        if (mid_id < colony_id) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-
-    return -1;
-}
+#define SERVER_PROTO_LOOKUP_STACK_CAP 4096
 
 // Helper to get current time in milliseconds
 static long get_time_ms(void) {
@@ -75,7 +54,11 @@ static void sleep_ms(int ms) {
     nanosleep(&ts, NULL);
 }
 
-Server* server_create(uint16_t port, int world_width, int world_height, int thread_count) {
+static Server* server_create_internal(uint16_t port,
+                                      int world_width,
+                                      int world_height,
+                                      int thread_count,
+                                      bool create_listener) {
     if (world_width <= 0 || world_height <= 0 || thread_count <= 0) {
         return NULL;
     }
@@ -83,11 +66,12 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
     Server* server = (Server*)calloc(1, sizeof(Server));
     if (!server) return NULL;
     
-    // Create network listener
-    server->listener = net_server_create(port);
-    if (!server->listener) {
-        free(server);
-        return NULL;
+    if (create_listener) {
+        server->listener = net_server_create(port);
+        if (!server->listener) {
+            free(server);
+            return NULL;
+        }
     }
     
     // Create world
@@ -102,7 +86,9 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
     server->pool = threadpool_create(thread_count);
     if (!server->pool) {
         world_destroy(server->world);
-        net_server_destroy(server->listener);
+        if (server->listener) {
+            net_server_destroy(server->listener);
+        }
         free(server);
         return NULL;
     }
@@ -113,7 +99,9 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
     if (!server->parallel_ctx) {
         threadpool_destroy(server->pool);
         world_destroy(server->world);
-        net_server_destroy(server->listener);
+        if (server->listener) {
+            net_server_destroy(server->listener);
+        }
         free(server);
         return NULL;
     }
@@ -125,7 +113,9 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
         parallel_destroy(server->parallel_ctx);
         threadpool_destroy(server->pool);
         world_destroy(server->world);
-        net_server_destroy(server->listener);
+        if (server->listener) {
+            net_server_destroy(server->listener);
+        }
         free(server);
         return NULL;
     }
@@ -136,7 +126,9 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
         parallel_destroy(server->parallel_ctx);
         threadpool_destroy(server->pool);
         world_destroy(server->world);
-        net_server_destroy(server->listener);
+        if (server->listener) {
+            net_server_destroy(server->listener);
+        }
         free(server);
         return NULL;
     }
@@ -151,6 +143,14 @@ Server* server_create(uint16_t port, int world_width, int world_height, int thre
     server->next_client_id = 1;
     
     return server;
+}
+
+Server* server_create(uint16_t port, int world_width, int world_height, int thread_count) {
+    return server_create_internal(port, world_width, world_height, thread_count, true);
+}
+
+Server* server_create_headless(int world_width, int world_height, int thread_count) {
+    return server_create_internal(0, world_width, world_height, thread_count, false);
 }
 
 void server_destroy(Server* server) {
@@ -432,20 +432,40 @@ void server_build_protocol_world_snapshot(Server* server, proto_world* out_world
         }
     }
 
-    bool has_sorted_lookup = false;
-    if (count > 0) {
-        qsort(colony_lookup, count, sizeof(colony_lookup[0]), compare_colony_proto_index);
-        has_sorted_lookup = true;
-    }
-
     if (grid_size > 0 && grid_size <= MAX_GRID_SIZE) {
         proto_world_alloc_grid(out_world, width, height);
     }
 
-    if (grid_size > 0 && has_sorted_lookup) {
+    if (grid_size > 0 && count > 0) {
         double sum_x[MAX_COLONIES] = {0};
         double sum_y[MAX_COLONIES] = {0};
         uint32_t pop[MAX_COLONIES] = {0};
+        const size_t lookup_capacity = world->colony_by_id_capacity;
+        uint16_t proto_lookup_stack[SERVER_PROTO_LOOKUP_STACK_CAP];
+        uint16_t* proto_lookup = proto_lookup_stack;
+        bool heap_lookup = false;
+
+        if (lookup_capacity > SERVER_PROTO_LOOKUP_STACK_CAP) {
+            proto_lookup = (uint16_t*)malloc(lookup_capacity * sizeof(uint16_t));
+            if (!proto_lookup) {
+                if (out_world->grid) {
+                    for (size_t i = 0; i < grid_size; i++) {
+                        out_world->grid[i] = (uint16_t)world->cells[i].colony_id;
+                    }
+                }
+                out_world->colony_count = count;
+                return;
+            }
+            heap_lookup = true;
+        }
+
+        memset(proto_lookup, 0xFF, lookup_capacity * sizeof(uint16_t));
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t colony_id = colony_lookup[i].colony_id;
+            if (colony_id < lookup_capacity) {
+                proto_lookup[colony_id] = colony_lookup[i].proto_idx;
+            }
+        }
 
         for (uint32_t y = 0; y < height; y++) {
             size_t row_start = (size_t)y * (size_t)width;
@@ -457,15 +477,14 @@ void server_build_protocol_world_snapshot(Server* server, proto_world* out_world
                     out_world->grid[idx] = (uint16_t)colony_id;
                 }
 
-                if (colony_id == 0) continue;
+                if (colony_id == 0 || colony_id >= lookup_capacity) continue;
 
-                int32_t proto_idx = find_proto_index_for_colony(colony_lookup, count, colony_id);
-                if (proto_idx < 0) continue;
+                uint16_t proto_idx = proto_lookup[colony_id];
+                if (proto_idx == UINT16_MAX) continue;
 
-                uint32_t pidx = (uint32_t)proto_idx;
-                pop[pidx]++;
-                sum_x[pidx] += (double)x;
-                sum_y[pidx] += (double)y;
+                pop[proto_idx]++;
+                sum_x[proto_idx] += (double)x;
+                sum_y[proto_idx] += (double)y;
             }
         }
 
@@ -474,6 +493,10 @@ void server_build_protocol_world_snapshot(Server* server, proto_world* out_world
                 out_world->colonies[i].x = (float)(sum_x[i] / (double)pop[i]);
                 out_world->colonies[i].y = (float)(sum_y[i] / (double)pop[i]);
             }
+        }
+
+        if (heap_lookup) {
+            free(proto_lookup);
         }
     } else if (out_world->grid) {
         for (size_t i = 0; i < grid_size; i++) {

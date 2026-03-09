@@ -22,6 +22,9 @@ typedef struct {
     int thread_id;
 } AtomicRegionWork;
 
+typedef void (*AtomicRegionTaskFunc)(AtomicRegionWork* work);
+typedef struct AtomicPhaseWorkerCtx AtomicPhaseWorkerCtx;
+
 // ============================================================================
 // Atomic World - Enhanced world with atomic operations
 // ============================================================================
@@ -49,7 +52,18 @@ typedef struct AtomicWorldStruct {
     
     // Preallocated region work items to avoid per-tick malloc
     AtomicRegionWork* region_work;
+    void** region_submit_args;
     int region_work_count;
+
+    // Local phase runner backend.
+    // Kept separate from simulation logic so it can be replaced by a SHMEM/PE backend later.
+    pthread_t* phase_threads;
+    AtomicPhaseWorkerCtx* phase_workers;
+    AtomicRegionTaskFunc phase_task_func;
+    int phase_worker_count;
+    atomic_int phase_generation;
+    atomic_int phase_completed_workers;
+    atomic_bool phase_shutdown;
 } AtomicWorld;
 
 typedef struct {
