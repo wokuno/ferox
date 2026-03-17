@@ -1,8 +1,10 @@
 add_library(ferox_server_lib STATIC
     atomic_sim.c
+    frontier_metrics.c
     genetics.c
     hardware_profile.c
     parallel.c
+    phase_wait.c
     server.c
     simulation.c
     threadpool.c

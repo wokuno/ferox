@@ -80,6 +80,9 @@ void simulation_update_nutrients(World* world);
 // Update behavioral environment layers such as toxins, signals, and alarm gradients
 void simulation_update_behavior_layers(World* world);
 
+// Compatibility wrapper used by newer scent/transport tests.
+void simulation_update_scents(World* world);
+
 // Update colony stress, lifecycle state, biofilm, learning, and drift dynamics
 void simulation_update_colony_dynamics(World* world);
 

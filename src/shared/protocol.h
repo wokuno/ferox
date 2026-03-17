@@ -203,6 +203,10 @@ typedef struct ProtoWorld {
     bool has_grid;            // Whether grid data is included
 } ProtoWorld;
 
+typedef ProtoWorld proto_world;
+typedef ProtoColony proto_colony;
+typedef ProtoWorldDeltaGridChunk proto_world_delta_grid_chunk;
+
 // Command data structures
 typedef struct CommandSelectColony {
     uint32_t colony_id;

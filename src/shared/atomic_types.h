@@ -132,14 +132,7 @@ static inline void atomic_cell_age(AtomicCell* cell) {
  * Atomic increment of colony population.
  */
 static inline void atomic_stats_add_cell(AtomicColonyStats* stats) {
-    int64_t new_count = atomic_fetch_add(&stats->cell_count, 1) + 1;
-    // Update max if needed (lock-free max)
-    int64_t old_max = atomic_load(&stats->max_cell_count);
-    while (new_count > old_max) {
-        if (atomic_compare_exchange_weak(&stats->max_cell_count, &old_max, new_count)) {
-            break;
-        }
-    }
+    atomic_fetch_add(&stats->cell_count, 1);
 }
 
 /**

@@ -1177,6 +1177,134 @@ void simulation_update_behavior_layers(World* world) {
     }
 }
 
+void simulation_update_scents(World* world) {
+    if (!world || !world->signals || !world->signal_source) {
+        return;
+    }
+
+    const int width = world->width;
+    const int height = world->height;
+    const int total = width * height;
+    float* next_signals = world->scratch_signals;
+    uint32_t* next_sources = world->scratch_sources;
+    bool heap_signals = false;
+    bool heap_sources = false;
+
+    if (!next_signals) {
+        next_signals = (float*)calloc((size_t)total, sizeof(float));
+        if (!next_signals) return;
+        heap_signals = true;
+    } else {
+        memset(next_signals, 0, (size_t)total * sizeof(float));
+    }
+
+    if (!next_sources) {
+        next_sources = (uint32_t*)calloc((size_t)total, sizeof(uint32_t));
+        if (!next_sources) {
+            if (heap_signals) free(next_signals);
+            return;
+        }
+        heap_sources = true;
+    } else {
+        memset(next_sources, 0, (size_t)total * sizeof(uint32_t));
+    }
+
+    const float diffusion = world->rd_controls.signals.diffusion;
+    const float decay = world->rd_controls.signals.decay;
+
+    for (int y = 0; y < height; y++) {
+        int row = y * width;
+        for (int x = 0; x < width; x++) {
+            int idx = row + x;
+            float current = utils_clamp_f(world->signals[idx], 0.0f, 1.0f);
+            int neighbor_count = 0;
+            float next_value = 0.0f;
+            float strongest = 0.0f;
+            uint32_t strongest_source = 0;
+
+            if (y > 0) neighbor_count++;
+            if (x + 1 < width) neighbor_count++;
+            if (y + 1 < height) neighbor_count++;
+            if (x > 0) neighbor_count++;
+
+            float center_contrib = current * (1.0f - decay - diffusion * (float)neighbor_count);
+            if (center_contrib > 0.0f) {
+                next_value += center_contrib;
+                strongest = center_contrib;
+                strongest_source = world->signal_source[idx];
+            }
+
+            if (y > 0) {
+                int ni = idx - width;
+                float contrib = utils_clamp_f(world->signals[ni], 0.0f, 1.0f) * diffusion;
+                next_value += contrib;
+                if (contrib > strongest) {
+                    strongest = contrib;
+                    strongest_source = world->signal_source[ni];
+                }
+            }
+            if (x + 1 < width) {
+                int ni = idx + 1;
+                float contrib = utils_clamp_f(world->signals[ni], 0.0f, 1.0f) * diffusion;
+                next_value += contrib;
+                if (contrib > strongest) {
+                    strongest = contrib;
+                    strongest_source = world->signal_source[ni];
+                }
+            }
+            if (y + 1 < height) {
+                int ni = idx + width;
+                float contrib = utils_clamp_f(world->signals[ni], 0.0f, 1.0f) * diffusion;
+                next_value += contrib;
+                if (contrib > strongest) {
+                    strongest = contrib;
+                    strongest_source = world->signal_source[ni];
+                }
+            }
+            if (x > 0) {
+                int ni = idx - 1;
+                float contrib = utils_clamp_f(world->signals[ni], 0.0f, 1.0f) * diffusion;
+                next_value += contrib;
+                if (contrib > strongest) {
+                    strongest = contrib;
+                    strongest_source = world->signal_source[ni];
+                }
+            }
+
+            next_signals[idx] = utils_clamp_f(next_value, 0.0f, 1.0f);
+            next_sources[idx] = next_signals[idx] > 0.0f ? strongest_source : 0;
+        }
+    }
+
+    for (int y = 0; y < height; y++) {
+        int row = y * width;
+        for (int x = 0; x < width; x++) {
+            int idx = row + x;
+            Cell* cell = &world->cells[idx];
+            if (cell->colony_id == 0 || !cell->is_border) continue;
+
+            Colony* colony = world_get_colony(world, cell->colony_id);
+            if (!colony || !colony->active) continue;
+
+            float emission = colony->genome.signal_emission * 0.3f;
+            emission *= 2.0f;
+            emission *= (1.0f + (float)colony->cell_count / 500.0f);
+
+            float updated = utils_clamp_f(next_signals[idx] + emission, 0.0f, 1.0f);
+            if (updated > next_signals[idx]) {
+                next_sources[idx] = cell->colony_id;
+            }
+            next_signals[idx] = updated;
+        }
+    }
+
+    memcpy(world->signals, next_signals, (size_t)total * sizeof(float));
+    memcpy(world->signal_source, next_sources, (size_t)total * sizeof(uint32_t));
+
+    if (heap_signals) free(next_signals);
+    if (heap_sources) free(next_sources);
+}
+
 void simulation_update_colony_dynamics(World* world) {
     if (!world) return;
 
@@ -1433,8 +1561,9 @@ void simulation_decay_toxins(World* world) {
     if (!world || !world->toxins) return;
     
     int total_cells = world->width * world->height;
+    float factor = 1.0f - world->rd_controls.toxins.decay;
     for (int i = 0; i < total_cells; i++) {
-        world->toxins[i] = utils_clamp_f(world->toxins[i] - TOXIN_DECAY_RATE, 0.0f, 1.0f);
+        world->toxins[i] = utils_clamp_f(world->toxins[i] * factor, 0.0f, 1.0f);
     }
 }
 
