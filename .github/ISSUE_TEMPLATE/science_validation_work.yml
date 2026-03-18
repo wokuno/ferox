@@ -1,0 +1,53 @@
+name: Science or validation work
+description: Track replayability, benchmarks, regression harnesses, or scientific validation work.
+title: "science: "
+labels:
+  - enhancement
+  - tracking
+  - area:science
+  - area:repro
+  - area:docs
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What reproducibility or science-validation capability should this add?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and current tooling gaps
+      placeholder: |
+        - docs/SCIENCE_BENCHMARKS.md:...
+        - docs/STATISTICAL_REGRESSION.md:...
+        - tests/test_simulation_stat_regression.c:...
+        - scripts/science_benchmarks.py:...
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope
+      description: Describe the executable slice to land first.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Include CI, artifact, and cross-host expectations where relevant.
+    validations:
+      required: true
+  - type: checkboxes
+    id: docs
+    attributes:
+      label: Documentation updates
+      options:
+        - label: Update `docs/SCIENCE_BENCHMARKS.md`, `docs/STATISTICAL_REGRESSION.md`, and related testing docs in the same PR.
+          required: true
+        - label: Document commands, artifact locations, and pass/fail interpretation for operators/contributors.
+          required: true
+        - label: Update README/docs README if this becomes a recommended workflow.
+          required: false

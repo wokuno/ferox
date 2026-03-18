@@ -6,6 +6,7 @@ Thank you for your interest in contributing to Ferox! This document provides gui
 
 - [Security](#security)
 - [Development Setup](#development-setup)
+- [Development Cycle](#development-cycle)
 - [Code Style](#code-style)
 - [Commit Message Format](#commit-message-format)
 - [Pull Request Process](#pull-request-process)
@@ -62,6 +63,21 @@ Recommended tools:
 - **clang-tidy**: Static analysis
 - **valgrind**: Memory debugging
 - **gdb/lldb**: Debugging
+
+## Development Cycle
+
+Ferox uses an issue-driven development loop with explicit validation and docs
+follow-through.
+
+- start new work from a GitHub issue template when possible
+- attach the issue to the matching labels, milestone, and GitHub Project track
+- implement a narrow slice rather than a large speculative branch
+- run the matching validation commands before opening a PR
+- update the relevant docs in the same PR as the code change
+
+See `docs/DEVELOPMENT_CYCLE.md` for the full process covering issue intake,
+project tracking, umbrella issues, validation expectations, PR hygiene, and
+merge follow-up.
 
 ## Code Style
 
@@ -250,6 +266,16 @@ docs(api): add API reference documentation
 4. **Run tests**: Ensure all tests pass
 5. **Update docs**: Update relevant documentation
 
+### Issue Templates and Tracking
+
+- Prefer the GitHub issue templates for new work so performance, protocol,
+  model, and science issues all capture evidence, validation, and doc updates in
+  a consistent shape.
+- New backlog work should be attached to the `Research Backlog Sweep` project and
+  use the matching area / priority labels when appropriate.
+- If an issue changes behavior, defaults, metrics, or workflows, call out the
+  required doc updates in the issue body and complete them in the same PR.
+
 ### Branch Naming
 
 | Type | Format | Example |
@@ -261,32 +287,13 @@ docs(api): add API reference documentation
 
 ### Pull Request Template
 
-```markdown
-## Description
-Brief description of changes.
+Use `.github/PULL_REQUEST_TEMPLATE.md`. The PR should clearly cover:
 
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Changes Made
-- Change 1
-- Change 2
-- Change 3
-
-## Testing
-- [ ] All existing tests pass
-- [ ] Added new tests for changes
-- [ ] Tested manually
-
-## Checklist
-- [ ] Code follows project style guidelines
-- [ ] Self-reviewed my code
-- [ ] Updated documentation
-- [ ] No new warnings
-```
+- linked issues
+- scope of the change
+- commands/tests/benchmarks run
+- documentation updated in the same PR
+- any intentional follow-up issues left out of scope
 
 ### Review Process
 

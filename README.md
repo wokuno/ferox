@@ -111,6 +111,9 @@ Inspect detected hardware and runtime target:
 ## Contributing
 
 See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for development guidelines.
+See [docs/DEVELOPMENT_CYCLE.md](docs/DEVELOPMENT_CYCLE.md) for the issue-driven
+development workflow, GitHub Project usage, validation expectations, and the
+rule that documentation updates land in the same PR as behavior/workflow changes.
 
 ## Hardware Support
 
