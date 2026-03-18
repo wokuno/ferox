@@ -1,0 +1,59 @@
+name: Model or behavior work
+description: Track ecology, simulation, genetics, or colony-behavior improvements.
+title: "model: "
+labels:
+  - enhancement
+  - tracking
+  - area:model
+  - area:docs
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What biological, ecological, or behavior outcome should improve?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and current gaps
+      placeholder: |
+        - docs/SIMULATION.md:...
+        - docs/GENETICS.md:...
+        - src/server/simulation.c:...
+        - tests/test_simulation_logic.c:...
+    validations:
+      required: true
+  - type: textarea
+    id: design
+    attributes:
+      label: Design direction
+      description: Describe the narrow first slice, not the entire dream state.
+    validations:
+      required: true
+  - type: textarea
+    id: metrics
+    attributes:
+      label: Validation and behavior checks
+      description: Which tests, metrics, or scenario runs should confirm the change?
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and compatibility notes
+      description: Note balance shifts, determinism concerns, protocol/UI implications, or migration needs.
+    validations:
+      required: false
+  - type: checkboxes
+    id: docs
+    attributes:
+      label: Documentation updates
+      options:
+        - label: Update `docs/SIMULATION.md` / `docs/GENETICS.md` / related planning docs in the same PR.
+          required: true
+        - label: Update testing and operator docs if the change adds new knobs, metrics, or workflows.
+          required: true
+        - label: Update README/docs README if the user-facing feature set changes materially.
+          required: false

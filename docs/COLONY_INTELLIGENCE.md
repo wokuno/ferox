@@ -149,3 +149,8 @@ Future selected-colony detail should also expose:
 - `#94` Surface colony state and behavior stats in protocol, CLI, and GUI
 - `#92` Restore colony ecology behavior parity on the atomic runtime path
 - `#87` Implement signal, alarm, and horizontal gene-transfer behaviors
+- `#101` Wire Monod uptake and EPS-dependent transport into the live runtime
+- `#102` Replace heuristic contact HGT with plasmid kinetics and metrics
+- `#103` Split atomic serial maintenance cadence by freshness requirements
+- `#104` Unify neighborhood topology across spread, division, combat, and frontier telemetry
+- `#105` Derive quorum state from signal field, memory, and thresholds

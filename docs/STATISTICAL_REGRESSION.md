@@ -50,3 +50,9 @@ The test logs machine-parseable lines in this format:
 `STAT_REGRESSION metric=<name> mean=<v> stddev=<v> min=<v> max=<v> expected_mean=<v> mean_tol=<v> expected_stddev=<v> stddev_tol=<v>`
 
 This gives pass/fail and observability without relying on fragile golden output files.
+
+## Related Tracking
+
+- `#100` Unify RNG sources and add exact replay fixtures to complement the statistical lane with exact deterministic checks.
+- `#109` Execute configured benchmark scenarios and enforce pass bands in CI for broader science-facing validation.
+- Keep this document updated alongside `docs/SCIENCE_BENCHMARKS.md`, `docs/TESTING.md`, and any replay/test workflow changes.

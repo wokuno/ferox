@@ -259,6 +259,17 @@ ferox/
 - [Scaling and Behavior Plan](SCALING_AND_BEHAVIOR_PLAN.md) - Current rollout plan and linked GitHub issues
 - [Progress](PROGRESS.md) - Current project status and active workstreams
 - [Contributing](CONTRIBUTING.md) - Development guidelines
+- [Development Cycle](DEVELOPMENT_CYCLE.md) - Issue intake, project tracking, validation, docs updates, and merge flow
+
+## GitHub Project Hygiene
+
+- Use the `Ferox Research Backlog` GitHub Project for the current research sweep.
+- Prefer the issue templates under `.github/ISSUE_TEMPLATE/` for new perf,
+  protocol, model, and science work so validation and documentation follow-up are
+  captured up front.
+- Keep linked planning docs updated in the same PR as implementation work.
+- Follow `DEVELOPMENT_CYCLE.md` for the standard capture -> triage -> implement ->
+  validate -> document -> review -> merge loop.
 
 ## License
 

@@ -1,0 +1,75 @@
+name: Performance work
+description: Track runtime, scheduling, memory, or transport performance improvements.
+title: "perf: "
+labels:
+  - enhancement
+  - tracking
+  - area:perf
+  - area:docs
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is slow, scaling poorly, or wasting work today?
+      placeholder: Describe the bottleneck, symptom, or regression clearly.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Link relevant files, docs, profiles, tests, or prior issues.
+      placeholder: |
+        - docs/PERFORMANCE.md:...
+        - src/server/...
+        - tests/test_performance_eval.c:...
+    validations:
+      required: true
+  - type: dropdown
+    id: track
+    attributes:
+      label: Primary track
+      options:
+        - Runtime & Perf
+        - Infra
+        - Network & Protocol
+        - Replay & Science
+        - Ecology & Behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Suggested priority
+      options:
+        - P0
+        - P1
+        - P2
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed direction
+      description: What implementation slice should be tried first?
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Which tests, benchmarks, or profiles should prove success?
+    validations:
+      required: true
+  - type: checkboxes
+    id: docs
+    attributes:
+      label: Documentation updates
+      options:
+        - label: Update the relevant planning doc or backlog entry in the same PR.
+          required: true
+        - label: Update affected runtime/spec docs and commands when behavior, defaults, or metrics change.
+          required: true
+        - label: Update README/docs README if the workflow or operator guidance changes.
+          required: false

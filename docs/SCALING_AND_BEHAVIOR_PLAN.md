@@ -37,6 +37,15 @@ worlds, richer colony behavior, and the follow-on work now tracked in GitHub.
 - `#91` Remove per-colony full-grid rescans from world broadcast path
 - `#88` Scale world-state transport for larger maps and colony counts
 - `#90` Define a backend interface for future CPU/GPU simulation execution
+- `#97` Add dirty-tile AtomicWorld sync to avoid full-grid copies each tick
+- `#99` Isolate slow clients with queued/coalesced world broadcasts
+- `#100` Unify RNG sources and add exact replay fixtures
+- `#101` Wire Monod uptake and EPS-dependent transport into the live runtime
+- `#103` Split atomic serial maintenance cadence by freshness requirements
+- `#107` Remove redundant chunk build/copy work from the large-world broadcast path
+- `#109` Execute configured benchmark scenarios and enforce pass bands in CI
+- `#110` Reconcile the protocol spec with the live wire format and version future changes
+- `#143` Rebaseline performance and transport costs for the new default world profile
 
 ## Validation Focus
 
@@ -46,8 +55,9 @@ worlds, richer colony behavior, and the follow-on work now tracked in GitHub.
 
 ## Next Recommended Moves
 
-- rebaseline perf targets for the new `400x200` / `50` colony default profile
-- tighten snapshot-build and chunked-transport perf guardrails with target values
-- continue reducing GUI and terminal client render overhead on dense large worlds
-- keep the CPU atomic backend as reference while defining the future accelerator
+- rebaseline perf targets for the new `400x200` / `50` colony default profile (`#143`)
+- tighten snapshot-build and chunked-transport perf guardrails with target values (`#107`, `#127`, `#128`)
+- continue reducing GUI and terminal client render overhead on dense large worlds (`#99`)
+- keep the CPU atomic backend as reference while defining the future accelerator backend seam (`#90`)
+- land follow-up ecology/runtime work with docs updates in the same PRs (`#101`, `#103`, `#105`)
   backend seam

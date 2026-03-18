@@ -75,3 +75,9 @@ The run plan emits scenario-specific `scripts/run.sh server ...` command lines a
 - Full local validation: `python3 scripts/science_benchmarks.py validate --strict`
 
 Both commands validate the scenario schema and canonical coverage; they fail fast on malformed fields, invalid pass bands, duplicate IDs, or missing required scenarios.
+
+## Active Tracking
+
+- `#109` Execute configured benchmark scenarios and enforce pass bands in CI.
+- `#138` Add perf-per-watt tracking mode for mobile/ARM hardware.
+- Keep `docs/SCIENCE_BENCHMARKS.md`, `docs/STATISTICAL_REGRESSION.md`, `docs/TESTING.md`, and `docs/PERF_RUNBOOK.md` updated as benchmark automation evolves.

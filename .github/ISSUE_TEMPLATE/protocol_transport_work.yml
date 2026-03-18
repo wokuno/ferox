@@ -1,0 +1,58 @@
+name: Protocol or transport work
+description: Track wire-format, client/server transport, sync, or compatibility work.
+title: "protocol: "
+labels:
+  - enhancement
+  - tracking
+  - area:protocol
+  - area:network
+  - area:docs
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What protocol or transport limitation is this issue addressing?
+    validations:
+      required: true
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: Current behavior and evidence
+      placeholder: |
+        - docs/PROTOCOL.md:...
+        - src/shared/protocol.h:...
+        - src/server/server.c:...
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and rollout notes
+      description: Note versioning, migration, client compatibility, and fallback concerns.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed direction
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Include protocol fixtures, client/server tests, and soak/load checks.
+    validations:
+      required: true
+  - type: checkboxes
+    id: docs
+    attributes:
+      label: Documentation updates
+      options:
+        - label: Update `docs/PROTOCOL.md` in the same PR as any wire-format or message-shape change.
+          required: true
+        - label: Update related architecture/testing/operator docs when rollout behavior changes.
+          required: true
+        - label: Update README/docs README if user-visible startup or compatibility expectations change.
+          required: false
