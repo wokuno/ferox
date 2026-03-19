@@ -8,6 +8,7 @@
 #ifndef FEROX_ATOMIC_SIM_H
 #define FEROX_ATOMIC_SIM_H
 
+#include "../shared/cacheline.h"
 #include "../shared/atomic_types.h"
 #include "../shared/types.h"
 #include "threadpool.h"
@@ -24,6 +25,34 @@ typedef struct {
     int end_x, end_y;
     int thread_id;
 } AtomicRegionWork;
+
+typedef struct {
+    int spread_frontier_count;
+    int spread_slot_capacity;
+    int spread_slots_used;
+    bool spread_frontier_enabled;
+    uint8_t cacheline_padding[FEROX_CACHELINE_SIZE - (sizeof(int) * 3) - sizeof(bool)];
+} AtomicSpreadSharedState;
+
+_Static_assert(FEROX_CACHELINE_SIZE >= (int)((sizeof(int) * 3) + sizeof(bool)),
+               "FEROX_CACHELINE_SIZE too small for AtomicSpreadSharedState");
+_Static_assert(sizeof(AtomicSpreadSharedState) == FEROX_CACHELINE_SIZE,
+               "AtomicSpreadSharedState should be one cacheline");
+
+typedef struct {
+    uint32_t phase_generation;
+    int phase_done_count;
+    int active_phase;
+    int phase_region_stride;
+    bool phase_shutdown;
+    bool phase_system_ready;
+    uint8_t cacheline_padding[FEROX_CACHELINE_SIZE - sizeof(uint32_t) - (sizeof(int) * 3) - (sizeof(bool) * 2)];
+} AtomicPhaseSharedState;
+
+_Static_assert(FEROX_CACHELINE_SIZE >= (int)(sizeof(uint32_t) + (sizeof(int) * 3) + (sizeof(bool) * 2)),
+               "FEROX_CACHELINE_SIZE too small for AtomicPhaseSharedState");
+_Static_assert(sizeof(AtomicPhaseSharedState) == FEROX_CACHELINE_SIZE,
+               "AtomicPhaseSharedState should be one cacheline");
 
 // ============================================================================
 // Atomic World - Enhanced world with atomic operations
@@ -61,13 +90,10 @@ typedef struct AtomicWorld {
     int32_t* spread_deltas;          // [region_count * max_colonies]
     uint32_t* spread_touched_ids;    // [region_count * max_colonies]
     uint32_t* spread_touched_counts; // [region_count]
-    int spread_slot_capacity;
-    int spread_slots_used;
+    FEROX_CACHELINE_ALIGN AtomicSpreadSharedState spread_state;
 
     // Active-frontier tracking for sparse spread processing
     int* spread_frontier_indices;     // [width * height] active source cell indices
-    int spread_frontier_count;
-    bool spread_frontier_enabled;
 
     // Dedicated phase workers for low-overhead atomic phases
     pthread_t* phase_threads;
@@ -78,12 +104,7 @@ typedef struct AtomicWorld {
     pthread_mutex_t phase_mutex;
     pthread_cond_t phase_cond;
     pthread_cond_t phase_done_cond;
-    uint32_t phase_generation;
-    int phase_done_count;
-    int active_phase;
-    int phase_region_stride;
-    bool phase_shutdown;
-    bool phase_system_ready;
+    FEROX_CACHELINE_ALIGN AtomicPhaseSharedState phase_state;
 
     // Run expensive serial maintenance every N ticks.
     int serial_interval;
@@ -91,6 +112,9 @@ typedef struct AtomicWorld {
     // Disable frontier when active source density exceeds this percentage.
     int frontier_dense_pct;
 } AtomicWorld;
+
+FEROX_CACHELINE_ASSERT_MEMBER_ALIGNED(AtomicWorld, spread_state);
+FEROX_CACHELINE_ASSERT_MEMBER_ALIGNED(AtomicWorld, phase_state);
 
 typedef struct {
     double age_ms;

@@ -6,8 +6,10 @@
 #ifndef THREADPOOL_H
 #define THREADPOOL_H
 
+#include "../shared/cacheline.h"
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 // Task function type
 typedef void (*task_func)(void* arg);
@@ -19,6 +21,19 @@ typedef struct Task {
     struct Task* next;
 } Task;
 
+typedef struct {
+    int active_tasks;
+    int pending_tasks;
+    int task_free_count;
+    bool shutdown;
+    uint8_t cacheline_padding[FEROX_CACHELINE_SIZE - (sizeof(int) * 3) - sizeof(bool)];
+} ThreadPoolHotCounters;
+
+_Static_assert(FEROX_CACHELINE_SIZE >= (int)((sizeof(int) * 3) + sizeof(bool)),
+               "FEROX_CACHELINE_SIZE too small for ThreadPoolHotCounters");
+_Static_assert(sizeof(ThreadPoolHotCounters) == FEROX_CACHELINE_SIZE,
+               "ThreadPoolHotCounters should be one cacheline");
+
 // ThreadPool structure
 typedef struct ThreadPool {
     pthread_t* threads;
@@ -29,11 +44,10 @@ typedef struct ThreadPool {
     pthread_mutex_t queue_mutex;
     pthread_cond_t queue_cond;
     pthread_cond_t done_cond;
-    int active_tasks;
-    int pending_tasks;
-    int task_free_count;
-    bool shutdown;
+    FEROX_CACHELINE_ALIGN ThreadPoolHotCounters counters;
 } ThreadPool;
+
+FEROX_CACHELINE_ASSERT_MEMBER_ALIGNED(ThreadPool, counters);
 
 /**
  * Create a new thread pool with the specified number of worker threads.

@@ -14,7 +14,7 @@ static Task* threadpool_take_free_task_locked(ThreadPool* pool) {
     if (task != NULL) {
         pool->task_free_list = task->next;
         task->next = NULL;
-        pool->task_free_count--;
+        pool->counters.task_free_count--;
     }
     return task;
 }
@@ -24,10 +24,10 @@ static void threadpool_recycle_task_locked(ThreadPool* pool, Task* task) {
         return;
     }
 
-    if (pool->task_free_count < TASK_FREELIST_LIMIT) {
+    if (pool->counters.task_free_count < TASK_FREELIST_LIMIT) {
         task->next = pool->task_free_list;
         pool->task_free_list = task;
-        pool->task_free_count++;
+        pool->counters.task_free_count++;
         return;
     }
 
@@ -50,12 +50,12 @@ static void* worker_thread(void* arg) {
         pthread_mutex_lock(&pool->queue_mutex);
         
         // Wait for a task or shutdown signal
-        while (pool->task_queue_head == NULL && !pool->shutdown) {
+        while (pool->task_queue_head == NULL && !pool->counters.shutdown) {
             pthread_cond_wait(&pool->queue_cond, &pool->queue_mutex);
         }
         
         // Check for shutdown
-        if (pool->shutdown && pool->task_queue_head == NULL) {
+        if (pool->counters.shutdown && pool->task_queue_head == NULL) {
             pthread_mutex_unlock(&pool->queue_mutex);
             break;
         }
@@ -67,8 +67,8 @@ static void* worker_thread(void* arg) {
             if (pool->task_queue_head == NULL) {
                 pool->task_queue_tail = NULL;
             }
-            pool->pending_tasks--;
-            pool->active_tasks++;
+            pool->counters.pending_tasks--;
+            pool->counters.active_tasks++;
         }
         
         pthread_mutex_unlock(&pool->queue_mutex);
@@ -78,11 +78,11 @@ static void* worker_thread(void* arg) {
             task->function(task->arg);
 
             pthread_mutex_lock(&pool->queue_mutex);
-            pool->active_tasks--;
+            pool->counters.active_tasks--;
             threadpool_recycle_task_locked(pool, task);
             
             // Signal if all tasks are done
-            if (pool->active_tasks == 0 && pool->pending_tasks == 0) {
+            if (pool->counters.active_tasks == 0 && pool->counters.pending_tasks == 0) {
                 pthread_cond_broadcast(&pool->done_cond);
             }
             pthread_mutex_unlock(&pool->queue_mutex);
@@ -106,10 +106,10 @@ ThreadPool* threadpool_create(int num_threads) {
     pool->task_queue_head = NULL;
     pool->task_queue_tail = NULL;
     pool->task_free_list = NULL;
-    pool->active_tasks = 0;
-    pool->pending_tasks = 0;
-    pool->task_free_count = 0;
-    pool->shutdown = false;
+    pool->counters.active_tasks = 0;
+    pool->counters.pending_tasks = 0;
+    pool->counters.task_free_count = 0;
+    pool->counters.shutdown = false;
     
     // Initialize synchronization primitives
     if (pthread_mutex_init(&pool->queue_mutex, NULL) != 0) {
@@ -144,7 +144,7 @@ ThreadPool* threadpool_create(int num_threads) {
     for (int i = 0; i < num_threads; i++) {
         if (pthread_create(&pool->threads[i], NULL, worker_thread, pool) != 0) {
             // Failed to create thread, shutdown existing threads
-            pool->shutdown = true;
+            pool->counters.shutdown = true;
             pthread_cond_broadcast(&pool->queue_cond);
             
             for (int j = 0; j < i; j++) {
@@ -171,7 +171,7 @@ void threadpool_destroy(ThreadPool* pool) {
     pthread_mutex_lock(&pool->queue_mutex);
     
     // Signal shutdown
-    pool->shutdown = true;
+    pool->counters.shutdown = true;
     pthread_cond_broadcast(&pool->queue_cond);
     
     pthread_mutex_unlock(&pool->queue_mutex);
@@ -211,7 +211,7 @@ void threadpool_submit(ThreadPool* pool, task_func func, void* arg) {
     pthread_mutex_lock(&pool->queue_mutex);
 
     // Don't accept new tasks if shutting down
-    if (pool->shutdown) {
+    if (pool->counters.shutdown) {
         pthread_mutex_unlock(&pool->queue_mutex);
         return;
     }
@@ -226,7 +226,7 @@ void threadpool_submit(ThreadPool* pool, task_func func, void* arg) {
         }
 
         pthread_mutex_lock(&pool->queue_mutex);
-        if (pool->shutdown) {
+        if (pool->counters.shutdown) {
             pthread_mutex_unlock(&pool->queue_mutex);
             free(task);
             return;
@@ -245,7 +245,7 @@ void threadpool_submit(ThreadPool* pool, task_func func, void* arg) {
         pool->task_queue_tail = task;
     }
     
-    pool->pending_tasks++;
+    pool->counters.pending_tasks++;
 
     // Wake a worker for each submit to maintain burst parallelism.
     pthread_cond_signal(&pool->queue_cond);
@@ -264,7 +264,7 @@ void threadpool_submit_batch(ThreadPool* pool, task_func func, void* const* args
 
     while (submitted < count) {
         pthread_mutex_lock(&pool->queue_mutex);
-        if (pool->shutdown) {
+        if (pool->counters.shutdown) {
             pthread_mutex_unlock(&pool->queue_mutex);
             break;
         }
@@ -297,7 +297,7 @@ void threadpool_submit_batch(ThreadPool* pool, task_func func, void* const* args
     }
 
     pthread_mutex_lock(&pool->queue_mutex);
-    if (pool->shutdown) {
+    if (pool->counters.shutdown) {
         pthread_mutex_unlock(&pool->queue_mutex);
         threadpool_free_task_list(batch_head);
         return;
@@ -313,7 +313,7 @@ void threadpool_submit_batch(ThreadPool* pool, task_func func, void* const* args
         pool->task_queue_tail = batch_tail;
     }
 
-    pool->pending_tasks += submitted;
+    pool->counters.pending_tasks += submitted;
 
     if (queue_was_empty) {
         if (submitted > 1) {
@@ -334,7 +334,7 @@ void threadpool_wait(ThreadPool* pool) {
     pthread_mutex_lock(&pool->queue_mutex);
     
     // Wait until all tasks are complete
-    while (pool->active_tasks > 0 || pool->pending_tasks > 0) {
+    while (pool->counters.active_tasks > 0 || pool->counters.pending_tasks > 0) {
         pthread_cond_wait(&pool->done_cond, &pool->queue_mutex);
     }
     

@@ -176,8 +176,8 @@ static int atomic_alloc_spread_tracking(AtomicWorld* aworld, size_t max_colonies
     aworld->spread_deltas = deltas;
     aworld->spread_touched_ids = touched_ids;
     aworld->spread_touched_counts = touched_counts;
-    aworld->spread_slot_capacity = slot_capacity;
-    aworld->spread_slots_used = aworld->region_count;
+    aworld->spread_state.spread_slot_capacity = slot_capacity;
+    aworld->spread_state.spread_slots_used = aworld->region_count;
     return 0;
 }
 
@@ -188,9 +188,9 @@ static int64_t atomic_apply_spread_deltas_internal(AtomicWorld* aworld) {
 
     int64_t total_applied = 0;
 
-    int slots_used = aworld->spread_slots_used;
-    if (slots_used < 0 || slots_used > aworld->spread_slot_capacity) {
-        slots_used = aworld->spread_slot_capacity;
+    int slots_used = aworld->spread_state.spread_slots_used;
+    if (slots_used < 0 || slots_used > aworld->spread_state.spread_slot_capacity) {
+        slots_used = aworld->spread_state.spread_slot_capacity;
     }
 
     for (int slot = 0; slot < slots_used; slot++) {
@@ -384,7 +384,7 @@ static void atomic_rebuild_spread_frontier(AtomicWorld* aworld) {
     int height = aworld->grid.height;
     int cell_count = width * height;
     if (cell_count <= 0) {
-        aworld->spread_frontier_count = 0;
+        aworld->spread_state.spread_frontier_count = 0;
         return;
     }
 
@@ -431,7 +431,7 @@ static void atomic_rebuild_spread_frontier(AtomicWorld* aworld) {
         }
     }
 
-    aworld->spread_frontier_count = frontier_count;
+    aworld->spread_state.spread_frontier_count = frontier_count;
 }
 
 static void atomic_prepare_next_buffer(AtomicWorld* aworld) {
@@ -597,20 +597,20 @@ static void* atomic_phase_worker(void* arg) {
 
     while (1) {
         pthread_mutex_lock(&aworld->phase_mutex);
-        while (!aworld->phase_shutdown && seen_generation == aworld->phase_generation) {
+        while (!aworld->phase_state.phase_shutdown && seen_generation == aworld->phase_state.phase_generation) {
             pthread_cond_wait(&aworld->phase_cond, &aworld->phase_mutex);
         }
 
-        if (aworld->phase_shutdown) {
+        if (aworld->phase_state.phase_shutdown) {
             pthread_mutex_unlock(&aworld->phase_mutex);
             break;
         }
 
-        seen_generation = aworld->phase_generation;
-        int phase = aworld->active_phase;
+        seen_generation = aworld->phase_state.phase_generation;
+        int phase = aworld->phase_state.active_phase;
         int start = aworld->worker_region_start[worker_id];
         int end = aworld->worker_region_end[worker_id];
-        int stride = aworld->phase_region_stride;
+        int stride = aworld->phase_state.phase_region_stride;
         if (stride < 1) {
             stride = 1;
         }
@@ -673,8 +673,8 @@ static void* atomic_phase_worker(void* arg) {
         }
 
         pthread_mutex_lock(&aworld->phase_mutex);
-        aworld->phase_done_count++;
-        if (aworld->phase_done_count >= aworld->phase_worker_count) {
+        aworld->phase_state.phase_done_count++;
+        if (aworld->phase_state.phase_done_count >= aworld->phase_worker_count) {
             pthread_cond_signal(&aworld->phase_done_cond);
         }
         pthread_mutex_unlock(&aworld->phase_mutex);
@@ -754,17 +754,17 @@ static int atomic_phase_system_create(AtomicWorld* aworld) {
         aworld->worker_region_end[w] = end;
     }
 
-    aworld->phase_generation = 0;
-    aworld->phase_done_count = 0;
-    aworld->active_phase = ATOMIC_PHASE_IDLE;
-    aworld->phase_region_stride = 1;
-    aworld->phase_shutdown = false;
+    aworld->phase_state.phase_generation = 0;
+    aworld->phase_state.phase_done_count = 0;
+    aworld->phase_state.active_phase = ATOMIC_PHASE_IDLE;
+    aworld->phase_state.phase_region_stride = 1;
+    aworld->phase_state.phase_shutdown = false;
 
     for (int w = 0; w < aworld->phase_worker_count; w++) {
         aworld->phase_worker_args[w].aworld = aworld;
         aworld->phase_worker_args[w].thread_id = w;
         if (pthread_create(&aworld->phase_threads[w], NULL, atomic_phase_worker, &aworld->phase_worker_args[w]) != 0) {
-            aworld->phase_shutdown = true;
+            aworld->phase_state.phase_shutdown = true;
             pthread_cond_broadcast(&aworld->phase_cond);
             for (int j = 0; j < w; j++) {
                 pthread_join(aworld->phase_threads[j], NULL);
@@ -784,17 +784,17 @@ static int atomic_phase_system_create(AtomicWorld* aworld) {
         }
     }
 
-    aworld->phase_system_ready = true;
+    aworld->phase_state.phase_system_ready = true;
     return 0;
 }
 
 static void atomic_phase_system_destroy(AtomicWorld* aworld) {
-    if (!aworld || !aworld->phase_system_ready) {
+    if (!aworld || !aworld->phase_state.phase_system_ready) {
         return;
     }
 
     pthread_mutex_lock(&aworld->phase_mutex);
-    aworld->phase_shutdown = true;
+    aworld->phase_state.phase_shutdown = true;
     pthread_cond_broadcast(&aworld->phase_cond);
     pthread_mutex_unlock(&aworld->phase_mutex);
 
@@ -805,35 +805,35 @@ static void atomic_phase_system_destroy(AtomicWorld* aworld) {
     pthread_cond_destroy(&aworld->phase_done_cond);
     pthread_cond_destroy(&aworld->phase_cond);
     pthread_mutex_destroy(&aworld->phase_mutex);
-    aworld->phase_system_ready = false;
+    aworld->phase_state.phase_system_ready = false;
 }
 
 static void atomic_run_phase(AtomicWorld* aworld, int phase) {
-    if (!aworld || !aworld->phase_system_ready) {
+    if (!aworld || !aworld->phase_state.phase_system_ready) {
         return;
     }
 
     pthread_mutex_lock(&aworld->phase_mutex);
-    aworld->active_phase = phase;
-    aworld->phase_done_count = 0;
-    aworld->phase_generation++;
+    aworld->phase_state.active_phase = phase;
+    aworld->phase_state.phase_done_count = 0;
+    aworld->phase_state.phase_generation++;
     pthread_cond_broadcast(&aworld->phase_cond);
 
-    while (aworld->phase_done_count < aworld->phase_worker_count) {
+    while (aworld->phase_state.phase_done_count < aworld->phase_worker_count) {
         pthread_cond_wait(&aworld->phase_done_cond, &aworld->phase_mutex);
     }
 
-    aworld->active_phase = ATOMIC_PHASE_IDLE;
+    aworld->phase_state.active_phase = ATOMIC_PHASE_IDLE;
     pthread_mutex_unlock(&aworld->phase_mutex);
 }
 
 static void atomic_phase_assign_ranges(AtomicWorld* aworld, int total_units) {
-    if (!aworld || !aworld->phase_system_ready || total_units < 0) {
+    if (!aworld || !aworld->phase_state.phase_system_ready || total_units < 0) {
         return;
     }
 
     pthread_mutex_lock(&aworld->phase_mutex);
-    aworld->phase_region_stride = 1;
+    aworld->phase_state.phase_region_stride = 1;
     for (int w = 0; w < aworld->phase_worker_count; w++) {
         int start = (w * total_units) / aworld->phase_worker_count;
         int end = ((w + 1) * total_units) / aworld->phase_worker_count;
@@ -844,14 +844,14 @@ static void atomic_phase_assign_ranges(AtomicWorld* aworld, int total_units) {
 }
 
 static void atomic_phase_assign_interleaved(AtomicWorld* aworld, int total_units) {
-    if (!aworld || !aworld->phase_system_ready || total_units < 0) {
+    if (!aworld || !aworld->phase_state.phase_system_ready || total_units < 0) {
         return;
     }
 
     pthread_mutex_lock(&aworld->phase_mutex);
-    aworld->phase_region_stride = aworld->phase_worker_count;
-    if (aworld->phase_region_stride < 1) {
-        aworld->phase_region_stride = 1;
+    aworld->phase_state.phase_region_stride = aworld->phase_worker_count;
+    if (aworld->phase_state.phase_region_stride < 1) {
+        aworld->phase_state.phase_region_stride = 1;
     }
 
     for (int w = 0; w < aworld->phase_worker_count; w++) {
@@ -1098,8 +1098,8 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
         free(aworld);
         return NULL;
     }
-    aworld->spread_frontier_enabled = atomic_parse_env_bool("FEROX_ATOMIC_USE_FRONTIER", true);
-    aworld->spread_frontier_count = 0;
+    aworld->spread_state.spread_frontier_enabled = atomic_parse_env_bool("FEROX_ATOMIC_USE_FRONTIER", true);
+    aworld->spread_state.spread_frontier_count = 0;
 
     int region_width = aworld->grid.width / regions_x;
     int region_height = aworld->grid.height / regions_y;
@@ -1118,7 +1118,7 @@ AtomicWorld* atomic_world_create(World* world, ThreadPool* pool, int thread_coun
     }
 
     if (atomic_phase_system_create(aworld) != 0) {
-        aworld->phase_system_ready = false;
+        aworld->phase_state.phase_system_ready = false;
     }
     
     // Sync from world
@@ -1360,7 +1360,7 @@ static void submit_region_tasks(AtomicWorld* aworld, void (*task_func)(void*)) {
 
 void atomic_age(AtomicWorld* aworld) {
     if (!aworld) return;
-    if (aworld->phase_system_ready) {
+    if (aworld->phase_state.phase_system_ready) {
         atomic_phase_assign_ranges(aworld, aworld->region_count);
         atomic_run_phase(aworld, ATOMIC_PHASE_AGE);
         return;
@@ -1372,27 +1372,27 @@ void atomic_age(AtomicWorld* aworld) {
 void atomic_spread(AtomicWorld* aworld) {
     if (!aworld) return;
 
-    aworld->spread_slots_used = aworld->region_count;
+    aworld->spread_state.spread_slots_used = aworld->region_count;
 
-    if (aworld->phase_system_ready) {
-        bool use_frontier = aworld->spread_frontier_enabled && aworld->spread_frontier_count > 0;
+    if (aworld->phase_state.phase_system_ready) {
+        bool use_frontier = aworld->spread_state.spread_frontier_enabled && aworld->spread_state.spread_frontier_count > 0;
         int total_cells = aworld->grid.width * aworld->grid.height;
         if (use_frontier && total_cells > 0) {
             int dense_cutoff = (total_cells * aworld->frontier_dense_pct) / 100;
             if (dense_cutoff < 1) {
                 dense_cutoff = 1;
             }
-            if (aworld->spread_frontier_count >= dense_cutoff) {
+            if (aworld->spread_state.spread_frontier_count >= dense_cutoff) {
                 use_frontier = false;
             }
         }
 
         if (use_frontier) {
-            aworld->spread_slots_used = aworld->phase_worker_count;
-            atomic_phase_assign_interleaved(aworld, aworld->spread_frontier_count);
+            aworld->spread_state.spread_slots_used = aworld->phase_worker_count;
+            atomic_phase_assign_interleaved(aworld, aworld->spread_state.spread_frontier_count);
             atomic_run_phase(aworld, ATOMIC_PHASE_SPREAD_FRONTIER);
         } else {
-            aworld->spread_slots_used = aworld->region_count;
+            aworld->spread_state.spread_slots_used = aworld->region_count;
             atomic_phase_assign_interleaved(aworld, aworld->region_count);
             atomic_run_phase(aworld, ATOMIC_PHASE_SPREAD);
         }
@@ -1421,19 +1421,19 @@ void atomic_set_spread_frontier_enabled(AtomicWorld* aworld, bool enabled) {
     if (!aworld) {
         return;
     }
-    aworld->spread_frontier_enabled = enabled;
+    aworld->spread_state.spread_frontier_enabled = enabled;
 }
 
 int atomic_get_spread_frontier_count(AtomicWorld* aworld) {
     if (!aworld) {
         return 0;
     }
-    return aworld->spread_frontier_count;
+    return aworld->spread_state.spread_frontier_count;
 }
 
 void atomic_barrier(AtomicWorld* aworld) {
     if (!aworld) return;
-    if (aworld->phase_system_ready) {
+    if (aworld->phase_state.phase_system_ready) {
         return;
     }
     threadpool_wait(aworld->pool);

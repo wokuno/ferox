@@ -51,7 +51,7 @@ static int test_threadpool_submit_ignored_during_shutdown(void) {
     int counter = 0;
 
     pthread_mutex_lock(&pool->queue_mutex);
-    pool->shutdown = true;
+    pool->counters.shutdown = true;
     pthread_mutex_unlock(&pool->queue_mutex);
 
     threadpool_submit(pool, increment_task, &counter);
@@ -111,8 +111,8 @@ static int test_parallel_tick_returns_when_world_is_null(void) {
 
     parallel_tick(ctx);
 
-    ASSERT_EQ(pool->pending_tasks, 0);
-    ASSERT_EQ(pool->active_tasks, 0);
+    ASSERT_EQ(pool->counters.pending_tasks, 0);
+    ASSERT_EQ(pool->counters.active_tasks, 0);
 
     parallel_destroy(ctx);
     threadpool_destroy(pool);
