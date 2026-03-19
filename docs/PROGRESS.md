@@ -66,14 +66,14 @@ Tracked baseline targets and acceptance bands live in `docs/PERF_TARGETS.md`.
 Human-readable observations from each rebaseline pass stay in
 `docs/PERFORMANCE.md`.
 
-Latest confirmed medians for issue `#143` (`artifacts/perf/20260319-132255`):
+Latest confirmed medians for issue `#143` (`artifacts/perf/20260319-172155`):
 
-- `simulation_tick (serial)`: `441.52 ms`
-- `atomic_tick (2 threads)`: `107.82 ms`
-- `atomic_tick (4 threads)`: `150.31 ms`
-- `broadcast build+serialize`: `8.67 ms`
-- `server snapshot build`: `8.32 ms`
-- `tiny/batched ratio`: `21.7367x`
+- `simulation_tick (serial)`: `457.65 ms`
+- `atomic_tick (2 threads)`: `107.12 ms`
+- `atomic_tick (4 threads)`: `151.92 ms`
+- `broadcast build+serialize`: `8.51 ms`
+- `server snapshot build`: `8.15 ms`
+- `tiny/batched ratio`: `41.2767x`
 
 ## Known Constraints
 

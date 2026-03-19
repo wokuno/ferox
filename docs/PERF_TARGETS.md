@@ -58,22 +58,22 @@ Checked-in machine-readable baseline:
 
 ## Current Default-Profile Baseline
 
-Source artifact: `artifacts/perf/20260319-132255`
+Source artifact: `artifacts/perf/20260319-172155`
 
-- `simulation_tick (serial)`: `441.52 ms`
-- `atomic_tick (1 thread)`: `122.70 ms`
-- `atomic_tick (2 threads)`: `107.82 ms`
-- `atomic_tick (4 threads)`: `150.31 ms`
-- `broadcast build snapshot`: `3.98 ms`
-- `broadcast build+serialize`: `8.67 ms`
-- `broadcast end-to-end (0 clients)`: `8.74 ms`
-- `server snapshot build`: `8.32 ms`
-- `protocol serialize+deserialize`: `9.65 ms`
-- `threadpool tiny tasks`: `14.49 ms`
-- `threadpool chunked submit`: `8.91 ms`
-- `threadpool batched tasks`: `0.66 ms`
-- `atomic/serial time ratio`: `0.6567x`
-- `tiny/batched ratio`: `21.7367x`
+- `simulation_tick (serial)`: `457.65 ms`
+- `atomic_tick (1 thread)`: `122.50 ms`
+- `atomic_tick (2 threads)`: `107.12 ms`
+- `atomic_tick (4 threads)`: `151.92 ms`
+- `broadcast build snapshot`: `3.99 ms`
+- `broadcast build+serialize`: `8.51 ms`
+- `broadcast end-to-end (0 clients)`: `8.50 ms`
+- `server snapshot build`: `8.15 ms`
+- `protocol serialize+deserialize`: `9.47 ms`
+- `threadpool tiny tasks`: `23.74 ms`
+- `threadpool chunked submit`: `13.68 ms`
+- `threadpool batched tasks`: `0.72 ms`
+- `atomic/serial time ratio`: `0.6267x`
+- `tiny/batched ratio`: `41.2767x`
 - average transport payloads from the same run: snapshot `159.96 KiB`, encoded `4.82 KiB`
 
 ## Source Files

@@ -54,22 +54,22 @@ have been confirmed.
 
 ## 2026-03-19 Default-Profile Rebaseline Results
 
-Confirmed release medians from `artifacts/perf/20260319-132255/` for the default
+Confirmed release medians from `artifacts/perf/20260319-172155/` for the default
 `400x200` / `50` colony profile (`FEROX_PERF_SCALE=2`, `3` repeats):
 
-- `simulation_tick (serial)`: **441.52 ms**
-- `atomic_tick (1 thread)`: **122.70 ms**
-- `atomic_tick (2 threads)`: **107.82 ms**
-- `atomic_tick (4 threads)`: **150.31 ms**
-- atomic/serial time ratio: **0.66x**
-- `broadcast build snapshot`: **3.98 ms**
-- `broadcast build+serialize`: **8.67 ms**
-- `broadcast end-to-end (0 clients)`: **8.74 ms**
-- `server snapshot build`: **8.32 ms**
-- `protocol serialize+deserialize`: **9.65 ms**
-- `threadpool tiny tasks`: **14.49 ms**
-- `threadpool batched tasks`: **0.66 ms**
-- tiny/batched ratio: **21.74x**
+- `simulation_tick (serial)`: **457.65 ms**
+- `atomic_tick (1 thread)`: **122.50 ms**
+- `atomic_tick (2 threads)`: **107.12 ms**
+- `atomic_tick (4 threads)`: **151.92 ms**
+- atomic/serial time ratio: **0.63x**
+- `broadcast build snapshot`: **3.99 ms**
+- `broadcast build+serialize`: **8.51 ms**
+- `broadcast end-to-end (0 clients)`: **8.50 ms**
+- `server snapshot build`: **8.15 ms**
+- `protocol serialize+deserialize`: **9.47 ms**
+- `threadpool tiny tasks`: **23.74 ms**
+- `threadpool batched tasks`: **0.72 ms**
+- tiny/batched ratio: **41.28x**
 
 Transport payload snapshot from the same pass:
 
@@ -81,8 +81,9 @@ Interpretation:
 - The new default profile is now explicitly captured in checked-in baseline data
   via `config/perf_baseline_default_profile.json`.
 - Broad transport costs are modest relative to the serial tick on this host.
-- The scheduler still shows a clear tiny-task overhead signal, so follow-up work
-  should keep batching/coarser work units in scope.
+- The scheduler still shows a clear tiny-task overhead signal even after the
+  worker follow-on submit fast path merged, so follow-up work should keep
+  batching/coarser work units in scope for external submit-heavy lanes.
 - `atomic_tick (2 threads)` currently beats `4 threads)` on this host, which is a
   reminder not to assume the largest worker count is the best default-profile lane.
 
