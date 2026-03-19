@@ -16,13 +16,7 @@
 #include <stddef.h>
 #include <stdatomic.h>
 
-#ifndef FEROX_CACHELINE_SIZE
-#if defined(__APPLE__) && defined(__aarch64__)
-#define FEROX_CACHELINE_SIZE 128
-#else
-#define FEROX_CACHELINE_SIZE 64
-#endif
-#endif
+#include "cacheline.h"
 
 // ============================================================================
 // Atomic Cell - Lock-free cell with atomic colony ownership

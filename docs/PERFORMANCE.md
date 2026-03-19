@@ -27,6 +27,17 @@ For regression checks, run at least 3 times and compare medians instead of singl
 - Performance thresholds in `test_performance_eval.c` are intentionally loose for host variance and instrumentation overhead.
 - For comparative performance work, run `./scripts/test.sh perf` on a stable local machine with the same `FEROX_PERF_SCALE`.
 
+## 2026-03-19 Hot Shared Struct Guardrails
+
+Low-risk cacheline guardrails now live in shared headers for the most contended scheduler and atomic-spread metadata:
+
+- `src/shared/cacheline.h` defines the common cacheline target plus reusable static-assert helpers.
+- `ThreadPoolHotCounters`, `AtomicSpreadSharedState`, and `AtomicPhaseSharedState` are explicitly padded to one cacheline and checked with compile-time offset assertions.
+- `tests/test_threadpool_stress.c` verifies the exposed hot structs stay cacheline-sized and that the aligned members land on cacheline boundaries in the owning runtime structs.
+- `tests/test_performance_profile.c` now prints the owning-struct member offsets plus size data for those hot structs beside the existing `AtomicColonyStats` platform report so local perf runs can confirm the host-specific layout quickly.
+
+This change is intentionally structural only: it does not alter scheduling policy, memory-order semantics, or feature defaults.
+
 ## Current Baseline (macOS arm64, scenario runs on 2026-03-05)
 
 Fresh scenario runs were executed with:

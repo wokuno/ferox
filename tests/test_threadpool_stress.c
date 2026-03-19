@@ -8,9 +8,12 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <stdint.h>
+#include <stddef.h>
 #include <stdatomic.h>
 
 #include "../src/server/threadpool.h"
+#include "../src/server/atomic_sim.h"
 
 // Test framework
 static int tests_passed = 0;
@@ -240,6 +243,21 @@ TEST(batch_submit_with_remainder) {
 
     threadpool_wait(pool);
     ASSERT_EQ(atomic_load(&task_counter), total);
+
+    threadpool_destroy(pool);
+}
+
+TEST(hot_shared_structs_are_cacheline_aligned) {
+    ThreadPool* pool = threadpool_create(4);
+    ASSERT_NOT_NULL(pool);
+
+    ASSERT_EQ(sizeof(ThreadPoolHotCounters), FEROX_CACHELINE_SIZE);
+    ASSERT_EQ(sizeof(AtomicSpreadSharedState), FEROX_CACHELINE_SIZE);
+    ASSERT_EQ(sizeof(AtomicPhaseSharedState), FEROX_CACHELINE_SIZE);
+    ASSERT_EQ(offsetof(ThreadPool, counters) % FEROX_CACHELINE_SIZE, 0);
+    ASSERT_EQ(offsetof(AtomicWorld, spread_state) % FEROX_CACHELINE_SIZE, 0);
+    ASSERT_EQ(offsetof(AtomicWorld, phase_state) % FEROX_CACHELINE_SIZE, 0);
+    ASSERT_EQ(((uintptr_t)&pool->counters) % FEROX_CACHELINE_SIZE, 0);
 
     threadpool_destroy(pool);
 }
@@ -493,6 +511,7 @@ int run_threadpool_stress_tests(void) {
     RUN_TEST(rapid_submit_wait_cycles);
     RUN_TEST(interleaved_submit_wait);
     RUN_TEST(batch_submit_with_remainder);
+    RUN_TEST(hot_shared_structs_are_cacheline_aligned);
     
     printf("\nConcurrent Submit Tests:\n");
     RUN_TEST(concurrent_submits_multiple_threads);

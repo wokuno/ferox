@@ -56,6 +56,7 @@ allows lower overhead.
 - precomputed region work descriptors and reusable submit argument vectors
 - optional spread frontier index list for sparse scheduling
 - dedicated phase workers for lower-overhead phase execution
+- cacheline-padded `AtomicSpreadSharedState` and `AtomicPhaseSharedState` blocks so frequently-updated spread/frontier and phase-coordination fields stay isolated from colder `AtomicWorld` metadata
 
 Key structs are defined in:
 
@@ -72,6 +73,7 @@ The threadpool evolved from a simple global FIFO to a mixed scheduler:
 - work stealing controls (`steal_probe_limit`, `steal_batch_size`)
 - profile presets via `FEROX_THREADPOOL_PROFILE`
 - optional telemetry in `ThreadPoolTelemetry`
+- cacheline-padded `ThreadPoolHotCounters` so queue-depth / active-task updates do not share a line with colder pool pointers and synchronization objects
 
 Relevant files:
 

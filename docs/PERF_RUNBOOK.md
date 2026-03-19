@@ -64,6 +64,12 @@ Optional threadpool tuning env vars:
 - `FEROX_THREADPOOL_TELEMETRY`
 - `FEROX_THREADPOOL_MICROBENCH_MODE`
 
+Layout guardrail notes:
+
+- `test_performance_profile` prints cacheline target plus owning-struct offsets/size data for `AtomicColonyStats`, `ThreadPoolHotCounters`, `AtomicSpreadSharedState`, and `AtomicPhaseSharedState`.
+- `test_threadpool_stress` includes a structural regression check that the hot shared members in `ThreadPool` and `AtomicWorld` stay cacheline-sized and cacheline-aligned.
+- If a platform/compiler changes these numbers unexpectedly, treat that as a perf-risk signal before trusting comparative scheduler or atomic spread measurements.
+
 Optional atomic simulation tuning env vars:
 
 - `FEROX_ATOMIC_SERIAL_INTERVAL` (default `5`) controls how often expensive serial maintenance

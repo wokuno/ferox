@@ -65,6 +65,13 @@ static void profile_platform_characteristics(void) {
            FEROX_CACHELINE_SIZE,
            (size_t)_Alignof(AtomicColonyStats),
            sizeof(AtomicColonyStats));
+    printf("[platform] hot members: tp counters offset=%zu size=%zu, spread state offset=%zu size=%zu, phase state offset=%zu size=%zu\n",
+           offsetof(ThreadPool, counters),
+           sizeof(ThreadPoolHotCounters),
+           offsetof(AtomicWorld, spread_state),
+           sizeof(AtomicSpreadSharedState),
+           offsetof(AtomicWorld, phase_state),
+           sizeof(AtomicPhaseSharedState));
 
     atomic_uint_fast64_t v;
     atomic_init(&v, 0);
@@ -952,7 +959,7 @@ static void profile_atomic_spread_phase_scaling(void) {
     }
 
     printf("[atomic_spread_step] phase workers enabled: %d, 1 worker: %.2f ms/%d steps, %d workers: %.2f ms/%d steps, speedup: %.2fx\n",
-           awn->phase_system_ready ? 1 : 0,
+           awn->phase_state.phase_system_ready ? 1 : 0,
            ns_to_ms(t1), steps,
            workers,
            ns_to_ms(tn), steps,
