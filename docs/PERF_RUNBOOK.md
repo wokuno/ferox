@@ -30,6 +30,22 @@ without chasing noisy one-off results.
 - Jitter-reduced summary (multi-iteration):
   - `./scripts/perf_multi_iter.py -n 7 --profile balanced`
 
+## Issue #120 Validation Notes
+
+- The worker-submit fast path is only expected to help worker-generated follow-on
+  tasks (nested/chained submits from inside threadpool jobs).
+- Benchmark the change primarily with `test_performance_eval` and compare the
+  `threadpool worker follow-on` lane plus the existing tiny-task metrics against
+  the pre-change baseline on the same host.
+- Keep `test_threadpool_profile_scan` and `test_threadpool_stress` in the
+  validation set to catch regressions in wakeups, stealing, or queue accounting.
+- The current implementation is deliberately limited to worker-issued
+  `threadpool_submit()` follow-on tasks; `threadpool_submit_batch()` still uses
+  the shared queue path and should remain neutral in comparisons.
+- If results regress for external producer workloads but improve for chained
+  worker workloads, treat that as a rollback signal because this change is meant
+  to be low-risk and workload-specific rather than a global scheduler rewrite.
+
 ## Granularity Ladder
 
 - `unit`:

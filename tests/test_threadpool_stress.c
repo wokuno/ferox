@@ -75,6 +75,20 @@ static void variable_time_task(void* arg) {
     atomic_fetch_add(&task_counter, 1);
 }
 
+typedef struct {
+    ThreadPool* pool;
+    atomic_int remaining;
+} FollowOnStressState;
+
+static void follow_on_stress_task(void* arg) {
+    FollowOnStressState* state = (FollowOnStressState*)arg;
+    atomic_fetch_add(&task_counter, 1);
+
+    if (atomic_fetch_sub(&state->remaining, 1) > 0) {
+        threadpool_submit(state->pool, follow_on_stress_task, state);
+    }
+}
+
 // ============================================================================
 // Basic Stress Tests
 // ============================================================================
@@ -243,6 +257,27 @@ TEST(batch_submit_with_remainder) {
 
     threadpool_wait(pool);
     ASSERT_EQ(atomic_load(&task_counter), total);
+
+    threadpool_destroy(pool);
+}
+
+TEST(worker_follow_on_submit_chain) {
+    ThreadPool* pool = threadpool_create(4);
+    ASSERT_NOT_NULL(pool);
+
+    atomic_store(&task_counter, 0);
+
+    FollowOnStressState state = {
+        .pool = pool,
+        .remaining = ATOMIC_VAR_INIT(999),
+    };
+
+    threadpool_submit(pool, follow_on_stress_task, &state);
+    threadpool_wait(pool);
+
+    ASSERT_EQ(atomic_load(&task_counter), 1000);
+    ASSERT_EQ(pool->counters.pending_tasks, 0);
+    ASSERT_EQ(pool->counters.active_tasks, 0);
 
     threadpool_destroy(pool);
 }
@@ -505,6 +540,7 @@ int run_threadpool_stress_tests(void) {
     RUN_TEST(rapid_submit_wait_cycles);
     RUN_TEST(interleaved_submit_wait);
     RUN_TEST(batch_submit_with_remainder);
+    RUN_TEST(worker_follow_on_submit_chain);
     RUN_TEST(hot_shared_structs_are_cacheline_aligned);
     
     printf("\nConcurrent Submit Tests:\n");

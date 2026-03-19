@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <assert.h>
+#include <stdatomic.h>
 #include "../src/server/threadpool.h"
 #include "../src/server/parallel.h"
 
@@ -60,6 +61,21 @@ static void record_thread_id(void* arg) {
     int idx = (*targ->index)++;
     targ->thread_ids[idx] = pthread_self();
     pthread_mutex_unlock(targ->mutex);
+}
+
+typedef struct {
+    ThreadPool* pool;
+    atomic_int remaining;
+    atomic_int executed;
+} FollowOnChainState;
+
+static void submit_follow_on_task(void* arg) {
+    FollowOnChainState* state = (FollowOnChainState*)arg;
+    atomic_fetch_add(&state->executed, 1);
+
+    if (atomic_fetch_sub(&state->remaining, 1) > 0) {
+        threadpool_submit(state->pool, submit_follow_on_task, state);
+    }
 }
 
 // ============================================================================
@@ -294,6 +310,30 @@ static int test_threadpool_submit_batch_executes_all_tasks(void) {
     threadpool_wait(pool);
 
     ASSERT_EQ(counter, 50);
+
+    threadpool_destroy(pool);
+    TEST_PASS();
+    return 0;
+}
+
+static int test_threadpool_worker_follow_on_submit_completes_chain(void) {
+    TEST_START("threadpool worker follow-on submit chain");
+
+    ThreadPool* pool = threadpool_create(4);
+    ASSERT_NOT_NULL(pool);
+
+    FollowOnChainState state = {
+        .pool = pool,
+        .remaining = ATOMIC_VAR_INIT(255),
+        .executed = ATOMIC_VAR_INIT(0),
+    };
+
+    threadpool_submit(pool, submit_follow_on_task, &state);
+    threadpool_wait(pool);
+
+    ASSERT_EQ(atomic_load(&state.executed), 256);
+    ASSERT_EQ(pool->counters.pending_tasks, 0);
+    ASSERT_EQ(pool->counters.active_tasks, 0);
 
     threadpool_destroy(pool);
     TEST_PASS();
@@ -583,6 +623,7 @@ int main(void) {
     failed += test_threadpool_destroy_completes_pending_tasks();
     failed += test_threadpool_handles_1000_tasks();
     failed += test_threadpool_submit_batch_executes_all_tasks();
+    failed += test_threadpool_worker_follow_on_submit_completes_chain();
     
     printf("\n[Parallel Context Tests]\n");
     failed += test_parallel_context_creates_four_regions();
