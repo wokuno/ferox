@@ -390,21 +390,68 @@ static void atomic_rebuild_spread_frontier(AtomicWorld* aworld) {
 
     AtomicCell* current = grid_current(&aworld->grid);
 
+    uint32_t tick = aworld->world ? (uint32_t)aworld->world->tick : 0u;
+    bool reverse_y = (tick & 1u) != 0u;
+    bool reverse_x_base = ((tick >> 1) & 1u) != 0u;
+
     int frontier_count = 0;
-    for (int idx = 0; idx < cell_count; idx++) {
-        uint32_t colony_id = atomic_load_explicit(&current[idx].colony_id, memory_order_relaxed);
-        if (colony_id == 0) {
-            continue;
-        }
+    for (int row = 0; row < height; row++) {
+        int y = reverse_y ? (height - 1 - row) : row;
+        int row_base = y * width;
+        bool reverse_x = reverse_x_base ^ ((row & 1) != 0);
 
-        if (!atomic_cell_has_empty_neighbor(current, width, height, idx)) {
-            continue;
-        }
+        if (reverse_x) {
+            for (int x = width - 1; x >= 0; x--) {
+                int idx = row_base + x;
+                uint32_t colony_id = atomic_load_explicit(&current[idx].colony_id, memory_order_relaxed);
+                if (colony_id == 0) {
+                    continue;
+                }
 
-        aworld->spread_frontier_indices[frontier_count++] = idx;
+                if (!atomic_cell_has_empty_neighbor(current, width, height, idx)) {
+                    continue;
+                }
+
+                aworld->spread_frontier_indices[frontier_count++] = idx;
+            }
+        } else {
+            for (int x = 0; x < width; x++) {
+                int idx = row_base + x;
+                uint32_t colony_id = atomic_load_explicit(&current[idx].colony_id, memory_order_relaxed);
+                if (colony_id == 0) {
+                    continue;
+                }
+
+                if (!atomic_cell_has_empty_neighbor(current, width, height, idx)) {
+                    continue;
+                }
+
+                aworld->spread_frontier_indices[frontier_count++] = idx;
+            }
+        }
     }
 
     aworld->spread_frontier_count = frontier_count;
+}
+
+static void atomic_prepare_next_buffer(AtomicWorld* aworld) {
+    if (!aworld) {
+        return;
+    }
+
+    DoubleBufferedGrid* grid = &aworld->grid;
+    AtomicCell* current = grid_current(grid);
+    AtomicCell* next = grid_next(grid);
+    int cell_count = grid->width * grid->height;
+
+    for (int i = 0; i < cell_count; i++) {
+        uint32_t colony_id = atomic_load_explicit(&current[i].colony_id, memory_order_relaxed);
+        uint8_t age = atomic_load_explicit(&current[i].age, memory_order_relaxed);
+
+        atomic_store_explicit(&next[i].colony_id, colony_id, memory_order_relaxed);
+        atomic_store_explicit(&next[i].age, age, memory_order_relaxed);
+        next[i].is_border = current[i].is_border;
+    }
 }
 
 static inline void atomic_record_spread_delta(
@@ -438,8 +485,9 @@ static void atomic_spread_from_cell(
     DoubleBufferedGrid* grid = &aworld->grid;
     int width = grid->width;
     int height = grid->height;
-    AtomicCell* cells = grid_current(grid);
-    AtomicCell* cell = &cells[y * width + x];
+    AtomicCell* current = grid_current(grid);
+    AtomicCell* next = grid_next(grid);
+    AtomicCell* cell = &current[y * width + x];
 
     uint32_t colony_id = atomic_load_explicit(&cell->colony_id, memory_order_relaxed);
     if (colony_id == 0 || colony_id >= aworld->max_colonies) {
@@ -481,7 +529,7 @@ static void atomic_spread_from_cell(
     int source_enemy = 0;
     int source_empty = 0;
     int source_total = 0;
-    atomic_count_neighbor_mix(cells, width, height, x, y, colony_id,
+    atomic_count_neighbor_mix(current, width, height, x, y, colony_id,
                               &source_friendly, &source_enemy, &source_empty, &source_total);
 
     for (int d = 0; d < 8; d++) {
@@ -494,7 +542,7 @@ static void atomic_spread_from_cell(
             continue;
         }
 
-        AtomicCell* neighbor = &cells[ny * width + nx];
+        AtomicCell* neighbor = &current[ny * width + nx];
 
         uint32_t neighbor_colony = atomic_load_explicit(&neighbor->colony_id, memory_order_relaxed);
         float spread_prob = colony->genome.spread_rate * colony->genome.metabolism * colony->genome.spread_weights[d];
@@ -525,8 +573,10 @@ static void atomic_spread_from_cell(
 
         if (neighbor_colony == 0) {
             if (rand_float_local(rng_state) < spread_prob) {
-                if (atomic_cell_try_claim(neighbor, 0, colony_id)) {
-                    atomic_store_explicit(&neighbor->age, 0, memory_order_relaxed);
+                AtomicCell* next_neighbor = &next[ny * width + nx];
+                if (atomic_cell_try_claim(next_neighbor, 0, colony_id)) {
+                    atomic_store_explicit(&next_neighbor->age, 0, memory_order_relaxed);
+                    next_neighbor->is_border = 0;
                     atomic_record_spread_delta(aworld, slot_deltas, slot_touched, touched_count, colony_id);
                 }
             }
@@ -580,20 +630,42 @@ static void* atomic_phase_worker(void* arg) {
             uint32_t* slot_touched = &aworld->spread_touched_ids[slot_base];
             uint32_t touched_count = 0;
             uint32_t rng_state = aworld->thread_seeds[worker_id];
+            bool reverse_frontier = (((aworld->world ? (uint32_t)aworld->world->tick : 0u) + (uint32_t)worker_id) & 1u) != 0u;
 
-            for (int i = start; i < end; i++) {
-                int idx = aworld->spread_frontier_indices[i];
-                int x = idx % aworld->grid.width;
-                int y = idx / aworld->grid.width;
-                atomic_spread_from_cell(
-                    aworld,
-                    x,
-                    y,
-                    slot_deltas,
-                    slot_touched,
-                    &touched_count,
-                    &rng_state
-                );
+            if (reverse_frontier) {
+                int last = end - 1;
+                if (stride > 1 && last >= start) {
+                    last -= (last - start) % stride;
+                }
+                for (int i = last; i >= start; i -= stride) {
+                    int idx = aworld->spread_frontier_indices[i];
+                    int x = idx % aworld->grid.width;
+                    int y = idx / aworld->grid.width;
+                    atomic_spread_from_cell(
+                        aworld,
+                        x,
+                        y,
+                        slot_deltas,
+                        slot_touched,
+                        &touched_count,
+                        &rng_state
+                    );
+                }
+            } else {
+                for (int i = start; i < end; i += stride) {
+                    int idx = aworld->spread_frontier_indices[i];
+                    int x = idx % aworld->grid.width;
+                    int y = idx / aworld->grid.width;
+                    atomic_spread_from_cell(
+                        aworld,
+                        x,
+                        y,
+                        slot_deltas,
+                        slot_touched,
+                        &touched_count,
+                        &rng_state
+                    );
+                }
             }
 
             aworld->spread_touched_counts[worker_id] = touched_count;
@@ -1211,19 +1283,40 @@ void atomic_spread_region(AtomicRegionWork* work) {
     
     // Thread-local RNG
     uint32_t rng_state = aworld->thread_seeds[work->thread_id];
-    
-    // Process each cell in region
-    for (int y = work->start_y; y < work->end_y; y++) {
-        for (int x = work->start_x; x < work->end_x; x++) {
-            atomic_spread_from_cell(
-                aworld,
-                x,
-                y,
-                region_deltas,
-                region_touched,
-                &touched_count,
-                &rng_state
-            );
+
+    uint32_t tick = aworld->world ? (uint32_t)aworld->world->tick : 0u;
+    bool reverse_y = ((tick + (uint32_t)work->region_index) & 1u) != 0u;
+    bool reverse_x_base = (((tick >> 1) + (uint32_t)work->region_index) & 1u) != 0u;
+    int row_count = work->end_y - work->start_y;
+
+    for (int row = 0; row < row_count; row++) {
+        int y = reverse_y ? (work->end_y - 1 - row) : (work->start_y + row);
+        bool reverse_x = reverse_x_base ^ ((row & 1) != 0);
+
+        if (reverse_x) {
+            for (int x = work->end_x - 1; x >= work->start_x; x--) {
+                atomic_spread_from_cell(
+                    aworld,
+                    x,
+                    y,
+                    region_deltas,
+                    region_touched,
+                    &touched_count,
+                    &rng_state
+                );
+            }
+        } else {
+            for (int x = work->start_x; x < work->end_x; x++) {
+                atomic_spread_from_cell(
+                    aworld,
+                    x,
+                    y,
+                    region_deltas,
+                    region_touched,
+                    &touched_count,
+                    &rng_state
+                );
+            }
         }
     }
 
@@ -1296,7 +1389,7 @@ void atomic_spread(AtomicWorld* aworld) {
 
         if (use_frontier) {
             aworld->spread_slots_used = aworld->phase_worker_count;
-            atomic_phase_assign_ranges(aworld, aworld->spread_frontier_count);
+            atomic_phase_assign_interleaved(aworld, aworld->spread_frontier_count);
             atomic_run_phase(aworld, ATOMIC_PHASE_SPREAD_FRONTIER);
         } else {
             aworld->spread_slots_used = aworld->region_count;
@@ -1312,9 +1405,12 @@ void atomic_spread(AtomicWorld* aworld) {
 void atomic_spread_step(AtomicWorld* aworld) {
     if (!aworld) return;
 
+    atomic_prepare_next_buffer(aworld);
     atomic_spread(aworld);
     atomic_barrier(aworld);
     atomic_spread_apply_deltas(aworld);
+    grid_swap(&aworld->grid);
+    atomic_rebuild_spread_frontier(aworld);
 }
 
 int64_t atomic_spread_apply_deltas(AtomicWorld* aworld) {

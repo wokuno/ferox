@@ -201,6 +201,11 @@ World* world_create(int width, int height) {
         goto fail;
     }
 
+    world->scratch_alarm_signals = (float*)calloc(grid_size, sizeof(float));
+    if (!world->scratch_alarm_signals) {
+        goto fail;
+    }
+
     world->scratch_nutrients = (float*)calloc(grid_size, sizeof(float));
     if (!world->scratch_nutrients) {
         goto fail;
@@ -218,6 +223,11 @@ World* world_create(int width, int height) {
     
     world->scratch_sources = (uint32_t*)calloc(grid_size, sizeof(uint32_t));
     if (!world->scratch_sources) {
+        goto fail;
+    }
+
+    world->scratch_alarm_sources = (uint32_t*)calloc(grid_size, sizeof(uint32_t));
+    if (!world->scratch_alarm_sources) {
         goto fail;
     }
     
@@ -249,10 +259,12 @@ fail:
     free(world->colony_index_map);
     free(world->colony_by_id);
     free(world->colonies);
+    free(world->scratch_alarm_sources);
     free(world->scratch_sources);
     free(world->scratch_eps);
     free(world->scratch_toxins);
     free(world->scratch_nutrients);
+    free(world->scratch_alarm_signals);
     free(world->scratch_signals);
     free(world->alarm_source);
     free(world->signal_source);
@@ -323,10 +335,12 @@ void world_destroy(World* world) {
     if (world->signal_source) free(world->signal_source);
     if (world->alarm_source) free(world->alarm_source);
     if (world->scratch_signals) free(world->scratch_signals);
+    if (world->scratch_alarm_signals) free(world->scratch_alarm_signals);
     if (world->scratch_nutrients) free(world->scratch_nutrients);
     if (world->scratch_toxins) free(world->scratch_toxins);
     if (world->scratch_eps) free(world->scratch_eps);
     if (world->scratch_sources) free(world->scratch_sources);
+    if (world->scratch_alarm_sources) free(world->scratch_alarm_sources);
     free(world);
 }
 

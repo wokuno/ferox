@@ -30,6 +30,10 @@ GuiClient* gui_client_create(void) {
     client->running = false;
     client->selected_colony = 0;
     client->selected_index = 0;
+    client->tps = 0.0f;
+    client->last_tick_sample = 0;
+    client->last_tick_sample_time = 0;
+    client->last_world_update_ms = 0;
     
     // Initialize local world
     proto_world_init(&client->local_world);
@@ -134,6 +138,8 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
 
 void gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len) {
     if (!client || !data) return;
+
+    uint32_t now = SDL_GetTicks();
     
     // Free old grid before deserializing new one
     proto_world_free(&client->local_world);
@@ -146,6 +152,20 @@ void gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len)
     
     if (protocol_deserialize_world_state(data, len, &client->local_world) < 0) {
         return;
+    }
+
+    client->last_world_update_ms = now;
+    if (client->last_tick_sample_time == 0) {
+        client->last_tick_sample = client->local_world.tick;
+        client->last_tick_sample_time = now;
+    } else if (now > client->last_tick_sample_time) {
+        uint32_t elapsed_ms = now - client->last_tick_sample_time;
+        uint32_t tick_delta = client->local_world.tick - client->last_tick_sample;
+        if (elapsed_ms >= 250) {
+            client->tps = (float)tick_delta * 1000.0f / (float)elapsed_ms;
+            client->last_tick_sample = client->local_world.tick;
+            client->last_tick_sample_time = now;
+        }
     }
 }
 
@@ -452,8 +472,14 @@ static void gui_client_receive_updates(GuiClient* client) {
     while (net_has_data(client->socket) && messages_processed < max_messages_per_frame) {
         MessageHeader header;
         uint8_t* payload = NULL;
-        
+
+        // Use blocking reads for a full message once data is available.
+        // The protocol reader does not buffer partial frames, so leaving the
+        // socket non-blocking can turn fragmented messages into false errors.
+        net_set_nonblocking(client->socket, false);
         int result = protocol_recv_message(client->socket->fd, &header, &payload);
+        net_set_nonblocking(client->socket, true);
+
         if (result == 0) {
             gui_client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
             free(payload);
@@ -462,9 +488,6 @@ static void gui_client_receive_updates(GuiClient* client) {
             // Connection error
             fprintf(stderr, "Network receive error\n");
             client->connected = false;
-            break;
-        } else {
-            // Partial read, try again next frame
             break;
         }
     }
@@ -494,7 +517,10 @@ static void gui_client_render(GuiClient* client) {
                                   alive_count,
                                   client->local_world.paused,
                                   client->local_world.speed_multiplier,
-                                  client->fps);
+                                  client->fps,
+                                  client->tps,
+                                  client->last_world_update_ms == 0 ? 0 : (SDL_GetTicks() - client->last_world_update_ms),
+                                  client->renderer->zoom);
     
     // Draw controls help hint
     gui_renderer_draw_controls_help(client->renderer);
