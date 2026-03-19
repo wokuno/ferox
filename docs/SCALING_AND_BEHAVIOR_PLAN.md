@@ -44,7 +44,7 @@ worlds, richer colony behavior, and the follow-on work now tracked in GitHub.
 - `#103` Split atomic serial maintenance cadence by freshness requirements
 - `#107` Remove redundant chunk build/copy work from the large-world broadcast path
 - `#109` Execute configured benchmark scenarios and enforce pass bands in CI
-- `#110` Reconcile the protocol spec with the live wire format and version future changes
+- `#110` Reconcile the protocol spec with the live wire format and version future changes (`#153`)
 - `#143` Rebaseline performance and transport costs for the new default world profile
 
 ## Validation Focus
