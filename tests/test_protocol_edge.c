@@ -38,6 +38,7 @@ static int tests_failed = 0;
 #define ASSERT_GE(a, b) ASSERT((a) >= (b), #a " >= " #b)
 #define ASSERT_LE(a, b) ASSERT((a) <= (b), #a " <= " #b)
 #define ASSERT_NOT_NULL(ptr) ASSERT((ptr) != NULL, #ptr " is not NULL")
+#define ASSERT_BYTES_EQ(actual, expected, len, msg) ASSERT(memcmp((actual), (expected), (len)) == 0, msg)
 
 // ============================================================================
 // Empty World Tests
@@ -171,6 +172,27 @@ TEST(header_serialization_roundtrip) {
     ASSERT_EQ(deserialized.sequence, 42);
 }
 
+TEST(header_wire_bytes_match_spec_example) {
+    MessageHeader header = {
+        .magic = PROTOCOL_MAGIC,
+        .type = MSG_COMMAND,
+        .payload_len = 8,
+        .sequence = 3,
+    };
+
+    uint8_t buffer[MESSAGE_HEADER_SIZE];
+    uint8_t expected[MESSAGE_HEADER_SIZE] = {
+        0x00, 0x00, 0xBA, 0xCF,
+        0x00, 0x05,
+        0x00, 0x00, 0x00, 0x08,
+        0x00, 0x00, 0x00, 0x03,
+    };
+
+    int result = protocol_serialize_header(&header, buffer);
+    ASSERT_EQ(result, MESSAGE_HEADER_SIZE);
+    ASSERT_BYTES_EQ(buffer, expected, sizeof(expected), "Header bytes should match documented wire example");
+}
+
 TEST(malformed_header_wrong_magic) {
     uint8_t buffer[MESSAGE_HEADER_SIZE];
     
@@ -299,6 +321,54 @@ TEST(world_delta_grid_chunk_roundtrip) {
     free(buffer);
     proto_world_delta_grid_chunk_free(&decoded);
     proto_world_delta_grid_chunk_free(&chunk);
+}
+
+TEST(world_delta_grid_chunk_wire_format) {
+    uint16_t cells[] = {1u, 256u, 513u};
+    ProtoWorldDeltaGridChunk chunk;
+    proto_world_delta_grid_chunk_init(&chunk);
+    chunk.tick = 0x01020304u;
+    chunk.width = 32u;
+    chunk.height = 16u;
+    chunk.total_cells = 512u;
+    chunk.start_index = 10u;
+    chunk.cell_count = 3u;
+    chunk.final_chunk = true;
+    chunk.cells = cells;
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_delta_grid_chunk(&chunk, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(buffer);
+    ASSERT_EQ(len, (size_t)32);
+
+    uint8_t expected[] = {
+        0x01,
+        0x01, 0x02, 0x03, 0x04,
+        0x00, 0x00, 0x00, 0x20,
+        0x00, 0x00, 0x00, 0x10,
+        0x00, 0x00, 0x02, 0x00,
+        0x00, 0x00, 0x00, 0x0A,
+        0x00, 0x00, 0x00, 0x03,
+        0x01,
+        0x00, 0x01,
+        0x01, 0x00,
+        0x02, 0x01,
+    };
+    ASSERT_BYTES_EQ(buffer, expected, sizeof(expected), "World-delta chunk bytes should match big-endian wire format");
+
+    ProtoWorldDeltaGridChunk decoded;
+    proto_world_delta_grid_chunk_init(&decoded);
+    result = protocol_deserialize_world_delta_grid_chunk(buffer, len, &decoded);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(decoded.final_chunk, true);
+    ASSERT_EQ(decoded.cells[0], 1u);
+    ASSERT_EQ(decoded.cells[1], 256u);
+    ASSERT_EQ(decoded.cells[2], 513u);
+    proto_world_delta_grid_chunk_free(&decoded);
+
+    free(buffer);
 }
 
 TEST(world_delta_grid_chunk_rejects_invalid_bounds) {
@@ -459,6 +529,99 @@ TEST(spawn_colony_command) {
     // Float comparison with tolerance
     ASSERT(fabsf(deserialized.x - 123.456f) < 0.001f, "X should match");
     ASSERT(fabsf(deserialized.y - 789.012f) < 0.001f, "Y should match");
+}
+
+TEST(command_wire_examples_match_spec) {
+    uint8_t pause_buffer[4];
+    uint8_t expected_pause[] = {0x00, 0x00, 0x00, 0x00};
+    int size = protocol_serialize_command(CMD_PAUSE, NULL, pause_buffer);
+    ASSERT_EQ(size, 4);
+    ASSERT_BYTES_EQ(pause_buffer, expected_pause, sizeof(expected_pause), "CMD_PAUSE bytes should match spec example");
+
+    CommandSelectColony select = {.colony_id = 42};
+    uint8_t select_buffer[8];
+    uint8_t expected_select[] = {
+        0x00, 0x00, 0x00, 0x05,
+        0x00, 0x00, 0x00, 0x2A,
+    };
+    size = protocol_serialize_command(CMD_SELECT_COLONY, &select, select_buffer);
+    ASSERT_EQ(size, 8);
+    ASSERT_BYTES_EQ(select_buffer, expected_select, sizeof(expected_select), "CMD_SELECT_COLONY bytes should match spec example");
+}
+
+TEST(world_state_without_grid_uses_fixed_prefix) {
+    ProtoWorld world;
+    proto_world_init(&world);
+    world.width = 7;
+    world.height = 9;
+    world.tick = 123;
+    world.colony_count = 0;
+    world.paused = true;
+    world.speed_multiplier = 1.5f;
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_state(&world, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(buffer);
+    ASSERT_EQ(len, (size_t)26);
+
+    uint8_t expected_prefix[] = {
+        0x00, 0x00, 0x00, 0x07,
+        0x00, 0x00, 0x00, 0x09,
+        0x00, 0x00, 0x00, 0x7B,
+        0x00, 0x00, 0x00, 0x00,
+        0x01,
+        0x3F, 0xC0, 0x00, 0x00,
+        0x00,
+        0x00, 0x00, 0x00, 0x00,
+    };
+    ASSERT_BYTES_EQ(buffer, expected_prefix, sizeof(expected_prefix), "World-state prefix should match current wire format");
+
+    ProtoWorld decoded;
+    proto_world_init(&decoded);
+    result = protocol_deserialize_world_state(buffer, len, &decoded);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(decoded.width, world.width);
+    ASSERT_EQ(decoded.height, world.height);
+    ASSERT_EQ(decoded.tick, world.tick);
+    ASSERT_EQ(decoded.paused, world.paused);
+    ASSERT(fabsf(decoded.speed_multiplier - world.speed_multiplier) < 0.0001f,
+           "speed multiplier should survive roundtrip");
+    ASSERT_EQ(decoded.has_grid, false);
+    proto_world_free(&decoded);
+
+    free(buffer);
+    proto_world_free(&world);
+}
+
+TEST(grid_rle_raw_mode_roundtrip) {
+    uint16_t grid[] = {1u, 2u, 3u, 4u, 5u, 6u};
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_grid_rle(grid, 6u, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(buffer);
+    ASSERT_EQ(buffer[4], 1);
+
+    uint16_t decoded[6] = {0};
+    result = protocol_deserialize_grid_rle(buffer, len, decoded, 6u);
+    ASSERT_EQ(result, 0);
+    for (size_t i = 0; i < 6; i++) {
+        ASSERT_EQ(decoded[i], grid[i]);
+    }
+
+    free(buffer);
+}
+
+TEST(grid_rle_rejects_unknown_mode) {
+    uint8_t buffer[] = {
+        0x00, 0x00, 0x00, 0x04,
+        0x02,
+        0x00, 0x01, 0x00, 0x02,
+    };
+    uint16_t decoded[4] = {0};
+    ASSERT_EQ(protocol_deserialize_grid_rle(buffer, sizeof(buffer), decoded, 4u), -1);
 }
 
 // ============================================================================
@@ -659,6 +822,7 @@ int run_protocol_edge_tests(void) {
     
     printf("\nHeader Tests:\n");
     RUN_TEST(header_serialization_roundtrip);
+    RUN_TEST(header_wire_bytes_match_spec_example);
     RUN_TEST(malformed_header_wrong_magic);
     RUN_TEST(header_all_message_types);
     
@@ -666,7 +830,11 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(zero_length_payload);
     RUN_TEST(partial_message_handling);
     RUN_TEST(world_delta_grid_chunk_roundtrip);
+    RUN_TEST(world_delta_grid_chunk_wire_format);
     RUN_TEST(world_delta_grid_chunk_rejects_invalid_bounds);
+    RUN_TEST(world_state_without_grid_uses_fixed_prefix);
+    RUN_TEST(grid_rle_raw_mode_roundtrip);
+    RUN_TEST(grid_rle_rejects_unknown_mode);
     
     printf("\nColony Name Tests:\n");
     RUN_TEST(maximum_length_colony_name);
@@ -678,6 +846,7 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(all_command_types);
     RUN_TEST(select_colony_command);
     RUN_TEST(spawn_colony_command);
+    RUN_TEST(command_wire_examples_match_spec);
     
     printf("\nNull Input Tests:\n");
     RUN_TEST(null_inputs_handled);
