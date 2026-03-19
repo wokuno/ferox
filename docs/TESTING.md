@@ -19,7 +19,7 @@ Ferox currently defines **25 CTest targets** (see `ctest -N`):
   - `ThreadpoolProfileScanTests`
   - `PerfUnitWorldTests`
   - `PerfUnitProtocolTests`
-  - `PerfComponentAtomicTests`
+  - `PerformanceComponentTests`
 - Aggregated runner: `AllTests`
 
 Sources are in `tests/` and wired in `tests/CMakeLists.txt`.
@@ -37,7 +37,7 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build --output-on-failure -R "Phase|SimulationLogicTests|ProtocolEdgeTests"
 
 # Run perf-focused + hardware slice
-ctest --test-dir build --output-on-failure -R "HardwareProfileTests|ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerfComponentAtomicTests"
+ctest --test-dir build --output-on-failure -R "HardwareProfileTests|ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerformanceComponentTests"
 ```
 
 You can also use helper categories in `scripts/test.sh`, for example:
@@ -57,7 +57,7 @@ Performance work is validated at three levels:
   - `test_perf_unit_world`
   - `test_perf_unit_protocol`
 - `component`
-  - `test_perf_component_atomic`
+  - `test_perf_components`
   - `test_threadpool_profile_scan`
 - `system`
   - `test_threadpool_microbench`
@@ -66,11 +66,23 @@ Performance work is validated at three levels:
 For jitter-resistant analysis, run multi-iteration medians:
 
 ```bash
-./scripts/perf_multi_iter.py -n 7 --profile balanced
+python3 scripts/perf_scenarios.py --build-types Release --scales 2 --repeats 3
 ```
 
 See `docs/PERF_RUNBOOK.md` and `docs/PERF_TARGETS.md` for required commands and
 acceptance thresholds.
+
+For the default `400x200` / `50` colony profile rebaseline, run this validation
+ladder in order:
+
+```bash
+./scripts/build.sh release
+python3 scripts/perf_scenarios.py --build-types Release --scales 2 --repeats 3
+ctest --test-dir build --output-on-failure -R "PerformanceComponentTests|PerformanceProfilingTests"
+```
+
+This sequence keeps the broad repeated-run numbers and the focused hotspot
+diagnostics aligned on the same branch and build settings.
 
 ## Environment Knobs Used in Tests
 

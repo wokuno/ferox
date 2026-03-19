@@ -79,9 +79,9 @@ case "$CATEGORY" in
         echo "⚡ Running performance evaluation tests..."
         echo "   Tip: set FEROX_PERF_SCALE=2 (or higher) for heavier timing loops"
         echo ""
-        echo "🧪 Running SIMD + performance eval tests (verbose timing output)..."
+        echo "🧪 Running perf eval + component + profiling tests (verbose timing output)..."
         echo ""
-        ctest --output-on-failure -R "SimdEvalTests|PerformanceEvalTests" -V
+        ctest --output-on-failure -R "SimdEvalTests|PerformanceEvalTests|PerformanceComponentTests|PerformanceProfilingTests" -V
         ;;
 
     science|bench|benchmarks)

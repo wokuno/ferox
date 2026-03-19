@@ -22,13 +22,20 @@ without chasing noisy one-off results.
 - Unit-level protocol diagnostics:
   - `./build/tests/test_perf_unit_protocol`
 - Component-level atomic diagnostics:
-  - `./build/tests/test_perf_component_atomic`
+  - `./build/tests/test_perf_components`
 - Hardware profile inspection:
   - `./build/src/server/ferox_server --print-hardware`
 - Focused ctest suite:
-  - `ctest --test-dir build --output-on-failure -R "ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerfComponentAtomicTests|ThreadpoolStressTests|SimulationLogicTests"`
+  - `ctest --test-dir build --output-on-failure -R "ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerformanceComponentTests|ThreadpoolStressTests|SimulationLogicTests"`
 - Jitter-reduced summary (multi-iteration):
-  - `./scripts/perf_multi_iter.py -n 7 --profile balanced`
+  - `python3 scripts/perf_scenarios.py --build-types Release --scales 2 --repeats 3`
+
+Default-profile rebaseline sequence (`400x200`, `50` colonies):
+
+- `./scripts/build.sh release`
+- `python3 scripts/perf_scenarios.py --build-types Release --scales 2 --repeats 3`
+- `ctest --test-dir build --output-on-failure -R "PerformanceComponentTests|PerformanceProfilingTests"`
+- record the resulting `artifacts/perf/<timestamp>/summary.json`, `run_extras.json`, and `report.md`
 
 ## Issue #120 Validation Notes
 
@@ -52,7 +59,7 @@ without chasing noisy one-off results.
   - `test_perf_unit_world` (lookup and world churn micro-cost)
   - `test_perf_unit_protocol` (RLE grid codec + chunked grid transport throughput/ratio)
 - `component`:
-  - `test_perf_component_atomic` (atomic tick pipeline modes)
+  - `test_perf_components` (default-profile hotspot kernels)
   - `test_threadpool_profile_scan` (scheduler profile behavior)
 - `system`:
   - `test_threadpool_microbench` (cross-scenario scheduler matrix)
@@ -145,6 +152,11 @@ Profile presets are tuned as follows:
       - `[atomic_spread_step]`
       - `[atomic_tick]`
 4. Only claim win when multiple runs point in same direction.
+
+<<<<<<< HEAD
+For issue `#143`, treat the default-profile rebaseline as complete only when the
+artifact set captures both time-based metrics and transport-size metrics from the
+same repeated-run pass.
 
 ## Atomic Order Change Guardrails
 
