@@ -39,6 +39,10 @@ hardware-aware runtime tuning.
   - `docs/PERF_RUNBOOK.md`
   - `docs/PERF_TARGETS.md`
   - `docs/PERFORMANCE_BACKLOG.md`
+- Recent merged follow-through:
+  - `#151` architecture-specific atomic cost lane
+  - `#152` hot-struct cacheline alignment/padding guardrails
+  - `#153` protocol spec/conformance sync with the live wire format
 
 ## Active Workstreams
 
@@ -83,3 +87,4 @@ Current thresholds and next target values are maintained in
 - Close tracked rollout issues `#89`, `#92`, and `#87`
 - Rebaseline perf targets and history for the larger default workload
 - Remove transport and broadcast scaling blockers tracked in `#91` and `#88`
+- Advance the next open P0/P1 backlog issues after `#151`, `#152`, and `#153`
