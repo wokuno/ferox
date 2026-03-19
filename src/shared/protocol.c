@@ -418,7 +418,7 @@ int protocol_serialize_world_state(const ProtoWorld* world, uint8_t** buffer, si
 }
 
 int protocol_deserialize_world_state(const uint8_t* buffer, size_t len, ProtoWorld* world) {
-    if (!buffer || !world || len < 26) return -1;  // Minimum header size now 26 bytes
+    if (!buffer || !world || len < 26) return -1;  // Minimum fixed world-state prefix size
     
     int offset = 0;
     

@@ -6,7 +6,7 @@
 #include <stdbool.h>
 
 #define PROTOCOL_MAGIC 0xBACF
-#define PROTOCOL_VERSION 1
+#define PROTOCOL_VERSION 1  // Current documented wire generation; not serialized in headers yet.
 #define MAX_COLONY_NAME 32
 #define MAX_COLONIES 256
 #define MAX_PAYLOAD_SIZE (1024 * 1024)  // 1MB max payload
@@ -78,7 +78,7 @@ typedef enum CommandType {
     CMD_SPAWN_COLONY    // Manually spawn a colony at position
 } CommandType;
 
-// Message header (12 bytes)
+// Message header (14 bytes on the wire)
 typedef struct MessageHeader {
     uint32_t magic;      // 0xBACF (bacteria ferox)
     uint16_t type;       // MessageType

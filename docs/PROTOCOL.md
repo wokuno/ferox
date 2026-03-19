@@ -1,208 +1,173 @@
 # Ferox Network Protocol
 
-This document specifies the binary network protocol used for communication between Ferox server and clients.
+This document describes the current live Ferox wire format as implemented in
+`src/shared/protocol.h` and `src/shared/protocol.c`.
 
 ## Overview
 
-The Ferox protocol is a simple binary protocol over TCP designed for efficient real-time state synchronization. All multi-byte values are transmitted in **network byte order** (big-endian).
+- Transport: TCP
+- Byte order: network byte order (big-endian) for integers and float bit-patterns
+- Current documented wire generation: `PROTOCOL_VERSION == 1`
+- Compatibility status: the version constant is not serialized on the wire yet;
+  peers are expected to speak the same protocol generation
 
 ## Protocol Constants
 
 ```c
-#define PROTOCOL_MAGIC    0xBACF     // "Bacteria Ferox" identifier
-#define PROTOCOL_VERSION  1          // Current protocol version
-#define MAX_COLONY_NAME   32         // Maximum colony name length
-#define MAX_COLONIES      256        // Maximum colonies per message
-#define MAX_PAYLOAD_SIZE  (1024*1024) // 1MB maximum payload
+#define PROTOCOL_MAGIC 0xBACF
+#define PROTOCOL_VERSION 1
+#define MAX_COLONY_NAME 32
+#define MAX_COLONIES 256
+#define MAX_PAYLOAD_SIZE (1024 * 1024)
+#define MAX_INLINE_GRID_SIZE (800 * 400)
+#define MAX_GRID_CHUNK_CELLS 65536u
 ```
 
-## Message Format
+## Versioning Status
 
-Every message consists of a fixed-size header followed by a variable-size payload.
+The current transport has a documented wire generation (`PROTOCOL_VERSION`) but
+does not serialize that value in the message header or connect handshake. In
+practice, that means:
 
-### Message Header (14 bytes)
+- current clients and servers must be upgraded together
+- the protocol spec must track the live implementation exactly
+- any future incompatible wire change should add explicit negotiation or a
+  serialized version field before rollout rather than silently reinterpreting
+  existing fields
 
-```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         Magic (0xBACF)                        |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|          Type (16-bit)        |        Payload Length         |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                     Payload Length (cont'd)                   |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                        Sequence Number                        |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|    (padding)  |
-+-+-+-+-+-+-+-+-+
-```
+This PR keeps the live wire format intact and makes the current expectations
+explicit instead of introducing a broad protocol redesign.
 
-| Field | Offset | Size | Description |
-|-------|--------|------|-------------|
-| `magic` | 0 | 4 bytes | Protocol identifier (0x0000BACF) |
-| `type` | 4 | 2 bytes | Message type enum |
-| `payload_len` | 6 | 4 bytes | Payload size in bytes |
-| `sequence` | 10 | 4 bytes | Message sequence number |
+## Message Header
 
-**Total header size: 14 bytes**
+Every message starts with a 14-byte header.
 
-### C Structure
+| Field | Offset | Size | Type |
+|-------|--------|------|------|
+| `magic` | 0 | 4 | `uint32_t` |
+| `type` | 4 | 2 | `uint16_t` |
+| `payload_len` | 6 | 4 | `uint32_t` |
+| `sequence` | 10 | 4 | `uint32_t` |
 
 ```c
 typedef struct MessageHeader {
-    uint32_t magic;      // 0xBACF
-    uint16_t type;       // MessageType enum
+    uint32_t magic;
+    uint16_t type;
     uint32_t payload_len;
-    uint32_t sequence;   // For ordering/debugging
+    uint32_t sequence;
 } MessageHeader;
+
+#define MESSAGE_HEADER_SIZE 14
+```
+
+Example header bytes for `MSG_COMMAND` with an 8-byte payload and sequence 3:
+
+```text
+00 00 BA CF 00 05 00 00 00 08 00 00 00 03
 ```
 
 ## Message Types
 
 ```c
 typedef enum MessageType {
-    MSG_CONNECT     = 0,  // Client -> Server: connection request
-    MSG_DISCONNECT  = 1,  // Client -> Server: graceful disconnect
-    MSG_WORLD_STATE = 2,  // Server -> Client: full world state
-    MSG_WORLD_DELTA = 3,  // Server -> Client: incremental update
-    MSG_COLONY_INFO = 4,  // Server -> Client: detailed colony info
-    MSG_COMMAND     = 5,  // Client -> Server: user command
-    MSG_ACK         = 6,  // Bidirectional: acknowledgment
-    MSG_ERROR       = 7   // Server -> Client: error response
+    MSG_CONNECT,
+    MSG_DISCONNECT,
+    MSG_WORLD_STATE,
+    MSG_WORLD_DELTA,
+    MSG_COLONY_INFO,
+    MSG_COMMAND,
+    MSG_ACK,
+    MSG_ERROR
 } MessageType;
 ```
 
-## Message Payloads
+## Payloads
 
-### MSG_CONNECT (Type 0)
+### MSG_CONNECT
 
-Sent by client to initiate connection. Payload is empty.
+- Direction: client -> server
+- Payload: none
+- Current behavior: clients send this immediately after TCP connect; the server
+  accepts the connection and then begins normal world-state broadcasting
 
-**Request:**
-- Direction: Client → Server
-- Payload: None
+### MSG_DISCONNECT
 
-**Response:** Server sends MSG_ACK followed by MSG_WORLD_STATE
+- Direction: client -> server
+- Payload: none
 
----
+### MSG_WORLD_STATE
 
-### MSG_DISCONNECT (Type 1)
+`MSG_WORLD_STATE` carries the fixed world metadata, colony list, and optionally
+an inline compressed grid.
 
-Graceful disconnect notification. Payload is empty.
+Fixed prefix layout (26 bytes):
 
-**Direction:** Client → Server  
-**Payload:** None
+| Field | Size | Type |
+|-------|------|------|
+| `width` | 4 | `uint32_t` |
+| `height` | 4 | `uint32_t` |
+| `tick` | 4 | `uint32_t` |
+| `colony_count` | 4 | `uint32_t` |
+| `paused` | 1 | `bool` as byte |
+| `speed_multiplier` | 4 | `float` |
+| `has_grid` | 1 | `bool` as byte |
+| `grid_len` | 4 | `uint32_t` |
 
-Server removes client from session list.
+After the fixed prefix:
 
----
+1. `colony_count` serialized `ProtoColony` entries
+2. `grid_len` bytes of compressed grid data when `has_grid == 1`
 
-### MSG_WORLD_STATE (Type 2)
-
-Complete world state broadcast. Sent after each simulation tick.
-
-**Direction:** Server → Client
-
-**Payload Structure:**
-
-```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         World Width                           |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         World Height                          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         Current Tick                          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         Colony Count                          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-| Paused |             Speed Multiplier (float)                 |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                   Speed Multiplier (cont'd)                   |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-|                     Colony Data Array                         |
-|                     (colony_count entries)                    |
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-|                     Grid Data (RLE Compressed)                |
-|                     (width * height cells)                    |
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```c
+typedef struct ProtoWorld {
+    uint32_t width;
+    uint32_t height;
+    uint32_t tick;
+    uint32_t colony_count;
+    ProtoColony colonies[MAX_COLONIES];
+    bool paused;
+    float speed_multiplier;
+    uint16_t* grid;
+    uint32_t grid_size;
+    bool has_grid;
+} ProtoWorld;
 ```
 
-| Field | Size | Description |
-|-------|------|-------------|
-| width | 4 bytes | World grid width |
-| height | 4 bytes | World grid height |
-| tick | 4 bytes | Current simulation tick |
-| colony_count | 4 bytes | Number of colonies following |
-| paused | 1 byte | 0 = running, 1 = paused |
-| speed_multiplier | 4 bytes | Speed factor (IEEE 754 float) |
-| colonies | variable | Array of colony structures |
-| grid_data | variable | RLE-compressed grid (see Grid Serialization) |
+Notes:
 
-**Colony Data Structure (per colony):**
+- `tick` is currently 32-bit on the wire
+- `grid` cells are `uint16_t colony_id` values
+- small/medium worlds may inline the grid in `MSG_WORLD_STATE`
+- larger worlds send colony metadata in `MSG_WORLD_STATE` and stream the grid in
+  ordered `MSG_WORLD_DELTA` chunks
 
-```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                          Colony ID                            |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-|                    Name (32 bytes, null-padded)               |
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      X Position (float)                       |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      Y Position (float)                       |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                        Radius (float)                         |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         Population                            |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                       Max Population                          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      Growth Rate (float)                      |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|  Red  | Green | Blue  | Alive |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-| Border Red | Border Green | Border Blue | (padding) |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+Example fixed prefix for a paused `7x9` world at tick `123`, speed `1.5`, no inline grid:
+
+```text
+00 00 00 07 00 00 00 09 00 00 00 7B 00 00 00 00 01 3F C0 00 00 00 00 00 00 00
 ```
 
-| Field | Size | Description |
-|-------|------|-------------|
-| id | 4 bytes | Unique colony identifier |
-| name | 32 bytes | Scientific name (null-terminated) |
-| x | 4 bytes | Center X position (float) |
-| y | 4 bytes | Center Y position (float) |
-| radius | 4 bytes | Approximate radius (float) |
-| population | 4 bytes | Current cell count |
-| max_population | 4 bytes | Historical peak population |
-| growth_rate | 4 bytes | Growth rate (float) |
-| color_r | 1 byte | Body color red component (0-255) |
-| color_g | 1 byte | Body color green component (0-255) |
-| color_b | 1 byte | Body color blue component (0-255) |
-| alive | 1 byte | 0 = inactive/dead, 1 = active |
-| border_r | 1 byte | Border color red component (0-255) |
-| border_g | 1 byte | Border color green component (0-255) |
-| border_b | 1 byte | Border color blue component (0-255) |
-| detection_range | 4 bytes | Social detection range (float) |
-| max_tracked | 1 byte | Max neighbor colonies to track |
-| social_factor | 4 bytes | Attraction/repulsion factor (float) |
-| merge_affinity | 4 bytes | Merge compatibility bonus (float) |
-| padding | 2 bytes | Alignment padding |
+### ProtoColony
 
-**Colony serialized size: 96 bytes**
+The live wire format for each colony is 76 bytes.
 
-> **Note:** The `shape_seed` and `wobble_phase` fields have been removed. Colony shapes are now rendered directly from actual cell positions transmitted via the grid data, providing much more accurate territory visualization.
-
-### C Structure (ProtoColony)
+| Field | Size | Type |
+|-------|------|------|
+| `id` | 4 | `uint32_t` |
+| `name` | 32 | fixed byte array |
+| `x` | 4 | `float` |
+| `y` | 4 | `float` |
+| `radius` | 4 | `float` |
+| `population` | 4 | `uint32_t` |
+| `max_population` | 4 | `uint32_t` |
+| `growth_rate` | 4 | `float` |
+| `color_r` | 1 | `uint8_t` |
+| `color_g` | 1 | `uint8_t` |
+| `color_b` | 1 | `uint8_t` |
+| `alive` | 1 | `bool` as byte |
+| `shape_seed` | 4 | `uint32_t` |
+| `wobble_phase` | 4 | `float` |
+| `shape_evolution` | 4 | `float` |
 
 ```c
 typedef struct ProtoColony {
@@ -211,62 +176,48 @@ typedef struct ProtoColony {
     float x, y;
     float radius;
     uint32_t population;
-    uint32_t max_population;         // Historical max population
+    uint32_t max_population;
     float growth_rate;
-    uint8_t color_r, color_g, color_b;  // Body color
+    uint8_t color_r, color_g, color_b;
     bool alive;
-    uint8_t border_r, border_g, border_b;  // Border color
-    
-    // Social behavior fields
-    float detection_range;           // How far to detect neighbors (0.1-0.5)
-    uint8_t max_tracked;             // Max neighbor colonies to track (1-4)
-    float social_factor;             // -1 to +1: repulsion to attraction
-    float merge_affinity;            // 0-0.3: bonus to merge compatibility
+    uint32_t shape_seed;
+    float wobble_phase;
+    float shape_evolution;
 } ProtoColony;
+
+#define COLONY_SERIALIZED_SIZE 76
 ```
 
-### C Structure (ProtoWorld)
+Important current behavior:
+
+- `name` is copied as 32 raw bytes on the wire
+- deserialization forces `name[31] = '\0'` locally for safety
+- visual fields (`shape_seed`, `wobble_phase`, `shape_evolution`) are still part
+  of the live wire format today
+
+### MSG_WORLD_DELTA
+
+`MSG_WORLD_DELTA` is currently used for chunked grid transport only.
+
+Payload layout:
+
+| Field | Size | Type |
+|-------|------|------|
+| `kind` | 1 | `uint8_t` |
+| `tick` | 4 | `uint32_t` |
+| `width` | 4 | `uint32_t` |
+| `height` | 4 | `uint32_t` |
+| `total_cells` | 4 | `uint32_t` |
+| `start_index` | 4 | `uint32_t` |
+| `cell_count` | 4 | `uint32_t` |
+| `final_chunk` | 1 | `bool` as byte |
+| `cells` | `2 * cell_count` | `uint16_t[]` |
 
 ```c
-typedef struct ProtoWorld {
-    int width;
-    int height;
-    uint64_t tick;
-    bool paused;
-    float speed_multiplier;
-    ProtoColony* colonies;
-    size_t colony_count;
-    
-    // Grid data for cell-based rendering
-    uint32_t* grid;                  // colony_id for each cell (width * height)
-    size_t grid_size;                // Size in bytes of uncompressed grid
-} ProtoWorld;
-```
+typedef enum ProtoWorldDeltaKind {
+    PROTO_WORLD_DELTA_GRID_CHUNK = 1,
+} ProtoWorldDeltaKind;
 
-### Memory Management Functions
-
-```c
-// Initialize ProtoWorld with default values
-void proto_world_init(ProtoWorld* world);
-
-// Free allocated memory in ProtoWorld
-void proto_world_free(ProtoWorld* world);
-
-// Allocate grid array for given dimensions
-int proto_world_alloc_grid(ProtoWorld* world, int width, int height);
-```
-
----
-
-### MSG_WORLD_DELTA (Type 3)
-
-Incremental update used for large-world grid transport.
-
-**Direction:** Server → Client  
-
-Current payload kind:
-
-```c
 typedef struct ProtoWorldDeltaGridChunk {
     uint32_t tick;
     uint32_t width;
@@ -279,19 +230,32 @@ typedef struct ProtoWorldDeltaGridChunk {
 } ProtoWorldDeltaGridChunk;
 ```
 
-Each chunk contains raw `uint16_t colony_id` values for a contiguous grid slice.
-Clients assemble chunks in order and mark the grid available once the final
-chunk for that tick arrives.
+Current server behavior:
 
----
+- when the world grid is too large to inline, the server first sends
+  `MSG_WORLD_STATE` with `has_grid = 0` and `grid_len = 0`
+- it then sends ordered `MSG_WORLD_DELTA` chunks for the same tick
+- clients assemble chunks sequentially and mark the grid available after the
+  final chunk arrives
 
-### MSG_COLONY_INFO (Type 4)
+Example chunk payload for three cells `{1, 256, 513}`:
 
-Detailed information about a specific colony, sent when client selects a colony.
+```text
+01
+01 02 03 04
+00 00 00 20
+00 00 00 10
+00 00 02 00
+00 00 00 0A
+00 00 00 03
+01
+00 01 01 00 02 01
+```
 
-**Direction:** Server → Client
+### MSG_COLONY_INFO
 
-Current payload:
+`MSG_COLONY_INFO` sends the serialized `ProtoColonyDetail` payload for the
+currently selected colony.
 
 ```c
 typedef struct ProtoColonyDetail {
@@ -344,426 +308,119 @@ typedef struct ProtoColonyDetail {
     float trait_efficiency;
     float trait_learning;
 } ProtoColonyDetail;
+
+#define COLONY_DETAIL_SERIALIZED_SIZE (COLONY_SERIALIZED_SIZE + 136)
 ```
 
-This detail payload is sent on demand for the currently selected colony and is
-also refreshed during world broadcasts while that colony remains selected.
+`COLONY_DETAIL_SERIALIZED_SIZE` is currently 212 bytes.
 
-The current selected-colony sheet exposes:
+### MSG_COMMAND
 
-- lifecycle state (`Normal`, `Stressed`, `Dormant`)
-- behavior mode and focus direction
-- strongest and second-strongest current sensors and drives with strength values
-- strongest live sensor -> drive link and drive -> action link
-- second-ranked live sensor -> drive link and drive -> action link
-- action outputs for expand, attack, defend, signal, transfer, dormancy, and motility
-- stress, biofilm, signal, and drift
-- age and parent id
-- current action outputs for expand, attack, defend, and signal
-- character summaries for expansion, aggression, resilience, cooperation,
-  efficiency, and learning
-
----
-
-### MSG_COMMAND (Type 5)
-
-User command from client to server.
-
-**Direction:** Client → Server
-
-**Payload Structure:**
-
-```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                        Command Type                           |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-|                     Command Data (variable)                   |
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-```
-
-**Command Types:**
+Commands are serialized as a 4-byte `CommandType` followed by command-specific
+data.
 
 ```c
 typedef enum CommandType {
-    CMD_PAUSE        = 0,  // Pause simulation
-    CMD_RESUME       = 1,  // Resume simulation
-    CMD_SPEED_UP     = 2,  // Increase simulation speed
-    CMD_SLOW_DOWN    = 3,  // Decrease simulation speed
-    CMD_RESET        = 4,  // Reset world to initial state
-    CMD_SELECT_COLONY = 5, // Select colony for detailed view
-    CMD_SPAWN_COLONY = 6   // Manually spawn colony at position
+    CMD_PAUSE,
+    CMD_RESUME,
+    CMD_SPEED_UP,
+    CMD_SLOW_DOWN,
+    CMD_RESET,
+    CMD_SELECT_COLONY,
+    CMD_SPAWN_COLONY
 } CommandType;
 ```
 
-**Command-Specific Data:**
+| Command | Extra payload |
+|---------|---------------|
+| `CMD_PAUSE` | none |
+| `CMD_RESUME` | none |
+| `CMD_SPEED_UP` | none |
+| `CMD_SLOW_DOWN` | none |
+| `CMD_RESET` | none |
+| `CMD_SELECT_COLONY` | `uint32_t colony_id` |
+| `CMD_SPAWN_COLONY` | `float x`, `float y`, `char name[32]` |
 
-| Command | Additional Data |
-|---------|----------------|
-| CMD_PAUSE | None |
-| CMD_RESUME | None |
-| CMD_SPEED_UP | None |
-| CMD_SLOW_DOWN | None |
-| CMD_RESET | None |
-| CMD_SELECT_COLONY | colony_id (4 bytes) |
-| CMD_SPAWN_COLONY | x (4 bytes) + y (4 bytes) + name (32 bytes) |
+Examples:
 
----
+```text
+CMD_PAUSE payload:
+00 00 00 00
 
-### MSG_ACK (Type 6)
-
-Acknowledgment of received message.
-
-**Direction:** Bidirectional  
-**Payload:** None (or optional sequence number of acknowledged message)
-
----
-
-### MSG_ERROR (Type 7)
-
-Error response from server.
-
-**Direction:** Server → Client  
-**Payload:** Error code (4 bytes) + error message (variable, null-terminated)
-
-## Grid Serialization
-
-The world grid is transmitted using Run-Length Encoding (RLE) compression to efficiently send cell ownership data.
-
-### Grid Data Format
-
-The grid contains `colony_id` values for each cell, where 0 = empty and 1+ = owned by that colony.
-
-**Uncompressed format:** `width * height * sizeof(uint32_t)` bytes
-
-**RLE Compressed format:** Series of (count, colony_id) pairs
-
-```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      Uncompressed Size                        |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                      Compressed Size                          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-|                   RLE Data (variable length)                  |
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+CMD_SELECT_COLONY payload for colony 42:
+00 00 00 05 00 00 00 2A
 ```
 
-### RLE Encoding
+### MSG_ACK
 
-Each run is encoded as:
-- **Run length** (2 bytes, uint16_t): Number of consecutive cells with same colony_id (1-65535)
-- **Colony ID** (4 bytes, uint32_t): The colony_id value for this run
+`MSG_ACK` exists in the enum but the current server/client implementation does
+not actively emit or consume an ACK payload.
+
+### MSG_ERROR
+
+`MSG_ERROR` exists in the enum but the current server/client implementation does
+not currently send structured error payloads.
+
+## Grid Codec
+
+The grid codec operates on `uint16_t` colony ids.
+
+Wire layout:
+
+| Field | Size | Type |
+|-------|------|------|
+| `uncompressed_size` | 4 | `uint32_t` |
+| `mode` | 1 | `uint8_t` |
+| `payload` | variable | mode-specific |
+
+Modes:
+
+- `0`: RLE payload as repeated `[count:uint16_t][value:uint16_t]`
+- `1`: raw payload as repeated `[value:uint16_t]`
+
+Current behavior:
+
+- the serializer samples the grid and can choose raw mode early for noisy input
+- it also falls back to raw mode when full RLE output is not smaller
+- deserialization rejects unknown mode values
+
+Function signatures:
 
 ```c
-// RLE run structure
-typedef struct {
-    uint16_t count;     // Number of cells in this run
-    uint32_t colony_id; // Colony ID (0 = empty)
-} RLERun;
-```
-
-### Compression Example
-
-For a 10x10 grid with colonies A (id=1) and B (id=2):
-```
-Original:  0 0 0 1 1 1 1 0 0 2 2 2 0 0 0 0 ...
-Encoded:   (3, 0) (4, 1) (2, 0) (3, 2) (4, 0) ...
-```
-
-Typical compression ratios:
-- Sparse grids (few colonies): 10:1 to 50:1
-- Dense grids (many colonies): 2:1 to 5:1
-
-### Serialization Functions
-
-```c
-// Serialize grid to RLE-compressed buffer
-// Returns compressed size, or -1 on error
-int protocol_serialize_grid_rle(const uint32_t* grid, int width, int height,
+int protocol_serialize_grid_rle(const uint16_t* grid, uint32_t size,
                                 uint8_t** buffer, size_t* len);
-
-// Deserialize RLE-compressed buffer to grid
-// Grid must be pre-allocated to width * height
 int protocol_deserialize_grid_rle(const uint8_t* buffer, size_t len,
-                                  uint32_t* grid, int width, int height);
+                                  uint16_t* grid, uint32_t max_size);
 ```
 
-### Client-Side Rendering
+## Serialization Rules
 
-With the grid data, clients render colonies by:
-1. Drawing each cell as a colored square based on its `colony_id`
-2. Using `body_color` for interior cells
-3. Using `border_color` for cells adjacent to empty/enemy cells
-4. Border detection: cell is border if any neighbor has different `colony_id`
+- integers use big-endian encoding
+- floats are serialized by reinterpreting the 32-bit IEEE-754 bit pattern and
+  then writing that value as big-endian `uint32_t`
+- booleans are serialized as one byte (`0` or `1`)
+- names are fixed-width byte arrays and may contain any byte values; receivers
+  should not assume UTF-8
 
-```c
-// Determine if cell at (x, y) is a border cell
-bool is_border_cell(const uint32_t* grid, int width, int height, int x, int y) {
-    uint32_t my_id = grid[y * width + x];
-    if (my_id == 0) return false;  // Empty cells aren't borders
-    
-    // Check 4 cardinal neighbors
-    int dx[] = {0, 1, 0, -1};
-    int dy[] = {-1, 0, 1, 0};
-    for (int i = 0; i < 4; i++) {
-        int nx = x + dx[i];
-        int ny = y + dy[i];
-        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
-            return true;  // Edge of world = border
-        }
-        if (grid[ny * width + nx] != my_id) {
-            return true;  // Different colony = border
-        }
-    }
-    return false;
-}
-```
+## Runtime Message Flow
 
-This cell-based rendering is more accurate than the previous procedural blob shapes, showing actual territory boundaries as they exist in the simulation.
+Current high-level flow:
 
----
+1. client opens a TCP connection
+2. client sends `MSG_CONNECT`
+3. server adds the client session
+4. each simulation tick, server sends `MSG_WORLD_STATE`
+5. for large worlds, server follows with ordered `MSG_WORLD_DELTA` grid chunks
+6. if a colony is selected, server may also send `MSG_COLONY_INFO`
 
-## Serialization Details
+## Conformance Coverage
 
-### Integer Encoding
+Protocol-focused conformance checks live in:
 
-All integers are serialized in **network byte order** (big-endian):
+- `tests/test_protocol_edge.c`
+- `tests/test_simulation_logic.c`
+- `tests/test_perf_unit_protocol.c`
 
-```c
-// Write uint32_t in network byte order
-static void write_u32(uint8_t* buf, uint32_t val) {
-    uint32_t net = htonl(val);
-    memcpy(buf, &net, 4);
-}
-
-// Read uint32_t from network byte order
-static uint32_t read_u32(const uint8_t* buf) {
-    uint32_t net;
-    memcpy(&net, buf, 4);
-    return ntohl(net);
-}
-```
-
-### Float Encoding
-
-Floats are serialized by treating their bit representation as uint32_t:
-
-```c
-// Write float as network-order uint32_t
-static void write_float(uint8_t* buf, float val) {
-    uint32_t bits;
-    memcpy(&bits, &val, 4);
-    write_u32(buf, bits);
-}
-
-// Read float from network-order uint32_t
-static float read_float(const uint8_t* buf) {
-    uint32_t bits = read_u32(buf);
-    float val;
-    memcpy(&val, &bits, 4);
-    return val;
-}
-```
-
-### String Encoding
-
-Strings are fixed-size, null-padded:
-
-```c
-// Copy string, ensuring null-termination
-memcpy(buffer + offset, colony->name, MAX_COLONY_NAME);
-buffer[offset + MAX_COLONY_NAME - 1] = '\0';  // Safety null
-```
-
-## Connection Handshake
-
-```
-    CLIENT                                SERVER
-       │                                     │
-       │          TCP SYN/ACK               │
-       │◄───────────────────────────────────►│
-       │                                     │
-       │          MSG_CONNECT               │
-       │────────────────────────────────────►│
-       │                                     │
-       │          MSG_ACK                   │
-       │◄────────────────────────────────────│
-       │                                     │
-       │          MSG_WORLD_STATE           │
-       │◄────────────────────────────────────│
-       │                                     │
-       │      (simulation running...)        │
-       │                                     │
-```
-
-## State Synchronization
-
-The server broadcasts world state at a fixed interval (default 100ms, configurable):
-
-1. Simulation thread completes tick
-2. World state is serialized to MSG_WORLD_STATE
-3. Message is broadcast to all connected clients
-4. Clients update their local world copy
-5. Clients render updated state
-
-### Handling Slow Clients
-
-If a client cannot keep up with updates:
-- Messages queue in the TCP buffer
-- Eventually, the send buffer fills
-- Server may drop the client connection
-- Client should handle reconnection
-
-## Command/Response Flow
-
-```
-    CLIENT                                SERVER
-       │                                     │
-       │     MSG_COMMAND (CMD_PAUSE)        │
-       │────────────────────────────────────►│
-       │                                     │ server->paused = true
-       │          MSG_ACK                   │
-       │◄────────────────────────────────────│
-       │                                     │
-       │     MSG_COMMAND (SELECT_COLONY)    │
-       │────────────────────────────────────►│
-       │                                     │
-       │          MSG_COLONY_INFO           │
-       │◄────────────────────────────────────│
-       │                                     │
-```
-
-## Error Handling
-
-### Protocol Errors
-
-| Condition | Behavior |
-|-----------|----------|
-| Invalid magic number | Close connection |
-| Unknown message type | Send MSG_ERROR, continue |
-| Payload too large | Close connection |
-| Malformed payload | Send MSG_ERROR, continue |
-| Payload length mismatch | Close connection |
-
-### Network Errors
-
-| Error | Recovery |
-|-------|----------|
-| Connection reset | Client should reconnect |
-| Read timeout | Send keepalive or disconnect |
-| Write failure | Mark client as disconnected |
-
-### Error Codes
-
-```c
-#define ERR_UNKNOWN_COMMAND   1
-#define ERR_INVALID_COLONY    2
-#define ERR_INVALID_POSITION  3
-#define ERR_SERVER_FULL       4
-#define ERR_PROTOCOL_ERROR    5
-```
-
-## Implementation Functions
-
-### Header Serialization
-
-```c
-int protocol_serialize_header(const MessageHeader* header, uint8_t* buffer);
-int protocol_deserialize_header(const uint8_t* buffer, MessageHeader* header);
-```
-
-### World State
-
-```c
-int protocol_serialize_world_state(const ProtoWorld* world, 
-                                   uint8_t** buffer, size_t* len);
-int protocol_deserialize_world_state(const uint8_t* buffer, 
-                                     size_t len, ProtoWorld* world);
-```
-
-### Commands
-
-```c
-int protocol_serialize_command(CommandType cmd, const void* data, 
-                               uint8_t* buffer);
-int protocol_deserialize_command(const uint8_t* buffer, 
-                                 CommandType* cmd, void* data);
-```
-
-### Message I/O
-
-```c
-int protocol_send_message(int socket, MessageType type, 
-                          const uint8_t* payload, size_t len);
-int protocol_recv_message(int socket, MessageHeader* header, 
-                          uint8_t** payload);
-```
-
-### Grid Compression
-
-```c
-// Compress grid data using RLE
-int protocol_serialize_grid_rle(const uint32_t* grid, int width, int height,
-                                uint8_t** buffer, size_t* len);
-
-// Decompress RLE grid data
-int protocol_deserialize_grid_rle(const uint8_t* buffer, size_t len,
-                                  uint32_t* grid, int width, int height);
-```
-
-### ProtoWorld Management
-
-```c
-// Initialize ProtoWorld structure
-void proto_world_init(ProtoWorld* world);
-
-// Free ProtoWorld allocated memory
-void proto_world_free(ProtoWorld* world);
-
-// Allocate grid array in ProtoWorld
-int proto_world_alloc_grid(ProtoWorld* world, int width, int height);
-```
-
-## Wire Examples
-
-### MSG_CONNECT
-
-```
-Bytes (hex): 00 00 BA CF 00 00 00 00 00 00 00 00 00 01
-             ├─────────┤ ├───┤ ├─────────┤ ├─────────┤
-             magic      type  payload_len sequence=1
-                        (0)   (0 bytes)
-```
-
-### MSG_COMMAND (CMD_PAUSE)
-
-```
-Bytes (hex): 00 00 BA CF 00 05 00 00 00 04 00 00 00 02
-             ├─────────┤ ├───┤ ├─────────┤ ├─────────┤
-             magic      type  payload_len sequence=2
-                        (5)   (4 bytes)
-
-Payload:     00 00 00 00
-             ├─────────┤
-             CMD_PAUSE=0
-```
-
-### MSG_COMMAND (CMD_SELECT_COLONY id=42)
-
-```
-Bytes (hex): 00 00 BA CF 00 05 00 00 00 08 00 00 00 03
-             ├─────────┤ ├───┤ ├─────────┤ ├─────────┤
-             magic      type  payload_len sequence=3
-                        (5)   (8 bytes)
-
-Payload:     00 00 00 05 00 00 00 2A
-             ├─────────┤ ├─────────┤
-             CMD_SELECT  colony_id=42
-```
+These tests now cover documented wire examples, fixed-prefix world-state bytes,
+delta chunk bytes, raw-grid mode round trips, and error handling for malformed
+grid codec mode values.

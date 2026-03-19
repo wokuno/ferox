@@ -128,6 +128,9 @@ rule that documentation updates land in the same PR as behavior/workflow changes
 - initial colonies: `50`
 - tick rate: `100 ms`
 - threads: auto-detected logical CPUs unless `-t/--threads` is provided
+- protocol wire generation: `PROTOCOL_VERSION=1` is documented, but current
+  transport compatibility still assumes matching client/server builds because
+  explicit version negotiation is not serialized yet
 - see [docs/SCALING_AND_BEHAVIOR_PLAN.md](docs/SCALING_AND_BEHAVIOR_PLAN.md) for the rollout plan and tracked issues
 
 ## Security

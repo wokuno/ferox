@@ -134,6 +134,11 @@ grid cells with binary search over the sorted colony metadata instead of a full
 linear scan per visible cell. Protocol performance is tracked by
 `test_perf_unit_protocol` and `test_performance_profile`.
 
+The current protocol generation is documented as `PROTOCOL_VERSION == 1`, but
+that version is not yet serialized in the transport header or handshake. Until
+explicit negotiation exists, client/server compatibility is defined by shipping
+matching builds and keeping `docs/PROTOCOL.md` aligned with the live wire format.
+
 ## Performance Instrumentation Architecture
 
 Performance validation is built into the repo (not a one-off script):

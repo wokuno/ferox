@@ -752,6 +752,15 @@ Enable/disable TCP_NODELAY (Nagle's algorithm).
 
 Network protocol serialization.
 
+Current wire-format notes:
+
+- `MessageHeader` is 14 bytes on the wire (`magic`, `type`, `payload_len`, `sequence`)
+- `ProtoWorld` uses a 26-byte fixed prefix before colony payloads and optional grid bytes
+- `ProtoColony` currently serializes 76 bytes, including visual fields
+  `shape_seed`, `wobble_phase`, and `shape_evolution`
+- `PROTOCOL_VERSION` documents the current wire generation but is not serialized
+  in the transport yet
+
 #### protocol_serialize_header
 
 ```c
@@ -819,6 +828,56 @@ Deserialize world state from buffer.
 - `world` - Output world structure
 
 **Returns:** 0 on success, -1 on error
+
+---
+
+#### protocol_serialize_world_delta_grid_chunk
+
+```c
+int protocol_serialize_world_delta_grid_chunk(const ProtoWorldDeltaGridChunk* chunk,
+                                              uint8_t** buffer, size_t* len);
+```
+
+Serialize one chunk of `MSG_WORLD_DELTA` grid payload.
+
+**Returns:** 0 on success, -1 on error
+
+---
+
+#### protocol_deserialize_world_delta_grid_chunk
+
+```c
+int protocol_deserialize_world_delta_grid_chunk(const uint8_t* buffer, size_t len,
+                                                ProtoWorldDeltaGridChunk* chunk);
+```
+
+Deserialize one chunk of `MSG_WORLD_DELTA` grid payload.
+
+**Returns:** 0 on success, -1 on error
+
+---
+
+#### protocol_serialize_colony_detail
+
+```c
+int protocol_serialize_colony_detail(const ProtoColonyDetail* detail, uint8_t* buffer);
+```
+
+Serialize the `MSG_COLONY_INFO` payload.
+
+**Returns:** Bytes written, or -1 on error
+
+---
+
+#### protocol_deserialize_colony_detail
+
+```c
+int protocol_deserialize_colony_detail(const uint8_t* buffer, ProtoColonyDetail* detail);
+```
+
+Deserialize the `MSG_COLONY_INFO` payload.
+
+**Returns:** Bytes read, or -1 on error
 
 ---
 
