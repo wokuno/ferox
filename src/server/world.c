@@ -452,7 +452,7 @@ uint32_t world_add_colony(World* world, Colony colony) {
     if (!world) return 0;
     
     // Check for ID overflow
-    uint32_t old_id = atomic_load(&world->next_colony_id);
+    uint32_t old_id = atomic_load_explicit(&world->next_colony_id, memory_order_relaxed);
     if (old_id == UINT32_MAX) {
         return 0;  // Cannot assign more colony IDs
     }
@@ -480,7 +480,7 @@ uint32_t world_add_colony(World* world, Colony colony) {
     }
     
     // Assign new ID using atomic increment
-    colony.id = atomic_fetch_add(&world->next_colony_id, 1);
+    colony.id = atomic_fetch_add_explicit(&world->next_colony_id, 1, memory_order_relaxed);
     colony.active = true;
     colony.is_persister = false;
 

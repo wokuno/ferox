@@ -63,6 +63,39 @@ Key structs are defined in:
 - `src/server/atomic_sim.h`
 - `src/shared/atomic_types.h`
 
+### Atomic Field Invariants
+
+The atomic-order audit for `#115` treats the current atomic simulation path as a
+double-buffered ownership system, not as a general lock-free publication graph.
+That scope matters because most atomic fields only need uniqueness or numeric
+integrity, not cross-struct happens-before edges.
+
+- `AtomicCell.colony_id`: the ownership word for a single cell. During spread,
+  workers read only from the current buffer and compete only on the next buffer.
+  A successful CAS must make the claim unique, but it does not publish other
+  metadata to concurrent readers in the same phase, so relaxed ordering is the
+  target for claim/read/write operations on the cell buffers.
+- `AtomicCell.age`: a per-cell scalar copied or incremented within a phase after
+  buffer ownership is already defined. No code relies on reading `age` as a
+  publication fence for another field, so relaxed load/store/RMW is sufficient.
+- `AtomicColonyStats.cell_count`: a numeric aggregate updated during sync and
+  spread-delta application. Correctness depends on atomic arithmetic and the
+  barrier between spread and apply, not on ordered publication to unrelated
+  fields.
+- `AtomicColonyStats.max_cell_count`: monotonic max-tracking only. The invariant
+  is `max_cell_count >= cell_count peak observed so far`; readers tolerate stale
+  values between sync points, so relaxed CAS/load/store is acceptable.
+- `World.next_colony_id`: uniqueness source only. Callers do not use a fetched id
+  as a publication barrier for the rest of the `Colony` payload, so relaxed
+  load/fetch-add is the intended policy.
+- `phase_wait_eq()` acquire loads remain the exception: when the helper is used
+  as a wait primitive, wake-up code may immediately inspect state guarded by the
+  waited-on value, so the polling side keeps acquire semantics.
+
+Non-atomic coordination fields in `ThreadPool`, `AtomicSpreadSharedState`, and
+`AtomicPhaseSharedState` remain mutex/condvar-protected and are deliberately out
+of scope for this audit.
+
 ## Threadpool Design
 
 The threadpool evolved from a simple global FIFO to a mixed scheduler:

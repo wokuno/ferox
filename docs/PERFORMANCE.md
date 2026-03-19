@@ -38,6 +38,34 @@ Low-risk cacheline guardrails now live in shared headers for the most contended 
 
 This change is intentionally structural only: it does not alter scheduling policy, memory-order semantics, or feature defaults.
 
+## 2026-03-19 Atomic Order Audit Scope
+
+Issue `#115` is scoped as a docs-first audit of the existing C11 atomic sites,
+with only low-risk code follow-ups allowed.
+
+- Audit target fields: `AtomicCell.colony_id`, `AtomicCell.age`,
+  `AtomicColonyStats.cell_count`, `AtomicColonyStats.max_cell_count`, and
+  `World.next_colony_id`.
+- Expected result: replace implicit default atomics with explicit orders only
+  where the existing invariant is already relaxed-order safe, and keep acquire
+  semantics only on true wait/wake polling paths.
+- Out of scope for this pass: algorithm changes, lock removal, converting
+  mutex-protected counters into atomics, or broad perf retuning.
+- Validation target: focused correctness tests plus the existing perf/profile
+  suite so the change stays CI-friendly.
+
+Completed implementation notes:
+
+- `src/shared/atomic_types.h` now uses explicit relaxed load/store/RMW/CAS calls
+  for the ownership, age, and colony-stat fields that already depend only on
+  uniqueness or numeric integrity.
+- `src/server/world.c` now uses explicit relaxed ordering for
+  `World.next_colony_id`, reflecting that the id allocator provides uniqueness,
+  not publication of the rest of the colony payload.
+- Focused regression coverage now includes a relaxed-order spread/stat roundtrip
+  check in `test_simulation_logic` and a monotonic-id check in
+  `test_world_branch_coverage`.
+
 ## Current Baseline (macOS arm64, scenario runs on 2026-03-05)
 
 Fresh scenario runs were executed with:

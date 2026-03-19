@@ -130,6 +130,22 @@ Profile presets are tuned as follows:
       - `[atomic_tick]`
 4. Only claim win when multiple runs point in same direction.
 
+## Atomic Order Change Guardrails
+
+- Treat atomic-order edits as correctness-sensitive first and performance work
+  second.
+- For `#115`, limit changes to fields whose invariants are already documented as
+  uniqueness-only or numeric-integrity-only (`AtomicCell`, `AtomicColonyStats`,
+  `World.next_colony_id`).
+- Keep acquire ordering on wait/poll loops unless the wake-up handoff is proven
+  unnecessary.
+- Run focused correctness suites before trusting perf numbers: at minimum
+  `SimulationLogicTests`, `WorldBranchCoverageTests` when available, and the
+  profiling lane that exercises the atomic path.
+- If a memory-order cleanup only makes implicit defaults explicit, treat stable
+  correctness results plus flat profiling output as success; do not expect a
+  large throughput jump from that class of change alone.
+
 ## Architecture-Specific Atomic Lane
 
 - `test_performance_profile` now emits an additive atomic-cost microbench lane before the broader hotspot probes.

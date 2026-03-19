@@ -31,8 +31,8 @@
  * Memory layout is GPU-friendly (32-bit aligned).
  */
 typedef struct {
-    _Atomic uint32_t colony_id;  // 0 = empty, atomic for CAS-based spreading
-    _Atomic uint8_t age;         // Atomic age counter
+    _Atomic uint32_t colony_id;  // 0 = empty; uniqueness only, claimed with relaxed CAS in next-buffer spread.
+    _Atomic uint8_t age;         // Per-cell scalar only; relaxed loads/stores are sufficient because age is not a publication fence.
     uint8_t is_border;           // Border flag (read-only during parallel phase)
     uint8_t padding[2];          // Alignment padding for 32-bit access
 } AtomicCell;
@@ -48,9 +48,9 @@ typedef struct {
  * Each colony has its own stats block to avoid false sharing.
  */
 typedef struct {
-    _Alignas(FEROX_CACHELINE_SIZE) _Atomic int64_t cell_count; // Current population (can go negative temporarily during CAS)
-    _Atomic int64_t max_cell_count;  // Historical max (updated with atomic max)
-    _Atomic uint64_t generation;     // Mutation generation counter
+    _Alignas(FEROX_CACHELINE_SIZE) _Atomic int64_t cell_count; // Numeric aggregate only; relaxed RMW keeps counts exact across phase barriers.
+    _Atomic int64_t max_cell_count;  // Monotonic max only; relaxed CAS is sufficient because readers tolerate staleness between sync points.
+    _Atomic uint64_t generation;     // Reserved atomic generation counter for future use.
     uint8_t cacheline_padding[FEROX_CACHELINE_SIZE - (sizeof(_Atomic int64_t) * 2) - sizeof(_Atomic uint64_t)];
 } AtomicColonyStats;
 
@@ -95,30 +95,36 @@ typedef struct {
  * - MPI: MPI_Compare_and_swap
  */
 static inline bool atomic_cell_try_claim(AtomicCell* cell, uint32_t expected, uint32_t desired) {
-    return atomic_compare_exchange_strong(&cell->colony_id, &expected, desired);
+    return atomic_compare_exchange_strong_explicit(
+        &cell->colony_id,
+        &expected,
+        desired,
+        memory_order_relaxed,
+        memory_order_relaxed
+    );
 }
 
 /**
  * Atomic load of colony_id.
  */
 static inline uint32_t atomic_cell_get_colony(const AtomicCell* cell) {
-    return atomic_load(&cell->colony_id);
+    return atomic_load_explicit(&cell->colony_id, memory_order_relaxed);
 }
 
 /**
  * Atomic store of colony_id.
  */
 static inline void atomic_cell_set_colony(AtomicCell* cell, uint32_t colony_id) {
-    atomic_store(&cell->colony_id, colony_id);
+    atomic_store_explicit(&cell->colony_id, colony_id, memory_order_relaxed);
 }
 
 /**
  * Atomic increment of cell age (saturates at 255).
  */
 static inline void atomic_cell_age(AtomicCell* cell) {
-    uint8_t old_age = atomic_load(&cell->age);
+    uint8_t old_age = atomic_load_explicit(&cell->age, memory_order_relaxed);
     if (old_age < 255) {
-        atomic_fetch_add(&cell->age, 1);
+        atomic_fetch_add_explicit(&cell->age, 1, memory_order_relaxed);
     }
 }
 
@@ -126,28 +132,28 @@ static inline void atomic_cell_age(AtomicCell* cell) {
  * Atomic increment of colony population.
  */
 static inline void atomic_stats_add_cell(AtomicColonyStats* stats) {
-    atomic_fetch_add(&stats->cell_count, 1);
+    atomic_fetch_add_explicit(&stats->cell_count, 1, memory_order_relaxed);
 }
 
 /**
  * Atomic decrement of colony population.
  */
 static inline void atomic_stats_remove_cell(AtomicColonyStats* stats) {
-    atomic_fetch_sub(&stats->cell_count, 1);
+    atomic_fetch_sub_explicit(&stats->cell_count, 1, memory_order_relaxed);
 }
 
 /**
  * Get current population (may be slightly stale in parallel phase).
  */
 static inline int64_t atomic_stats_get_count(const AtomicColonyStats* stats) {
-    return atomic_load(&stats->cell_count);
+    return atomic_load_explicit(&stats->cell_count, memory_order_relaxed);
 }
 
 /**
  * Get max population ever reached.
  */
 static inline int64_t atomic_stats_get_max(const AtomicColonyStats* stats) {
-    return atomic_load(&stats->max_cell_count);
+    return atomic_load_explicit(&stats->max_cell_count, memory_order_relaxed);
 }
 
 // ============================================================================

@@ -102,6 +102,12 @@ target_link_libraries(test_rd_controls PRIVATE ferox_server_lib)
 target_compile_definitions(test_rd_controls PRIVATE STANDALONE_TEST)
 add_test(NAME RdControlsTests COMMAND test_rd_controls)
 
+# World branch coverage tests
+add_executable(test_world_branch_coverage test_world_branch_coverage.c)
+target_link_libraries(test_world_branch_coverage PRIVATE ferox_server_lib)
+target_compile_definitions(test_world_branch_coverage PRIVATE STANDALONE_TEST)
+add_test(NAME WorldBranchCoverageTests COMMAND test_world_branch_coverage)
+
 # Broad performance evaluation tests
 add_executable(test_performance_eval test_performance_eval.c)
 target_link_libraries(test_performance_eval PRIVATE ferox_server_lib)
