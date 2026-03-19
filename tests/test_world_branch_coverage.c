@@ -71,7 +71,8 @@ TEST(world_get_colony_checks_lookup_and_active_state) {
 
     world->colonies[0].active = true;
     world->colony_by_id[id] = NULL;
-    ASSERT_NULL(world_get_colony(world, id));
+    ASSERT_NOT_NULL(world_get_colony(world, id));
+    ASSERT_EQ(world->colony_by_id[id], &world->colonies[0]);
 
     ASSERT_NULL(world_get_colony(world, 0));
     ASSERT_NULL(world_get_colony(world, (uint32_t)world->colony_by_id_capacity + 10));
@@ -87,6 +88,20 @@ TEST(world_add_colony_rejects_uint32_id_overflow) {
     uint32_t id = world_add_colony(world, make_colony());
     ASSERT_EQ(id, 0u);
     ASSERT_EQ(world->colony_count, 0u);
+
+    world_destroy(world);
+}
+
+TEST(world_add_colony_assigns_monotonic_unique_ids) {
+    World* world = world_create(4, 4);
+    ASSERT_NOT_NULL(world);
+
+    uint32_t first = world_add_colony(world, make_colony());
+    uint32_t second = world_add_colony(world, make_colony());
+
+    ASSERT_EQ(first, 1u);
+    ASSERT_EQ(second, 2u);
+    ASSERT_EQ(atomic_load_explicit(&world->next_colony_id, memory_order_relaxed), 3u);
 
     world_destroy(world);
 }
@@ -191,6 +206,7 @@ int main(void) {
     RUN_TEST(world_create_rejects_invalid_sizes);
     RUN_TEST(world_get_colony_checks_lookup_and_active_state);
     RUN_TEST(world_add_colony_rejects_uint32_id_overflow);
+    RUN_TEST(world_add_colony_assigns_monotonic_unique_ids);
     RUN_TEST(world_colony_cell_tracking_updates_centroid_both_paths);
     RUN_TEST(world_remove_colony_uses_tracked_and_fallback_clear_paths);
 

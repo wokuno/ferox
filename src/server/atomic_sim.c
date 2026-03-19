@@ -208,10 +208,15 @@ static int64_t atomic_apply_spread_deltas_internal(AtomicWorld* aworld) {
             }
 
             AtomicColonyStats* stats = &aworld->colony_stats[colony_id];
-            int64_t new_count = atomic_fetch_add(&stats->cell_count, (int64_t)delta) + (int64_t)delta;
+            int64_t new_count = atomic_fetch_add_explicit(&stats->cell_count, (int64_t)delta, memory_order_relaxed) + (int64_t)delta;
             int64_t old_max = atomic_load_explicit(&stats->max_cell_count, memory_order_relaxed);
             while (new_count > old_max) {
-                if (atomic_compare_exchange_weak(&stats->max_cell_count, &old_max, new_count)) {
+                if (atomic_compare_exchange_weak_explicit(
+                        &stats->max_cell_count,
+                        &old_max,
+                        new_count,
+                        memory_order_relaxed,
+                        memory_order_relaxed)) {
                     break;
                 }
             }

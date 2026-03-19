@@ -899,6 +899,58 @@ TEST(atomic_spread_step_swaps_buffers_for_new_claims) {
     world_destroy(world);
 }
 
+TEST(atomic_relaxed_claim_and_stats_roundtrip_remain_consistent) {
+    World* world = world_create(9, 9);
+    ASSERT_NOT_NULL(world);
+
+    Colony colony = create_test_colony();
+    colony.genome.spread_rate = 1.0f;
+    colony.genome.metabolism = 1.0f;
+    colony.genome.nutrient_sensitivity = 1.0f;
+    for (int i = 0; i < 8; i++) {
+        colony.genome.spread_weights[i] = 1.0f;
+    }
+
+    uint32_t id = world_add_colony(world, colony);
+    ASSERT_NE(id, 0);
+
+    for (int i = 0; i < world->width * world->height; i++) {
+        world->nutrients[i] = 1.0f;
+        world->toxins[i] = 0.0f;
+    }
+
+    fill_colony_rect(world, id, 3, 3, 3, 3);
+    Colony* stored = world_get_colony(world, id);
+    ASSERT_NOT_NULL(stored);
+    stored->cell_count = 9;
+    stored->max_cell_count = 9;
+    stored->behavior_actions[COLONY_ACTION_EXPAND] = 1.0f;
+
+    ThreadPool* pool = threadpool_create(4);
+    ASSERT_NOT_NULL(pool);
+
+    AtomicWorld* aworld = atomic_world_create(world, pool, 4);
+    ASSERT_NOT_NULL(aworld);
+
+    for (int tick = 0; tick < 3; tick++) {
+        atomic_spread_step(aworld);
+        atomic_world_sync_to_world(aworld);
+
+        int grid_count = count_colony_cells(world, id);
+        ASSERT_EQ((int)atomic_get_population(aworld, id), grid_count);
+
+        stored = world_get_colony(world, id);
+        ASSERT_NOT_NULL(stored);
+        ASSERT_EQ((int)stored->cell_count, grid_count);
+        ASSERT_GE((int)atomic_get_max_population(aworld, id), grid_count);
+        ASSERT_GE((int)stored->max_cell_count, grid_count);
+    }
+
+    atomic_world_destroy(aworld);
+    threadpool_destroy(pool);
+    world_destroy(world);
+}
+
 // ============================================================================
 // Cell Count Stability Tests
 // ============================================================================
@@ -2140,6 +2192,7 @@ int run_simulation_logic_tests(void) {
     RUN_TEST(atomic_sync_roundtrip_preserves_state);
     RUN_TEST(atomic_tick_preserves_cell_count);
     RUN_TEST(atomic_spread_step_swaps_buffers_for_new_claims);
+    RUN_TEST(atomic_relaxed_claim_and_stats_roundtrip_remain_consistent);
     
     printf("\nCell Count Stability Tests:\n");
     RUN_TEST(cell_count_stable_without_spreading);

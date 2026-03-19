@@ -28,7 +28,7 @@ Priority values:
 
 ## Atomics, Memory Layout, and Data Access
 
-- [ ] `PERF-011` `P0` `open` Audit all atomic memory orders and document invariants per field (`#115`).
+- [x] `PERF-011` `P0` `done` Audit all atomic memory orders and document invariants per field (`#115`).
 - [x] `PERF-012` `P0` `done` Add alignment/padding checks for all hot shared structs (queue metadata, counters) (`#116`, merged in `#152`).
 - [ ] `PERF-013` `P0` `open` Replace global counters with sharded per-worker counters where possible (`#117`).
 - [ ] `PERF-014` `P1` `open` Add cacheline-aware wrappers and static assertions in shared headers (`#118`).
@@ -90,6 +90,8 @@ Priority values:
 - [ ] `PERF-055` `P1` `open` Continue atomic ecology parity and richer behavior rollout (`#92`, `#87`, `#101`, `#102`, `#103`, `#104`, `#105`).
 
 ## Additional Issue-Backed Follow-Ups
+
+- `#115` completed scope: audited the real C11 atomic fields (`AtomicCell`, `AtomicColonyStats`, `World.next_colony_id`), documented per-field invariants, made relaxed-order intent explicit in code, and added focused sync/id regression coverage without changing higher-level scheduling policy.
 
 - `#98` Make frontier telemetry incremental and scratch-buffer based.
 - `#99` Isolate slow clients with queued/coalesced world broadcasts.
