@@ -90,10 +90,24 @@ typedef struct {
     int iterations;
 } PerfTaskBatch;
 
+typedef struct {
+    ThreadPool* pool;
+    atomic_int remaining;
+} PerfFollowOnChainState;
+
 static void perf_increment_task_batch(void* arg) {
     PerfTaskBatch* batch = (PerfTaskBatch*)arg;
     for (int i = 0; i < batch->iterations; i++) {
         atomic_fetch_add(&perf_task_counter, 1);
+    }
+}
+
+static void perf_follow_on_increment_task(void* arg) {
+    PerfFollowOnChainState* state = (PerfFollowOnChainState*)arg;
+    atomic_fetch_add(&perf_task_counter, 1);
+
+    if (atomic_fetch_sub(&state->remaining, 1) > 0) {
+        threadpool_submit(state->pool, perf_follow_on_increment_task, state);
     }
 }
 
@@ -733,6 +747,30 @@ TEST(threadpool_granularity_eval) {
     threadpool_destroy(pool);
 }
 
+TEST(threadpool_worker_follow_on_submit_eval) {
+    const int scale = get_perf_scale();
+    const int total_increments = 50000 * scale;
+
+    ThreadPool* pool = threadpool_create(4);
+    ASSERT_NOT_NULL(pool);
+
+    atomic_store(&perf_task_counter, 0);
+    PerfFollowOnChainState state = {
+        .pool = pool,
+        .remaining = ATOMIC_VAR_INIT(total_increments - 1),
+    };
+
+    double start = now_ms();
+    threadpool_submit(pool, perf_follow_on_increment_task, &state);
+    threadpool_wait(pool);
+    double elapsed = now_ms() - start;
+
+    ASSERT_EQ(atomic_load(&perf_task_counter), total_increments);
+    print_metric("threadpool worker follow-on", elapsed, (double)total_increments);
+
+    threadpool_destroy(pool);
+}
+
 int run_performance_eval_tests(void) {
     tests_passed = 0;
     tests_failed = 0;
@@ -753,6 +791,7 @@ int run_performance_eval_tests(void) {
     RUN_TEST(atomic_sync_throughput_scaling_eval);
     RUN_TEST(threadpool_task_throughput);
     RUN_TEST(threadpool_granularity_eval);
+    RUN_TEST(threadpool_worker_follow_on_submit_eval);
 
     printf("\n--- Performance Eval Results ---\n");
     printf("Passed: %d\n", tests_passed);

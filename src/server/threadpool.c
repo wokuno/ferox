@@ -9,6 +9,82 @@
 
 #define TASK_FREELIST_LIMIT 4096
 
+typedef struct WorkerLocalState {
+    ThreadPool* pool;
+    Task* submit_head;
+    Task* submit_tail;
+    Task* free_list;
+    int free_count;
+} WorkerLocalState;
+
+static pthread_key_t worker_state_key;
+static pthread_once_t worker_state_key_once = PTHREAD_ONCE_INIT;
+
+static void threadpool_make_worker_state_key(void) {
+    (void)pthread_key_create(&worker_state_key, NULL);
+}
+
+static WorkerLocalState* threadpool_current_worker_state(void) {
+    pthread_once(&worker_state_key_once, threadpool_make_worker_state_key);
+    return (WorkerLocalState*)pthread_getspecific(worker_state_key);
+}
+
+static void threadpool_set_worker_state(WorkerLocalState* state) {
+    pthread_once(&worker_state_key_once, threadpool_make_worker_state_key);
+    (void)pthread_setspecific(worker_state_key, state);
+}
+
+static Task* threadpool_take_free_task_local(WorkerLocalState* state) {
+    if (state == NULL || state->free_list == NULL) {
+        return NULL;
+    }
+
+    Task* task = state->free_list;
+    state->free_list = task->next;
+    task->next = NULL;
+    state->free_count--;
+    return task;
+}
+
+static void threadpool_recycle_task_local(WorkerLocalState* state, Task* task) {
+    if (state == NULL || task == NULL) {
+        return;
+    }
+
+    if (state->free_count < TASK_FREELIST_LIMIT) {
+        task->next = state->free_list;
+        state->free_list = task;
+        state->free_count++;
+        return;
+    }
+
+    free(task);
+}
+
+static void threadpool_enqueue_local_task(WorkerLocalState* state, Task* task) {
+    if (state->submit_tail == NULL) {
+        state->submit_head = task;
+        state->submit_tail = task;
+    } else {
+        state->submit_tail->next = task;
+        state->submit_tail = task;
+    }
+}
+
+static Task* threadpool_pop_local_task(WorkerLocalState* state) {
+    if (state == NULL || state->submit_head == NULL) {
+        return NULL;
+    }
+
+    Task* task = state->submit_head;
+    state->submit_head = task->next;
+    if (state->submit_head == NULL) {
+        state->submit_tail = NULL;
+    }
+    task->next = NULL;
+    return task;
+}
+
 static Task* threadpool_take_free_task_locked(ThreadPool* pool) {
     Task* task = pool->task_free_list;
     if (task != NULL) {
@@ -19,21 +95,6 @@ static Task* threadpool_take_free_task_locked(ThreadPool* pool) {
     return task;
 }
 
-static void threadpool_recycle_task_locked(ThreadPool* pool, Task* task) {
-    if (task == NULL) {
-        return;
-    }
-
-    if (pool->counters.task_free_count < TASK_FREELIST_LIMIT) {
-        task->next = pool->task_free_list;
-        pool->task_free_list = task;
-        pool->counters.task_free_count++;
-        return;
-    }
-
-    free(task);
-}
-
 static void threadpool_free_task_list(Task* head) {
     while (head != NULL) {
         Task* next = head->next;
@@ -42,9 +103,35 @@ static void threadpool_free_task_list(Task* head) {
     }
 }
 
+static void threadpool_execute_local_tasks(ThreadPool* pool, WorkerLocalState* state) {
+    while (1) {
+        pthread_mutex_lock(&pool->queue_mutex);
+        Task* task = threadpool_pop_local_task(state);
+        if (task != NULL) {
+            pool->counters.pending_tasks--;
+        }
+        pthread_mutex_unlock(&pool->queue_mutex);
+
+        if (task == NULL) {
+            return;
+        }
+
+        task->function(task->arg);
+        threadpool_recycle_task_local(state, task);
+    }
+}
+
 // Worker thread function
 static void* worker_thread(void* arg) {
     ThreadPool* pool = (ThreadPool*)arg;
+    WorkerLocalState local_state = {
+        .pool = pool,
+        .submit_head = NULL,
+        .submit_tail = NULL,
+        .free_list = NULL,
+        .free_count = 0,
+    };
+    threadpool_set_worker_state(&local_state);
     
     while (1) {
         pthread_mutex_lock(&pool->queue_mutex);
@@ -76,10 +163,15 @@ static void* worker_thread(void* arg) {
         // Execute the task outside the lock
         if (task != NULL) {
             task->function(task->arg);
+            threadpool_execute_local_tasks(pool, &local_state);
 
             pthread_mutex_lock(&pool->queue_mutex);
             pool->counters.active_tasks--;
-            threadpool_recycle_task_locked(pool, task);
+            pthread_mutex_unlock(&pool->queue_mutex);
+
+            threadpool_recycle_task_local(&local_state, task);
+
+            pthread_mutex_lock(&pool->queue_mutex);
             
             // Signal if all tasks are done
             if (pool->counters.active_tasks == 0 && pool->counters.pending_tasks == 0) {
@@ -88,6 +180,10 @@ static void* worker_thread(void* arg) {
             pthread_mutex_unlock(&pool->queue_mutex);
         }
     }
+
+    threadpool_set_worker_state(NULL);
+    threadpool_free_task_list(local_state.submit_head);
+    threadpool_free_task_list(local_state.free_list);
     
     return NULL;
 }
@@ -208,6 +304,34 @@ void threadpool_submit(ThreadPool* pool, task_func func, void* arg) {
     if (pool == NULL || func == NULL) {
         return;
     }
+
+    WorkerLocalState* worker_state = threadpool_current_worker_state();
+    if (worker_state != NULL && worker_state->pool == pool) {
+        Task* task = threadpool_take_free_task_local(worker_state);
+        if (task == NULL) {
+            task = (Task*)malloc(sizeof(Task));
+            if (task == NULL) {
+                return;
+            }
+        }
+
+        task->function = func;
+        task->arg = arg;
+        task->next = NULL;
+
+        pthread_mutex_lock(&pool->queue_mutex);
+        if (pool->counters.shutdown) {
+            pthread_mutex_unlock(&pool->queue_mutex);
+            threadpool_recycle_task_local(worker_state, task);
+            return;
+        }
+        pool->counters.pending_tasks++;
+        pthread_mutex_unlock(&pool->queue_mutex);
+
+        threadpool_enqueue_local_task(worker_state, task);
+        return;
+    }
+
     pthread_mutex_lock(&pool->queue_mutex);
 
     // Don't accept new tasks if shutting down

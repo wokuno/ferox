@@ -34,7 +34,7 @@ Priority values:
 - [ ] `PERF-014` `P1` `open` Add cacheline-aware wrappers and static assertions in shared headers (`#118`).
 - [x] `PERF-015` `P1` `done` Add ARM/x86 specific microbench lane for atomic operation costs (`#119`, merged in `#151`).
 - [x] `PERF-016` `P1` `done` Add false-sharing diagnostics workflow (perf c2c + struct offset mapping).
-- [ ] `PERF-017` `P2` `open` Introduce thread-local submit fast path for worker-generated follow-on tasks (`#120`).
+- [x] `PERF-017` `P2` `done` Introduce thread-local submit fast path for worker-generated follow-on tasks (`#120`).
 - [ ] `PERF-018` `P2` `open` Add optional RCU/QSBR for read-mostly metadata snapshots (`#121`).
 
 ## Simulation Core

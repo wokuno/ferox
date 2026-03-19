@@ -70,10 +70,19 @@ The threadpool evolved from a simple global FIFO to a mixed scheduler:
 - per-worker queues (`WorkerQueue`) for locality and reduced global contention
 - lock-free fast queues (`FastTaskQueue`) for hot paths
 - owner-local submit and batching controls
+- worker-generated follow-on submit fast path that reuses thread-local worker identity to push directly into the submitting worker's local queue before falling back to shared ingress paths
 - work stealing controls (`steal_probe_limit`, `steal_batch_size`)
 - profile presets via `FEROX_THREADPOOL_PROFILE`
 - optional telemetry in `ThreadPoolTelemetry`
 - cacheline-padded `ThreadPoolHotCounters` so queue-depth / active-task updates do not share a line with colder pool pointers and synchronization objects
+
+The fast path is intentionally narrow-scope: it only targets single-task submits
+issued by an active pool worker while that worker is already executing Ferox
+threadpool work. Those follow-on tasks stay thread-local until the current task
+finishes, which avoids an extra shared-queue enqueue/dequeue round-trip for the
+worker-chained case. External producers, non-worker threads, and batch submit
+calls continue to use the existing shared submit path so semantics, wakeups, and
+fallback behavior stay unchanged.
 
 Relevant files:
 
