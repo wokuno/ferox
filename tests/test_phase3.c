@@ -72,10 +72,10 @@ static int test_threadpool_create_returns_valid_pool(void) {
     ThreadPool* pool = threadpool_create(4);
     ASSERT_NOT_NULL(pool);
     ASSERT_EQ(pool->thread_count, 4);
-    ASSERT_FALSE(pool->shutdown);
+    ASSERT_FALSE(pool->counters.shutdown);
     ASSERT_NULL(pool->task_queue_head);
-    ASSERT_EQ(pool->active_tasks, 0);
-    ASSERT_EQ(pool->pending_tasks, 0);
+    ASSERT_EQ(pool->counters.active_tasks, 0);
+    ASSERT_EQ(pool->counters.pending_tasks, 0);
     
     threadpool_destroy(pool);
     TEST_PASS();
