@@ -136,6 +136,9 @@ See [SECURITY.md](SECURITY.md) for security policy and vulnerability reporting.
 
 ## Development
 
+- Performance profiling: `./build/tests/test_performance_profile`
+- Architecture-specific atomic-cost lane: use `FEROX_PERF_SCALE=2..10 ./build/tests/test_performance_profile` for stabler x86/ARM microbench comparisons
+
 ### Debug Build
 
 ```bash

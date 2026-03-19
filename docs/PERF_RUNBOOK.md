@@ -116,10 +116,24 @@ Profile presets are tuned as follows:
 3. Compare:
    - microbench `MICROBENCH_SUMMARY`
    - profile lines:
-     - `[threadpool tiny tasks]`
-     - `[atomic_spread_step]`
-     - `[atomic_tick]`
+      - `[atomic_cost_lane]`
+      - `[atomic_cost_common]`
+      - `[atomic_cost_x86]` or `[atomic_cost_arm]`
+      - `[threadpool tiny tasks]`
+      - `[atomic_spread_step]`
+      - `[atomic_tick]`
 4. Only claim win when multiple runs point in same direction.
+
+## Architecture-Specific Atomic Lane
+
+- `test_performance_profile` now emits an additive atomic-cost microbench lane before the broader hotspot probes.
+- The lane is architecture-aware and reports:
+  - `[atomic_cost_lane]` for host architecture and lane selection
+  - `[atomic_cost_common]` for relaxed load/store/RMW and CAS costs on all hosts
+  - `[atomic_cost_x86]` plus `[atomic_cost_x86_ratios]` on x86/x86_64 hosts
+  - `[atomic_cost_arm]` plus `[atomic_cost_arm_ratios]` on arm/aarch64 hosts
+- Use these numbers for same-host comparisons and for x86-vs-ARM trend notes; do not enforce tight pass/fail thresholds in CI because fence/RMW costs vary by runner class.
+- Scale the microbench loop with `FEROX_PERF_SCALE=2..10` when you want stabler medians without changing the rest of the profiling command.
 
 ## Profiling Workflow
 

@@ -61,7 +61,7 @@ Performance work is validated at three levels:
   - `test_threadpool_profile_scan`
 - `system`
   - `test_threadpool_microbench`
-  - `test_performance_profile`
+  - `test_performance_profile` (includes architecture-specific atomic-cost lane output)
 
 For jitter-resistant analysis, run multi-iteration medians:
 
@@ -84,6 +84,8 @@ acceptance thresholds.
   - `FEROX_ATOMIC_FRONTIER_DENSE_PCT` (default `15`)
 - Accelerator target selection:
   - `FEROX_ACCELERATOR=auto|cpu|apple|amd`
+- Perf profiling loop scale:
+  - `FEROX_PERF_SCALE=1..10` for the atomic-cost lane in `test_performance_profile`
 
 CTest sets several of these automatically for perf targets in
 `tests/CMakeLists.txt`.

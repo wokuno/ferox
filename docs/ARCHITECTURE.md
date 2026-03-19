@@ -143,6 +143,11 @@ Performance validation is built into the repo (not a one-off script):
 - system: `test_threadpool_microbench`, `test_performance_profile`
 - multi-run aggregation: `scripts/perf_multi_iter.py`
 
+`test_performance_profile` also carries an additive architecture-specific atomic
+microbench lane that emits common relaxed-operation costs on every host and
+extra ordered-operation probes on x86/x86_64 versus arm/aarch64. This keeps the
+CI path stable while still surfacing platform-specific atomic cost differences.
+
 Reference docs:
 
 - `docs/PERF_RUNBOOK.md`

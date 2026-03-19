@@ -17,16 +17,48 @@
 #include "../src/server/threadpool.h"
 #include "../src/server/atomic_sim.h"
 
-static void profile_platform_characteristics(void) {
+static const char* perf_arch_name(void) {
 #if defined(__x86_64__) || defined(_M_X64)
-    const char* arch = "x86_64";
+    return "x86_64";
+#elif defined(__i386__) || defined(_M_IX86)
+    return "x86";
 #elif defined(__aarch64__)
-    const char* arch = "aarch64";
+    return "aarch64";
 #elif defined(__arm__)
-    const char* arch = "arm";
+    return "arm";
 #else
-    const char* arch = "unknown";
+    return "unknown";
 #endif
+}
+
+static const char* perf_atomic_lane_name(void) {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    return "x86_tso";
+#elif defined(__aarch64__) || defined(__arm__)
+    return "arm_weak_ordering";
+#else
+    return "generic";
+#endif
+}
+
+static bool perf_atomic_lane_is_x86(void) {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    return true;
+#else
+    return false;
+#endif
+}
+
+static bool perf_atomic_lane_is_arm(void) {
+#if defined(__aarch64__) || defined(__arm__)
+    return true;
+#else
+    return false;
+#endif
+}
+
+static void profile_platform_characteristics(void) {
+    const char* arch = perf_arch_name();
 
     printf("[platform] arch: %s, cacheline target: %d, stats align: %zu, stats size: %zu\n",
            arch,
@@ -41,6 +73,24 @@ static void profile_platform_characteristics(void) {
 
 static volatile uint64_t perf_sink = 0;
 
+#define ATOMIC_MICROBENCH_STRIPES 64
+
+static int get_perf_scale(void) {
+    const char* env = getenv("FEROX_PERF_SCALE");
+    if (!env || !*env) {
+        return 1;
+    }
+
+    int scale = atoi(env);
+    if (scale < 1) {
+        scale = 1;
+    }
+    if (scale > 10) {
+        scale = 10;
+    }
+    return scale;
+}
+
 static uint64_t now_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -49,6 +99,201 @@ static uint64_t now_ns(void) {
 
 static double ns_to_ms(uint64_t ns) {
     return (double)ns / 1000000.0;
+}
+
+static void init_atomic_microbench_stripes(atomic_uint_fast64_t* values, uint64_t seed) {
+    for (int i = 0; i < ATOMIC_MICROBENCH_STRIPES; i++) {
+        atomic_init(&values[i], seed + (uint64_t)i);
+    }
+}
+
+static double benchmark_atomic_load_cost(memory_order order, int iterations) {
+    atomic_uint_fast64_t values[ATOMIC_MICROBENCH_STRIPES];
+    init_atomic_microbench_stripes(values, 0xC0FFEEu);
+    uint64_t start = now_ns();
+    uint64_t local_sink = 0;
+
+    for (int i = 0; i < iterations; i++) {
+        local_sink += atomic_load_explicit(&values[i & (ATOMIC_MICROBENCH_STRIPES - 1)], order);
+    }
+
+    perf_sink ^= local_sink;
+    return (double)(now_ns() - start) / (double)iterations;
+}
+
+static double benchmark_atomic_store_cost(memory_order order, int iterations) {
+    atomic_uint_fast64_t values[ATOMIC_MICROBENCH_STRIPES];
+    init_atomic_microbench_stripes(values, 0);
+    uint64_t start = now_ns();
+
+    for (int i = 0; i < iterations; i++) {
+        atomic_store_explicit(&values[i & (ATOMIC_MICROBENCH_STRIPES - 1)], (uint64_t)i, order);
+    }
+
+    for (int i = 0; i < ATOMIC_MICROBENCH_STRIPES; i++) {
+        perf_sink ^= atomic_load_explicit(&values[i], memory_order_relaxed);
+    }
+    return (double)(now_ns() - start) / (double)iterations;
+}
+
+static double benchmark_atomic_fetch_add_cost(memory_order order, int iterations) {
+    atomic_uint_fast64_t values[ATOMIC_MICROBENCH_STRIPES];
+    init_atomic_microbench_stripes(values, 0);
+    uint64_t start = now_ns();
+    uint64_t local_sink = 0;
+
+    for (int i = 0; i < iterations; i++) {
+        local_sink += atomic_fetch_add_explicit(&values[i & (ATOMIC_MICROBENCH_STRIPES - 1)], 1, order);
+    }
+
+    perf_sink ^= local_sink;
+    return (double)(now_ns() - start) / (double)iterations;
+}
+
+static double benchmark_atomic_exchange_cost(memory_order order, int iterations) {
+    atomic_uint_fast64_t values[ATOMIC_MICROBENCH_STRIPES];
+    init_atomic_microbench_stripes(values, 1);
+    uint64_t start = now_ns();
+    uint64_t local_sink = 0;
+
+    for (int i = 0; i < iterations; i++) {
+        local_sink += atomic_exchange_explicit(
+            &values[i & (ATOMIC_MICROBENCH_STRIPES - 1)],
+            (uint64_t)((i & 7) + 1),
+            order);
+    }
+
+    perf_sink ^= local_sink;
+    return (double)(now_ns() - start) / (double)iterations;
+}
+
+static double benchmark_atomic_cas_success_cost(memory_order success_order,
+                                                memory_order failure_order,
+                                                int iterations) {
+    atomic_uint_fast64_t values[ATOMIC_MICROBENCH_STRIPES];
+    init_atomic_microbench_stripes(values, 0);
+    uint64_t start = now_ns();
+    uint64_t local_sink = 0;
+
+    for (int i = 0; i < iterations; i++) {
+        int stripe = i & (ATOMIC_MICROBENCH_STRIPES - 1);
+        uint64_t expected = (uint64_t)(stripe + (i / ATOMIC_MICROBENCH_STRIPES));
+        bool ok = atomic_compare_exchange_strong_explicit(
+            &values[stripe], &expected, expected + 1u, success_order, failure_order);
+        if (!ok) {
+            local_sink ^= expected;
+        }
+    }
+
+    for (int i = 0; i < ATOMIC_MICROBENCH_STRIPES; i++) {
+        local_sink ^= atomic_load_explicit(&values[i], memory_order_relaxed);
+    }
+    perf_sink ^= local_sink;
+    return (double)(now_ns() - start) / (double)iterations;
+}
+
+static double benchmark_atomic_cas_fail_cost(memory_order success_order,
+                                             memory_order failure_order,
+                                             int iterations) {
+    atomic_uint_fast64_t values[ATOMIC_MICROBENCH_STRIPES];
+    init_atomic_microbench_stripes(values, 1);
+    uint64_t start = now_ns();
+    uint64_t local_sink = 0;
+
+    for (int i = 0; i < iterations; i++) {
+        uint64_t expected = 0;
+        bool ok = atomic_compare_exchange_strong_explicit(
+            &values[i & (ATOMIC_MICROBENCH_STRIPES - 1)], &expected, 2, success_order, failure_order);
+        local_sink += ok ? 17u : expected;
+    }
+
+    perf_sink ^= local_sink;
+    return (double)(now_ns() - start) / (double)iterations;
+}
+
+static double benchmark_atomic_fence_cost(memory_order order, int iterations) {
+    uint64_t start = now_ns();
+    uint64_t local_sink = 0;
+
+    for (int i = 0; i < iterations; i++) {
+        local_sink += (uint64_t)i;
+        atomic_signal_fence(memory_order_seq_cst);
+        atomic_thread_fence(order);
+        atomic_signal_fence(memory_order_seq_cst);
+    }
+
+    perf_sink ^= local_sink;
+    return (double)(now_ns() - start) / (double)iterations;
+}
+
+static void profile_atomic_operation_costs(void) {
+    const char* arch = perf_arch_name();
+    const char* lane = perf_atomic_lane_name();
+    const int iterations = 1500000 * get_perf_scale();
+    double load_relaxed = benchmark_atomic_load_cost(memory_order_relaxed, iterations);
+    double store_relaxed = benchmark_atomic_store_cost(memory_order_relaxed, iterations);
+    double fetch_add_relaxed = benchmark_atomic_fetch_add_cost(memory_order_relaxed, iterations);
+    double cas_success_acq_rel = benchmark_atomic_cas_success_cost(
+        memory_order_acq_rel, memory_order_acquire, iterations);
+    double cas_fail_acquire = benchmark_atomic_cas_fail_cost(
+        memory_order_acq_rel, memory_order_acquire, iterations);
+
+    printf("[atomic_cost_lane] arch: %s, lane: %s, iterations: %d\n",
+           arch,
+           lane,
+           iterations);
+    printf("[atomic_cost_common] load_relaxed: %.2f ns, store_relaxed: %.2f ns, fetch_add_relaxed: %.2f ns, cas_success_acq_rel: %.2f ns, cas_fail_acquire: %.2f ns\n",
+           load_relaxed,
+           store_relaxed,
+           fetch_add_relaxed,
+           cas_success_acq_rel,
+           cas_fail_acquire);
+
+    if (perf_atomic_lane_is_x86()) {
+        double load_acquire = benchmark_atomic_load_cost(memory_order_acquire, iterations);
+        double store_release = benchmark_atomic_store_cost(memory_order_release, iterations);
+        double fetch_add_seq_cst = benchmark_atomic_fetch_add_cost(memory_order_seq_cst, iterations);
+        double exchange_seq_cst = benchmark_atomic_exchange_cost(memory_order_seq_cst, iterations);
+        double fence_seq_cst = benchmark_atomic_fence_cost(memory_order_seq_cst, iterations);
+
+        printf("[atomic_cost_x86] load_acquire: %.2f ns, store_release: %.2f ns, fetch_add_seq_cst: %.2f ns, exchange_seq_cst: %.2f ns, fence_seq_cst: %.2f ns\n",
+               load_acquire,
+               store_release,
+               fetch_add_seq_cst,
+               exchange_seq_cst,
+               fence_seq_cst);
+        printf("[atomic_cost_x86_ratios] seq_cst_fetch_add/relaxed: %.2fx, seq_cst_fence/relaxed_fetch_add: %.2fx\n",
+               fetch_add_relaxed > 0.0 ? fetch_add_seq_cst / fetch_add_relaxed : 0.0,
+               fetch_add_relaxed > 0.0 ? fence_seq_cst / fetch_add_relaxed : 0.0);
+        if (fence_seq_cst > fetch_add_relaxed * 2.0) {
+            printf("  note: x86 TSO keeps basic acquire/release costs close to relaxed, but seq_cst fences still serialize noticeably\n");
+        }
+        return;
+    }
+
+    if (perf_atomic_lane_is_arm()) {
+        double load_acquire = benchmark_atomic_load_cost(memory_order_acquire, iterations);
+        double store_release = benchmark_atomic_store_cost(memory_order_release, iterations);
+        double fetch_add_acq_rel = benchmark_atomic_fetch_add_cost(memory_order_acq_rel, iterations);
+        double fence_acq_rel = benchmark_atomic_fence_cost(memory_order_acq_rel, iterations);
+        double fence_seq_cst = benchmark_atomic_fence_cost(memory_order_seq_cst, iterations);
+
+        printf("[atomic_cost_arm] load_acquire: %.2f ns, store_release: %.2f ns, fetch_add_acq_rel: %.2f ns, fence_acq_rel: %.2f ns, fence_seq_cst: %.2f ns\n",
+               load_acquire,
+               store_release,
+               fetch_add_acq_rel,
+               fence_acq_rel,
+               fence_seq_cst);
+        printf("[atomic_cost_arm_ratios] acq_rel_fetch_add/relaxed: %.2fx, seq_cst_fence/relaxed_fetch_add: %.2fx\n",
+               fetch_add_relaxed > 0.0 ? fetch_add_acq_rel / fetch_add_relaxed : 0.0,
+               fetch_add_relaxed > 0.0 ? fence_seq_cst / fetch_add_relaxed : 0.0);
+        if (fetch_add_acq_rel > fetch_add_relaxed * 1.10) {
+            printf("  note: ARM ordered RMW operations are materially more expensive than relaxed on this host\n");
+        }
+        return;
+    }
+
+    printf("[atomic_cost_generic] compare results only within the same host class; x86 and ARM lanes expose extra ordered-operation probes\n");
 }
 
 static Colony make_colony_template(void) {
@@ -745,8 +990,10 @@ int main(void) {
     rng_seed(42);
 
     printf("\n=== Ferox Performance Profiling Tests ===\n\n");
+    printf("    (Set FEROX_PERF_SCALE=2..10 for heavier atomic microbench loops)\n\n");
 
     profile_platform_characteristics();
+    profile_atomic_operation_costs();
     profile_world_get_colony_scaling();
     profile_simulation_update_colony_stats();
     profile_protocol_world_state_cost();

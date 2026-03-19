@@ -32,7 +32,7 @@ Priority values:
 - [ ] `PERF-012` `P0` `open` Add alignment/padding checks for all hot shared structs (queue metadata, counters) (`#116`).
 - [ ] `PERF-013` `P0` `open` Replace global counters with sharded per-worker counters where possible (`#117`).
 - [ ] `PERF-014` `P1` `open` Add cacheline-aware wrappers and static assertions in shared headers (`#118`).
-- [ ] `PERF-015` `P1` `open` Add ARM/x86 specific microbench lane for atomic operation costs (`#119`).
+- [x] `PERF-015` `P1` `done` Add ARM/x86 specific microbench lane for atomic operation costs (`#119`).
 - [x] `PERF-016` `P1` `done` Add false-sharing diagnostics workflow (perf c2c + struct offset mapping).
 - [ ] `PERF-017` `P2` `open` Introduce thread-local submit fast path for worker-generated follow-on tasks (`#120`).
 - [ ] `PERF-018` `P2` `open` Add optional RCU/QSBR for read-mostly metadata snapshots (`#121`).
