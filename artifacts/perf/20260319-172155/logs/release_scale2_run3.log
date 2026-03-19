@@ -1,0 +1,199 @@
+UpdateCTestConfiguration  from :/Users/okunow/Desktop/ferox-wt-143/build-perf/release/DartConfiguration.tcl
+Test project /Users/okunow/Desktop/ferox-wt-143/build-perf/release
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 16
+    Start 16: SimdEvalTests
+
+16: Test command: /Users/okunow/Desktop/ferox-wt-143/build-perf/release/tests/test_simd_eval
+16: Working Directory: /Users/okunow/Desktop/ferox-wt-143/build-perf/release/tests
+16: Test timeout computed to be: 120
+16: 
+16: === SIMD Eval Tests ===
+16: 
+16:   Running simd_decay_toxins_matches_scalar_reference... PASSED
+16:   Running simd_produce_toxins_decay_matches_scalar_on_empty_world... PASSED
+16:   Running simd_update_scents_clamps_signal_range... PASSED
+16:   Running simd_update_scents_produces_reproducible_activation_front... PASSED
+16:   Running simd_update_scents_tracks_strongest_source... PASSED
+16:   Running simd_decay_toxins_performance_eval... 
+16:     [perf] decay_toxins: optimized=2.64ms scalar=2.65ms ratio=1.00x
+16: PASSED
+16: 
+16: --- SIMD Eval Results ---
+16: Passed: 6
+16: Failed: 0
+1/3 Test #16: SimdEvalTests ....................   Passed    0.01 sec
+test 19
+    Start 19: PerformanceEvalTests
+
+19: Test command: /Users/okunow/Desktop/ferox-wt-143/build-perf/release/tests/test_performance_eval
+19: Working Directory: /Users/okunow/Desktop/ferox-wt-143/build-perf/release/tests
+19: Test timeout computed to be: 180
+19: 
+19: === Performance Eval Tests ===
+19:     (Set FEROX_PERF_SCALE=2..20 for heavier benchmark loops)
+19: 
+19:   Running shared_name_color_generation_throughput... 
+19:     [perf] name+color generation          14.97 ms, 6677796.37 ops/s
+19: PASSED
+19:   Running world_lifecycle_throughput... 
+19:     [perf] world create/init/destroy      10.92 ms, 32954.96 ops/s
+19: PASSED
+19:   Running protocol_world_serialize_deserialize_throughput... 
+19:     [perf] protocol serialize+deserialize 9.47 ms, 25348.54 ops/s
+19:     [perf] protocol throughput: 607.04 MB/s
+19: PASSED
+19:   Running protocol_world_path_breakdown_eval... 
+19:     [perf] protocol serialize only        5.88 ms, 40844.11 ops/s
+19: 
+19:     [perf] protocol deserialize only      6.04 ms, 39735.10 ops/s
+19:     [perf] protocol size per frame: 32615 bytes
+19:     [hint] serialize/deserialize costs are balanced
+19: PASSED
+19:   Running server_broadcast_path_breakdown_eval... 
+19:     [perf] broadcast build snapshot       3.99 ms, 40050.06 ops/s
+19: 
+19:     [perf] broadcast build+serialize      8.51 ms, 18790.37 ops/s
+19: 
+19:     [perf] broadcast end-to-end (0 clients) 8.50 ms, 18823.53 ops/s
+19:     [perf] broadcast avg snapshot: 159.96 KiB, encoded: 4.82 KiB
+19:     [perf] broadcast stage share: build=46.9% serialize+other=53.1%
+19: PASSED
+19:   Running simulation_tick_throughput... 
+19:     [perf] simulation_tick (serial)       459.58 ms, 152.31 ops/s
+19: PASSED
+19:   Running frontier_telemetry_seeded_run_eval...     [perf] frontier telemetry csv: seed,tick,frontier_sector_count,lineage_diversity_proxy,lineage_entropy_bits
+19:     [perf] frontier_telemetry seed=48048 tick=10 frontier_sector_count=14 lineage_diversity_proxy=0.976354 lineage_entropy_bits=5.260585 frontier_cells=1176 occupied_cells=2540 active_lineages=49
+19:     [perf] frontier_telemetry seed=48048 tick=20 frontier_sector_count=14 lineage_diversity_proxy=0.974089 lineage_entropy_bits=5.161312 frontier_cells=3134 occupied_cells=9629 active_lineages=49
+19:     [perf] frontier_telemetry seed=48048 tick=30 frontier_sector_count=15 lineage_diversity_proxy=0.970855 lineage_entropy_bits=5.058022 frontier_cells=5219 occupied_cells=19794 active_lineages=48
+19:     [perf] frontier_telemetry seed=48048 tick=40 frontier_sector_count=15 lineage_diversity_proxy=0.968477 lineage_entropy_bits=4.957969 frontier_cells=8163 occupied_cells=31189 active_lineages=48
+19:     [perf] frontier_telemetry seed=48048 tick=50 frontier_sector_count=16 lineage_diversity_proxy=0.965860 lineage_entropy_bits=4.904332 frontier_cells=11780 occupied_cells=42382 active_lineages=48
+19:     [perf] frontier_telemetry seed=48048 tick=60 frontier_sector_count=16 lineage_diversity_proxy=0.959898 lineage_entropy_bits=4.839403 frontier_cells=16125 occupied_cells=51648 active_lineages=48
+19: 
+19:     [perf] frontier telemetry compute     259.85 ms, 230.90 ops/s
+19: PASSED
+19:   Running atomic_tick_throughput_and_speedup_eval... 
+19:     [perf] atomic_tick (4 threads)        194.35 ms, 308.73 ops/s
+19: 
+19:     [perf] simulation_tick baseline       342.38 ms, 175.25 ops/s
+19:     [perf] atomic/serial time ratio: 0.57x
+19: PASSED
+19:   Running atomic_tick_thread_scaling_eval... 
+19:     [perf] atomic_tick (1 thread)         120.92 ms, 330.81 ops/s
+19: 
+19:     [perf] atomic_tick (2 threads)        111.23 ms, 359.62 ops/s
+19: 
+19:     [perf] atomic_tick (4 threads)        109.49 ms, 365.32 ops/s
+19:     [perf] speedup vs 1-thread: 2-thread=1.09x 4-thread=1.10x
+19: PASSED
+19:   Running atomic_tick_phase_breakdown_eval... 
+19:     [perf] atomic phase: age              83.03 ms, 602.18 ops/s
+19: 
+19:     [perf] atomic phase: spread           21.06 ms, 2374.17 ops/s
+19: 
+19:     [perf] atomic phase: sync_to_world    1.86 ms, 26910.65 ops/s
+19: 
+19:     [perf] atomic phase: serial core      42.55 ms, 1175.06 ops/s
+19: 
+19:     [perf] atomic phase: sync_from_world  3.37 ms, 14850.02 ops/s
+19: 
+19:     [perf] atomic phase: total            151.87 ms, 329.23 ops/s
+19:     [perf] atomic phase share: age=54.7% spread=13.9% sync_to=1.2% serial=28.0% sync_from=2.2% overhead=0.0%
+19: PASSED
+19:   Running atomic_sync_throughput_scaling_eval... 
+19:     [perf] sync_to_world 200x100          0.69 ms, 116448.28 ops/s
+19: 
+19:     [perf] sync_from_world 200x100        2.84 ms, 28178.94 ops/s
+19:     [perf] sync_to_world 200x100: 2328.97 Mcells/s
+19:     [perf] sync_from_world 200x100: 563.58 Mcells/s
+19: 
+19:     [perf] sync_to_world 400x200          2.89 ms, 27643.40 ops/s
+19: 
+19:     [perf] sync_from_world 400x200        10.35 ms, 7727.98 ops/s
+19:     [perf] sync_to_world 400x200: 2211.47 Mcells/s
+19:     [perf] sync_from_world 400x200: 618.24 Mcells/s
+19: 
+19:     [perf] sync_to_world 800x400          11.66 ms, 6858.71 ops/s
+19: 
+19:     [perf] sync_from_world 800x400        37.73 ms, 2120.33 ops/s
+19:     [perf] sync_to_world 800x400: 2194.79 Mcells/s
+19:     [perf] sync_from_world 800x400: 678.51 Mcells/s
+19:     [perf] sync_to scaling vs 200x100: 400x200=0.95x 800x400=0.94x
+19:     [perf] sync_from scaling vs 200x100: 400x200=1.10x 800x400=1.20x
+19: PASSED
+19:   Running threadpool_task_throughput... 
+19:     [perf] threadpool submit+execute      25.93 ms, 3856685.51 ops/s
+19: PASSED
+19:   Running threadpool_granularity_eval... 
+19:     [perf] threadpool tiny tasks          23.74 ms, 4212654.83 ops/s
+19: 
+19:     [perf] threadpool chunked submit      13.68 ms, 7307270.76 ops/s
+19: 
+19:     [perf] threadpool batched tasks       0.74 ms, 135135089.85 ops/s
+19:     [perf] tiny/chunked-submit ratio: 1.73x
+19:     [perf] tiny/batched ratio: 32.08x
+19:     [hint] task submission overhead is high; consider coarser work units
+19: PASSED
+19:   Running threadpool_worker_follow_on_submit_eval... 
+19:     [perf] threadpool worker follow-on    1.06 ms, 93896750.61 ops/s
+19: PASSED
+19: 
+19: --- Performance Eval Results ---
+19: Passed: 14
+19: Failed: 0
+2/3 Test #19: PerformanceEvalTests .............   Passed    2.02 sec
+test 20
+    Start 20: PerformanceComponentTests
+
+20: Test command: /Users/okunow/Desktop/ferox-wt-143/build-perf/release/tests/test_perf_components
+20: Working Directory: /Users/okunow/Desktop/ferox-wt-143/build-perf/release/tests
+20: Test timeout computed to be: 180
+20: 
+20: === Performance Component Tests ===
+20:     (Set FEROX_PERF_SCALE=2..20 for heavier benchmark loops)
+20: 
+20:   Running simulation_update_nutrients_component_eval... 
+20:     [perf] simulation_update_nutrients        7.02 ms, 22805.02 ops/s
+20: PASSED
+20:   Running simulation_spread_component_eval... 
+20:     [perf] simulation_spread                  11.16 ms, 7167.82 ops/s
+20: PASSED
+20:   Running simulation_update_scents_component_eval... 
+20:     [perf] simulation_update_scents           47.28 ms, 3384.09 ops/s
+20: PASSED
+20:   Running simulation_resolve_combat_component_eval... 
+20:     [perf] simulation_resolve_combat          11.44 ms, 3496.81 ops/s
+20: PASSED
+20:   Running simulation_resolve_combat_sparse_border_component_eval... 
+20:     [perf] simulation_resolve_combat_sparse_border 7.52 ms, 5320.56 ops/s
+20: PASSED
+20:   Running frontier_telemetry_component_eval... 
+20:     [perf] frontier_telemetry_compute         5.69 ms, 14069.65 ops/s
+20: PASSED
+20:   Running atomic_spread_phase_component_eval... 
+20:     [perf] atomic_age phase                   2.29 ms, 52310.37 ops/s
+20: 
+20:     [perf] atomic_spread phase                1.74 ms, 68846.81 ops/s
+20: PASSED
+20:   Running snapshot_build_component_eval... 
+20:     [perf] server snapshot build              8.14 ms, 39321.70 ops/s
+20: PASSED
+20: 
+20: --- Performance Component Results ---
+20: Passed: 8
+20: Failed: 0
+3/3 Test #20: PerformanceComponentTests ........   Passed    3.44 sec
+
+The following tests passed:
+	SimdEvalTests
+	PerformanceEvalTests
+	PerformanceComponentTests
+
+100% tests passed, 0 tests failed out of 3
+
+Total Test time (real) =   5.47 sec

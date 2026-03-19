@@ -153,7 +153,6 @@ Profile presets are tuned as follows:
       - `[atomic_tick]`
 4. Only claim win when multiple runs point in same direction.
 
-<<<<<<< HEAD
 For issue `#143`, treat the default-profile rebaseline as complete only when the
 artifact set captures both time-based metrics and transport-size metrics from the
 same repeated-run pass.

@@ -1,0 +1,124 @@
+scenario,build_type,scale,repeat,metric,ms,ops_per_sec
+release_scale2,Release,2,1,name+color generation,15.470000,6462453.160000
+release_scale2,Release,2,1,world create/init/destroy,11.260000,31980.100000
+release_scale2,Release,2,1,protocol serialize+deserialize,9.980000,24038.460000
+release_scale2,Release,2,1,protocol serialize only,5.940000,40376.850000
+release_scale2,Release,2,1,protocol deserialize only,6.440000,37261.290000
+release_scale2,Release,2,1,broadcast build snapshot,4.130000,38703.440000
+release_scale2,Release,2,1,broadcast build+serialize,8.510000,18794.780000
+release_scale2,Release,2,1,broadcast end-to-end (0 clients),8.100000,19753.090000
+release_scale2,Release,2,1,simulation_tick (serial),455.780000,153.580000
+release_scale2,Release,2,1,frontier telemetry compute,275.160000,218.060000
+release_scale2,Release,2,1,atomic_tick (4 threads),216.500000,277.140000
+release_scale2,Release,2,1,simulation_tick baseline,322.080000,186.290000
+release_scale2,Release,2,1,atomic_tick (1 thread),128.670000,310.860000
+release_scale2,Release,2,1,atomic_tick (2 threads),107.080000,373.540000
+release_scale2,Release,2,1,atomic_tick (4 threads),100.770000,396.950000
+release_scale2,Release,2,1,atomic phase: age,76.520000,653.440000
+release_scale2,Release,2,1,atomic phase: spread,19.990000,2501.750000
+release_scale2,Release,2,1,atomic phase: sync_to_world,1.760000,28344.650000
+release_scale2,Release,2,1,atomic phase: serial core,40.240000,1242.420000
+release_scale2,Release,2,1,atomic phase: sync_from_world,3.170000,15767.890000
+release_scale2,Release,2,1,atomic phase: total,141.690000,352.880000
+release_scale2,Release,2,1,sync_to_world 200x100,0.700000,114942.510000
+release_scale2,Release,2,1,sync_from_world 200x100,2.600000,30792.920000
+release_scale2,Release,2,1,sync_to_world 400x200,2.510000,31859.810000
+release_scale2,Release,2,1,sync_from_world 400x200,9.500000,8421.050000
+release_scale2,Release,2,1,sync_to_world 800x400,11.160000,7165.250000
+release_scale2,Release,2,1,sync_from_world 800x400,50.060000,1598.150000
+release_scale2,Release,2,1,threadpool submit+execute,25.630000,3901982.170000
+release_scale2,Release,2,1,threadpool tiny tasks,26.500000,3772873.090000
+release_scale2,Release,2,1,threadpool chunked submit,13.560000,7376263.100000
+release_scale2,Release,2,1,threadpool batched tasks,0.720000,139081992.740000
+release_scale2,Release,2,1,threadpool worker follow-on,1.080000,92850498.510000
+release_scale2,Release,2,1,simulation_update_nutrients,8.110000,19728.730000
+release_scale2,Release,2,1,simulation_spread,14.390000,5557.490000
+release_scale2,Release,2,1,simulation_update_scents,49.120000,3257.130000
+release_scale2,Release,2,1,simulation_resolve_combat,11.300000,3539.820000
+release_scale2,Release,2,1,simulation_resolve_combat_sparse_border,6.650000,6017.750000
+release_scale2,Release,2,1,frontier_telemetry_compute,5.270000,15174.510000
+release_scale2,Release,2,1,atomic_age phase,2.280000,52631.590000
+release_scale2,Release,2,1,atomic_spread phase,1.790000,67076.580000
+release_scale2,Release,2,1,server snapshot build,8.150000,39273.440000
+release_scale2,Release,2,2,name+color generation,15.010000,6660006.720000
+release_scale2,Release,2,2,world create/init/destroy,10.860000,33143.070000
+release_scale2,Release,2,2,protocol serialize+deserialize,9.400000,25521.050000
+release_scale2,Release,2,2,protocol serialize only,5.680000,42260.960000
+release_scale2,Release,2,2,protocol deserialize only,6.000000,39986.670000
+release_scale2,Release,2,2,broadcast build snapshot,3.840000,41688.380000
+release_scale2,Release,2,2,broadcast build+serialize,8.610000,18591.680000
+release_scale2,Release,2,2,broadcast end-to-end (0 clients),8.590000,18630.650000
+release_scale2,Release,2,2,simulation_tick (serial),457.650000,152.950000
+release_scale2,Release,2,2,frontier telemetry compute,255.570000,234.770000
+release_scale2,Release,2,2,atomic_tick (4 threads),207.080000,289.740000
+release_scale2,Release,2,2,simulation_tick baseline,324.860000,184.690000
+release_scale2,Release,2,2,atomic_tick (1 thread),122.500000,326.540000
+release_scale2,Release,2,2,atomic_tick (2 threads),107.120000,373.420000
+release_scale2,Release,2,2,atomic_tick (4 threads),102.840000,388.930000
+release_scale2,Release,2,2,atomic phase: age,78.460000,637.290000
+release_scale2,Release,2,2,atomic phase: spread,20.300000,2462.690000
+release_scale2,Release,2,2,atomic phase: sync_to_world,1.780000,28026.920000
+release_scale2,Release,2,2,atomic phase: serial core,41.060000,1217.790000
+release_scale2,Release,2,2,atomic phase: sync_from_world,3.260000,15318.630000
+release_scale2,Release,2,2,atomic phase: total,144.870000,345.130000
+release_scale2,Release,2,2,sync_to_world 200x100,0.620000,128410.980000
+release_scale2,Release,2,2,sync_from_world 200x100,2.850000,28109.630000
+release_scale2,Release,2,2,sync_to_world 400x200,2.820000,28348.690000
+release_scale2,Release,2,2,sync_from_world 400x200,10.310000,7762.470000
+release_scale2,Release,2,2,sync_to_world 800x400,11.780000,6791.170000
+release_scale2,Release,2,2,sync_from_world 800x400,41.030000,1949.600000
+release_scale2,Release,2,2,threadpool submit+execute,25.350000,3944150.880000
+release_scale2,Release,2,2,threadpool tiny tasks,22.830000,4379625.940000
+release_scale2,Release,2,2,threadpool chunked submit,15.940000,6272345.290000
+release_scale2,Release,2,2,threadpool batched tasks,0.420000,240384679.310000
+release_scale2,Release,2,2,threadpool worker follow-on,1.910000,52465893.390000
+release_scale2,Release,2,2,simulation_update_nutrients,7.780000,20578.780000
+release_scale2,Release,2,2,simulation_spread,11.070000,7230.000000
+release_scale2,Release,2,2,simulation_update_scents,46.740000,3423.410000
+release_scale2,Release,2,2,simulation_resolve_combat,13.420000,2980.850000
+release_scale2,Release,2,2,simulation_resolve_combat_sparse_border,5.380000,7429.420000
+release_scale2,Release,2,2,frontier_telemetry_compute,5.300000,15080.110000
+release_scale2,Release,2,2,atomic_age phase,2.300000,52060.740000
+release_scale2,Release,2,2,atomic_spread phase,1.690000,70963.930000
+release_scale2,Release,2,2,server snapshot build,8.180000,39105.460000
+release_scale2,Release,2,3,name+color generation,14.970000,6677796.370000
+release_scale2,Release,2,3,world create/init/destroy,10.920000,32954.960000
+release_scale2,Release,2,3,protocol serialize+deserialize,9.470000,25348.540000
+release_scale2,Release,2,3,protocol serialize only,5.880000,40844.110000
+release_scale2,Release,2,3,protocol deserialize only,6.040000,39735.100000
+release_scale2,Release,2,3,broadcast build snapshot,3.990000,40050.060000
+release_scale2,Release,2,3,broadcast build+serialize,8.510000,18790.370000
+release_scale2,Release,2,3,broadcast end-to-end (0 clients),8.500000,18823.530000
+release_scale2,Release,2,3,simulation_tick (serial),459.580000,152.310000
+release_scale2,Release,2,3,frontier telemetry compute,259.850000,230.900000
+release_scale2,Release,2,3,atomic_tick (4 threads),194.350000,308.730000
+release_scale2,Release,2,3,simulation_tick baseline,342.380000,175.250000
+release_scale2,Release,2,3,atomic_tick (1 thread),120.920000,330.810000
+release_scale2,Release,2,3,atomic_tick (2 threads),111.230000,359.620000
+release_scale2,Release,2,3,atomic_tick (4 threads),109.490000,365.320000
+release_scale2,Release,2,3,atomic phase: age,83.030000,602.180000
+release_scale2,Release,2,3,atomic phase: spread,21.060000,2374.170000
+release_scale2,Release,2,3,atomic phase: sync_to_world,1.860000,26910.650000
+release_scale2,Release,2,3,atomic phase: serial core,42.550000,1175.060000
+release_scale2,Release,2,3,atomic phase: sync_from_world,3.370000,14850.020000
+release_scale2,Release,2,3,atomic phase: total,151.870000,329.230000
+release_scale2,Release,2,3,sync_to_world 200x100,0.690000,116448.280000
+release_scale2,Release,2,3,sync_from_world 200x100,2.840000,28178.940000
+release_scale2,Release,2,3,sync_to_world 400x200,2.890000,27643.400000
+release_scale2,Release,2,3,sync_from_world 400x200,10.350000,7727.980000
+release_scale2,Release,2,3,sync_to_world 800x400,11.660000,6858.710000
+release_scale2,Release,2,3,sync_from_world 800x400,37.730000,2120.330000
+release_scale2,Release,2,3,threadpool submit+execute,25.930000,3856685.510000
+release_scale2,Release,2,3,threadpool tiny tasks,23.740000,4212654.830000
+release_scale2,Release,2,3,threadpool chunked submit,13.680000,7307270.760000
+release_scale2,Release,2,3,threadpool batched tasks,0.740000,135135089.850000
+release_scale2,Release,2,3,threadpool worker follow-on,1.060000,93896750.610000
+release_scale2,Release,2,3,simulation_update_nutrients,7.020000,22805.020000
+release_scale2,Release,2,3,simulation_spread,11.160000,7167.820000
+release_scale2,Release,2,3,simulation_update_scents,47.280000,3384.090000
+release_scale2,Release,2,3,simulation_resolve_combat,11.440000,3496.810000
+release_scale2,Release,2,3,simulation_resolve_combat_sparse_border,7.520000,5320.560000
+release_scale2,Release,2,3,frontier_telemetry_compute,5.690000,14069.650000
+release_scale2,Release,2,3,atomic_age phase,2.290000,52310.370000
+release_scale2,Release,2,3,atomic_spread phase,1.740000,68846.810000
+release_scale2,Release,2,3,server snapshot build,8.140000,39321.700000

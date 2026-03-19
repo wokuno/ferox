@@ -8,23 +8,23 @@
     "scale": 2,
     "repeats": 3
   },
-  "artifact_dir": "artifacts/perf/20260319-132255",
+  "artifact_dir": "artifacts/perf/20260319-172155",
   "metrics": {
-    "simulation_tick_serial_ms": 441.52,
-    "atomic_tick_1_thread_ms": 122.7,
-    "atomic_tick_2_threads_ms": 107.82,
-    "atomic_tick_4_threads_ms": 150.305,
-    "broadcast_build_snapshot_ms": 3.98,
-    "broadcast_build_serialize_ms": 8.67,
-    "broadcast_end_to_end_ms": 8.74,
-    "threadpool_tiny_tasks_ms": 14.49,
-    "threadpool_chunked_submit_ms": 8.91,
-    "threadpool_batched_tasks_ms": 0.66,
-    "server_snapshot_build_ms": 8.32,
-    "protocol_serialize_deserialize_ms": 9.65
+    "simulation_tick_serial_ms": 457.65,
+    "atomic_tick_1_thread_ms": 122.5,
+    "atomic_tick_2_threads_ms": 107.12,
+    "atomic_tick_4_threads_ms": 151.92,
+    "broadcast_build_snapshot_ms": 3.99,
+    "broadcast_build_serialize_ms": 8.51,
+    "broadcast_end_to_end_ms": 8.5,
+    "threadpool_tiny_tasks_ms": 23.74,
+    "threadpool_chunked_submit_ms": 13.68,
+    "threadpool_batched_tasks_ms": 0.72,
+    "server_snapshot_build_ms": 8.15,
+    "protocol_serialize_deserialize_ms": 9.47
   },
   "ratios": {
-    "atomic_serial_time_ratio": 0.6567,
-    "tiny_batched_ratio": 21.7367
+    "atomic_serial_time_ratio": 0.6267,
+    "tiny_batched_ratio": 41.2767
   }
 }
