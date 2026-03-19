@@ -79,6 +79,9 @@ See `docs/DEVELOPMENT_CYCLE.md` for the full process covering issue intake,
 project tracking, umbrella issues, validation expectations, PR hygiene, and
 merge follow-up.
 
+Maintainers should also use `docs/PROJECT_HYGIENE.md` for the GitHub Project,
+label, milestone, wave, and umbrella-issue maintenance loop.
+
 ## Code Style
 
 ### General Guidelines

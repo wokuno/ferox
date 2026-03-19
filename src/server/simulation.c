@@ -281,6 +281,63 @@ static void emit_layer_signal(
     }
 }
 
+static void seed_decayed_layer(float* dst,
+                               uint32_t* dst_source,
+                               const float* src,
+                               const uint32_t* src_source,
+                               int total,
+                               float decay_factor,
+                               float clear_threshold) {
+    if (!dst || !src || total <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < total; i++) {
+        float value = utils_clamp_f(src[i] * decay_factor, 0.0f, 1.0f);
+        dst[i] = value;
+        if (dst_source) {
+            dst_source[i] = (src_source && value >= clear_threshold) ? src_source[i] : 0;
+        }
+    }
+}
+
+static uint32_t simulation_hash_mix(uint32_t state, uint32_t value) {
+    return hash_u32(state ^ hash_u32(value + 0x9E3779B9u));
+}
+
+static float simulation_event_random(uint32_t tick,
+                                     int x,
+                                     int y,
+                                     int dir,
+                                     uint32_t attacker_id,
+                                     uint32_t defender_id,
+                                     uint32_t salt) {
+    (void)tick;
+    uint32_t state = hash_u32(salt);
+    state = simulation_hash_mix(state, (uint32_t)x);
+    state = simulation_hash_mix(state, (uint32_t)y);
+    state = simulation_hash_mix(state, (uint32_t)dir);
+    state = simulation_hash_mix(state, attacker_id);
+    state = simulation_hash_mix(state, defender_id);
+    return hash_to_float(state);
+}
+
+static uint32_t simulation_event_priority(uint32_t tick,
+                                          int x,
+                                          int y,
+                                          int dir,
+                                          uint32_t attacker_id,
+                                          uint32_t defender_id) {
+    (void)tick;
+    uint32_t state = hash_u32(0xA5A5A5A5u);
+    state = simulation_hash_mix(state, (uint32_t)x);
+    state = simulation_hash_mix(state, (uint32_t)y);
+    state = simulation_hash_mix(state, (uint32_t)dir);
+    state = simulation_hash_mix(state, attacker_id);
+    state = simulation_hash_mix(state, defender_id);
+    return state;
+}
+
 // Calculate local population density around a cell
 static float calculate_local_density(World* world, int x, int y, uint32_t colony_id) {
     int count = 0;
@@ -1094,28 +1151,101 @@ void simulation_update_behavior_layers(World* world) {
     if (!world) return;
 
     int total_cells = world->width * world->height;
+    float* signal_layer = world->scratch_signals;
+    float* alarm_layer = world->scratch_alarm_signals;
+    float* toxin_layer = world->scratch_toxins;
+    uint32_t* signal_sources = world->scratch_sources;
+    uint32_t* alarm_sources = world->scratch_alarm_sources;
+    bool heap_signal_layer = false;
+    bool heap_alarm_layer = false;
+    bool heap_toxin_layer = false;
+    bool heap_signal_sources = false;
+    bool heap_alarm_sources = false;
+
+    if (world->signals && !signal_layer) {
+        signal_layer = (float*)calloc((size_t)total_cells, sizeof(float));
+        if (!signal_layer) {
+            return;
+        }
+        heap_signal_layer = true;
+    }
+
+    if (world->alarm_signals && !alarm_layer) {
+        alarm_layer = (float*)calloc((size_t)total_cells, sizeof(float));
+        if (!alarm_layer) {
+            if (heap_signal_layer) free(signal_layer);
+            return;
+        }
+        heap_alarm_layer = true;
+    }
+
+    if (world->toxins && !toxin_layer) {
+        toxin_layer = (float*)calloc((size_t)total_cells, sizeof(float));
+        if (!toxin_layer) {
+            if (heap_signal_layer) free(signal_layer);
+            if (heap_alarm_layer) free(alarm_layer);
+            return;
+        }
+        heap_toxin_layer = true;
+    }
+
+    if (world->signals && world->signal_source && !signal_sources) {
+        signal_sources = (uint32_t*)calloc((size_t)total_cells, sizeof(uint32_t));
+        if (!signal_sources) {
+            if (heap_signal_layer) free(signal_layer);
+            if (heap_alarm_layer) free(alarm_layer);
+            if (heap_toxin_layer) free(toxin_layer);
+            return;
+        }
+        heap_signal_sources = true;
+    }
+
+    if (world->alarm_signals && world->alarm_source && !alarm_sources) {
+        alarm_sources = (uint32_t*)calloc((size_t)total_cells, sizeof(uint32_t));
+        if (!alarm_sources) {
+            if (heap_signal_layer) free(signal_layer);
+            if (heap_alarm_layer) free(alarm_layer);
+            if (heap_toxin_layer) free(toxin_layer);
+            if (heap_signal_sources) free(signal_sources);
+            return;
+        }
+        heap_alarm_sources = true;
+    }
+
     for (int i = 0; i < total_cells; i++) {
         if (world->nutrients && world->cells[i].colony_id == 0) {
             world->nutrients[i] = utils_clamp_f(world->nutrients[i] + NUTRIENT_REGEN_RATE * 1.5f, 0.0f, 1.0f);
         }
+    }
 
-        if (world->toxins) {
-            world->toxins[i] = utils_clamp_f(world->toxins[i] * (1.0f - TOXIN_DECAY_RATE * 1.5f), 0.0f, 1.0f);
-        }
+    if (world->signals) {
+        seed_decayed_layer(signal_layer,
+                           signal_sources,
+                           world->signals,
+                           world->signal_source,
+                           total_cells,
+                           1.0f - SIGNAL_DECAY_RATE,
+                           0.01f);
+    }
 
-        if (world->signals) {
-            world->signals[i] = utils_clamp_f(world->signals[i] * (1.0f - SIGNAL_DECAY_RATE), 0.0f, 1.0f);
-            if (world->signal_source && world->signals[i] < 0.01f) {
-                world->signal_source[i] = 0;
-            }
-        }
+    if (world->alarm_signals) {
+        seed_decayed_layer(alarm_layer,
+                           alarm_sources,
+                           world->alarm_signals,
+                           world->alarm_source,
+                           total_cells,
+                           1.0f - ALARM_DECAY_RATE,
+                           0.01f);
+    }
 
-        if (world->alarm_signals) {
-            world->alarm_signals[i] = utils_clamp_f(world->alarm_signals[i] * (1.0f - ALARM_DECAY_RATE), 0.0f, 1.0f);
-            if (world->alarm_source && world->alarm_signals[i] < 0.01f) {
-                world->alarm_source[i] = 0;
-            }
-        }
+    if (world->toxins) {
+        seed_decayed_layer(toxin_layer,
+                           NULL,
+                           world->toxins,
+                           NULL,
+                           total_cells,
+                           1.0f - TOXIN_DECAY_RATE * 1.5f,
+                           0.0f);
     }
 
     for (int y = 0; y < world->height; y++) {
@@ -1148,7 +1278,7 @@ void simulation_update_behavior_layers(World* world) {
                 if (colony->is_dormant) {
                     signal_emit *= 0.45f;
                 }
-                emit_layer_signal(world->signals, world->signal_source, world->width, world->height,
+                emit_layer_signal(signal_layer, signal_sources, world->width, world->height,
                                   x, y, colony->id, signal_emit);
             }
 
@@ -1159,7 +1289,7 @@ void simulation_update_behavior_layers(World* world) {
                     alarm_emit *= (0.5f + colony->genome.signal_emission * 0.5f);
                     alarm_emit *= (0.7f + colony->behavior_actions[COLONY_ACTION_DEFEND] * 0.7f);
                 }
-                emit_layer_signal(world->alarm_signals, world->alarm_source, world->width, world->height,
+                emit_layer_signal(alarm_layer, alarm_sources, world->width, world->height,
                                   x, y, colony->id, alarm_emit);
             }
 
@@ -1170,11 +1300,38 @@ void simulation_update_behavior_layers(World* world) {
                 }
                 toxin_emit *= (0.75f + colony->behavior_actions[COLONY_ACTION_ATTACK] * 0.55f +
                                colony->behavior_actions[COLONY_ACTION_DEFEND] * 0.25f);
-                emit_layer_signal(world->toxins, NULL, world->width, world->height,
+                emit_layer_signal(toxin_layer,
+                                  NULL,
+                                  world->width,
+                                  world->height,
                                   x, y, colony->id, toxin_emit);
             }
         }
     }
+
+    if (world->signals) {
+        memcpy(world->signals, signal_layer, (size_t)total_cells * sizeof(float));
+        if (world->signal_source) {
+            memcpy(world->signal_source, signal_sources, (size_t)total_cells * sizeof(uint32_t));
+        }
+    }
+
+    if (world->alarm_signals) {
+        memcpy(world->alarm_signals, alarm_layer, (size_t)total_cells * sizeof(float));
+        if (world->alarm_source) {
+            memcpy(world->alarm_source, alarm_sources, (size_t)total_cells * sizeof(uint32_t));
+        }
+    }
+
+    if (world->toxins) {
+        memcpy(world->toxins, toxin_layer, (size_t)total_cells * sizeof(float));
+    }
+
+    if (heap_alarm_sources) free(alarm_sources);
+    if (heap_signal_sources) free(signal_sources);
+    if (heap_toxin_layer) free(toxin_layer);
+    if (heap_alarm_layer) free(alarm_layer);
+    if (heap_signal_layer) free(signal_layer);
 }
 
 void simulation_update_scents(World* world) {
@@ -1711,25 +1868,61 @@ void simulation_consume_resources(World* world) {
 // Combat resolution when colonies meet at borders
 void simulation_resolve_combat(World* world) {
     if (!world) return;
-    
-    // Decay existing toxins
-    if (world->toxins) {
-        int total = world->width * world->height;
-        for (int i = 0; i < total; i++) {
-            world->toxins[i] *= 0.95f;  // 5% decay per tick
+
+    int total = world->width * world->height;
+    float* combat_toxins = world->scratch_toxins;
+    bool heap_combat_toxins = false;
+    if (world->toxins && !combat_toxins) {
+        combat_toxins = (float*)calloc((size_t)total, sizeof(float));
+        if (!combat_toxins) {
+            return;
         }
+        heap_combat_toxins = true;
     }
-    
-    typedef struct { int x, y; uint32_t winner; uint32_t loser; float strength; } CombatResult;
-    CombatResult* results = NULL;
-    int result_count = 0;
-    int result_capacity = 128;
-    results = (CombatResult*)malloc(result_capacity * sizeof(CombatResult));
-    if (!results) return;
+
+    if (world->toxins) {
+        seed_decayed_layer(combat_toxins,
+                           NULL,
+                           world->toxins,
+                           NULL,
+                           total,
+                           0.95f,
+                           0.0f);
+    }
+
+    typedef struct {
+        int x, y;
+        uint32_t winner;
+        uint32_t loser;
+        float strength;
+        uint32_t priority;
+    } CombatResult;
+    CombatResult* best_results = (CombatResult*)calloc((size_t)total, sizeof(CombatResult));
+    uint8_t* has_result = (uint8_t*)calloc((size_t)total, sizeof(uint8_t));
+    float* success_deltas = NULL;
+    if (world->colony_count > 0) {
+        success_deltas = (float*)calloc(world->colony_count * DIR_COUNT, sizeof(float));
+    }
+    if (!best_results || !has_result || (world->colony_count > 0 && !success_deltas)) {
+        free(best_results);
+        free(has_result);
+        free(success_deltas);
+        if (heap_combat_toxins) {
+            free(combat_toxins);
+        }
+        return;
+    }
+
+    uint32_t tick = (uint32_t)world->tick;
+    bool reverse_y = (tick & 1u) != 0u;
+    bool reverse_x_base = ((tick >> 1) & 1u) != 0u;
     
     // First pass: emit toxins from aggressive colonies to create hostile zones
-    for (int y = 0; y < world->height; y++) {
-        for (int x = 0; x < world->width; x++) {
+    for (int row = 0; row < world->height; row++) {
+        int y = reverse_y ? (world->height - 1 - row) : row;
+        bool reverse_x = reverse_x_base ^ ((row & 1) != 0);
+        for (int step = 0; step < world->width; step++) {
+            int x = reverse_x ? (world->width - 1 - step) : step;
             Cell* cell = world_get_cell(world, x, y);
             if (!cell || cell->colony_id == 0 || !cell->is_border) continue;
             
@@ -1741,26 +1934,35 @@ void simulation_resolve_combat(World* world) {
             if (toxin_emit > 0.01f) {
                 // Emit to self and neighbors
                 int idx = y * world->width + x;
-                world->toxins[idx] = utils_clamp_f(world->toxins[idx] + toxin_emit, 0.0f, 1.0f);
+                combat_toxins[idx] = utils_clamp_f(combat_toxins[idx] + toxin_emit, 0.0f, 1.0f);
                 for (int d = 0; d < 4; d++) {
                     int nx = x + DX[d], ny = y + DY[d];
                     if (nx >= 0 && nx < world->width && ny >= 0 && ny < world->height) {
                         int ni = ny * world->width + nx;
-                        world->toxins[ni] = utils_clamp_f(world->toxins[ni] + toxin_emit * 0.5f, 0.0f, 1.0f);
+                        combat_toxins[ni] = utils_clamp_f(combat_toxins[ni] + toxin_emit * 0.5f, 0.0f, 1.0f);
                     }
                 }
             }
         }
     }
+
+    if (world->toxins) {
+        memcpy(world->toxins, combat_toxins, (size_t)total * sizeof(float));
+    }
     
     // Second pass: resolve combat at borders with strategic modifiers
-    for (int y = 0; y < world->height; y++) {
-        for (int x = 0; x < world->width; x++) {
+    for (int row = 0; row < world->height; row++) {
+        int y = reverse_y ? (world->height - 1 - row) : row;
+        bool reverse_x = reverse_x_base ^ ((row & 1) != 0);
+        for (int step = 0; step < world->width; step++) {
+            int x = reverse_x ? (world->width - 1 - step) : step;
             Cell* cell = world_get_cell(world, x, y);
             if (!cell || cell->colony_id == 0 || !cell->is_border) continue;
             
             Colony* attacker = world_get_colony(world, cell->colony_id);
             if (!attacker || !attacker->active) continue;
+            size_t attacker_index = (size_t)(attacker - world->colonies);
+            bool attacker_index_valid = attacker_index < world->colony_count;
 
             float attacker_attack_action = attacker->behavior_actions[COLONY_ACTION_ATTACK];
             float attacker_defend_action = attacker->behavior_actions[COLONY_ACTION_DEFEND];
@@ -1870,38 +2072,69 @@ void simulation_resolve_combat(World* world) {
                 float attack_chance = attack_str / (attack_str + defend_str + 0.1f);
                 
                 // High combat rate for dynamic, active borders
-                if (rand_float() < attack_chance * 0.9f) {
-                    // Attacker wins - record result
-                    if (result_count >= result_capacity) {
-                        result_capacity *= 2;
-                        CombatResult* new_results = (CombatResult*)realloc(results, result_capacity * sizeof(CombatResult));
-                        if (!new_results) { free(results); return; }
-                        results = new_results;
+                float attack_roll = simulation_event_random(tick, x, y, d,
+                                                            cell->colony_id,
+                                                            neighbor->colony_id,
+                                                            0x13579BDFu);
+                if (attack_roll < attack_chance * 0.9f) {
+                    int target_idx = ny * world->width + nx;
+                    uint32_t priority = simulation_event_priority(tick, x, y, d,
+                                                                  cell->colony_id,
+                                                                  neighbor->colony_id);
+                    bool replace = !has_result[target_idx] ||
+                                   attack_str > best_results[target_idx].strength + 0.0001f ||
+                                   (fabsf(attack_str - best_results[target_idx].strength) <= 0.0001f &&
+                                    priority > best_results[target_idx].priority);
+                    if (replace) {
+                        best_results[target_idx] = (CombatResult){nx, ny, cell->colony_id, neighbor->colony_id, attack_str, priority};
+                        has_result[target_idx] = 1;
                     }
-                    results[result_count++] = (CombatResult){nx, ny, cell->colony_id, neighbor->colony_id, attack_str};
-                    
-                    // Update success history for learning
-                    if (d < 8) {
-                        attacker->success_history[d] = utils_clamp_f(
-                            attacker->success_history[d] + 0.05f * attacker->genome.learning_rate, 0.0f, 1.0f);
+
+                    if (attacker_index_valid && d < DIR_COUNT) {
+                        success_deltas[attacker_index * DIR_COUNT + (size_t)d] +=
+                            0.05f * attacker->genome.learning_rate;
                     }
-                } else if (rand_float() < 0.3f) {
-                    // Defender successfully defends - slight penalty to attacker's direction
-                    if (d < 8) {
-                        attacker->success_history[d] = utils_clamp_f(
-                            attacker->success_history[d] - 0.02f * attacker->genome.learning_rate, 0.0f, 1.0f);
+                } else {
+                    float defend_roll = simulation_event_random(tick, x, y, d,
+                                                                cell->colony_id,
+                                                                neighbor->colony_id,
+                                                                0x2468ACE1u);
+                    if (defend_roll >= 0.3f) {
+                        continue;
+                    }
+
+                    if (attacker_index_valid && d < DIR_COUNT) {
+                        success_deltas[attacker_index * DIR_COUNT + (size_t)d] -=
+                            0.02f * attacker->genome.learning_rate;
                     }
                 }
             }
         }
     }
-    
-    // Apply combat results
-    for (int i = 0; i < result_count; i++) {
-        Cell* cell = world_get_cell(world, results[i].x, results[i].y);
-        if (cell && cell->colony_id == results[i].loser) {
-            Colony* loser = world_get_colony(world, results[i].loser);
-            Colony* winner = world_get_colony(world, results[i].winner);
+
+    for (size_t i = 0; i < world->colony_count; i++) {
+        Colony* colony = &world->colonies[i];
+        if (!colony->active) {
+            continue;
+        }
+        for (int d = 0; d < DIR_COUNT; d++) {
+            float delta = success_deltas[i * DIR_COUNT + (size_t)d];
+            if (delta != 0.0f) {
+                colony->success_history[d] = utils_clamp_f(colony->success_history[d] + delta, 0.0f, 1.0f);
+            }
+        }
+    }
+
+    for (int idx = 0; idx < total; idx++) {
+        if (!has_result[idx]) {
+            continue;
+        }
+
+        CombatResult* result = &best_results[idx];
+        Cell* cell = &world->cells[idx];
+        if (cell->colony_id == result->loser) {
+            Colony* loser = world_get_colony(world, result->loser);
+            Colony* winner = world_get_colony(world, result->winner);
             
             if (loser && loser->cell_count > 0) {
                 loser->cell_count--;
@@ -1911,7 +2144,7 @@ void simulation_resolve_combat(World* world) {
             
             // Cell is captured by winner
             if (winner && winner->active) {
-                cell->colony_id = results[i].winner;
+                cell->colony_id = result->winner;
                 cell->age = 0;
                 cell->is_border = true;
                 winner->cell_count++;
@@ -1924,8 +2157,13 @@ void simulation_resolve_combat(World* world) {
             }
         }
     }
-    
-    free(results);
+
+    free(success_deltas);
+    free(has_result);
+    free(best_results);
+    if (heap_combat_toxins) {
+        free(combat_toxins);
+    }
 }
 
 void simulation_tick(World* world) {

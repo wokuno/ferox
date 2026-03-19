@@ -612,6 +612,7 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
     if (end_y > (int)world->height) end_y = (int)world->height;
     
     float cell_size_pixels = renderer->zoom;
+    bool draw_cell_borders = cell_size_pixels >= 3.0f;
     
     // Use grid-based rendering if grid data is available
     if (world->has_grid && world->grid && world->grid_size > 0) {
@@ -647,12 +648,12 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
                 }
                 
                 // Get screen position
-                int sx, sy;
-                gui_renderer_world_to_screen(renderer, (float)wx, (float)wy, &sx, &sy);
-                
-                // Calculate cell size
-                int cell_w = (int)(cell_size_pixels + 0.5f);
-                int cell_h = (int)(cell_size_pixels + 0.5f);
+                int sx0, sy0, sx1, sy1;
+                gui_renderer_world_to_screen(renderer, (float)wx, (float)wy, &sx0, &sy0);
+                gui_renderer_world_to_screen(renderer, (float)(wx + 1), (float)(wy + 1), &sx1, &sy1);
+
+                int cell_w = sx1 - sx0;
+                int cell_h = sy1 - sy0;
                 if (cell_w < 1) cell_w = 1;
                 if (cell_h < 1) cell_h = 1;
                 
@@ -661,7 +662,7 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
                 uint8_t col_g = colony->color_g;
                 uint8_t col_b = colony->color_b;
                 
-                if (is_border) {
+                if (is_border && draw_cell_borders) {
                     // Darker border color
                     col_r = (uint8_t)(col_r * 0.6f);
                     col_g = (uint8_t)(col_g * 0.6f);
@@ -677,7 +678,7 @@ void gui_renderer_draw_world(GuiRenderer* renderer, const ProtoWorld* world) {
                 }
                 
                 SDL_SetRenderDrawColor(r, col_r, col_g, col_b, 255);
-                SDL_Rect cell_rect = { sx, sy, cell_w, cell_h };
+                SDL_Rect cell_rect = { sx0, sy0, cell_w, cell_h };
                 SDL_RenderFillRect(r, &cell_rect);
             }
         }
@@ -1037,12 +1038,13 @@ void gui_renderer_draw_colony_info(GuiRenderer* renderer, const ProtoColony* col
 }
 
 void gui_renderer_draw_status_bar(GuiRenderer* renderer, uint32_t tick, int colony_count,
-                                   bool paused, float speed, float fps) {
+                                   bool paused, float speed, float fps, float tps,
+                                   uint32_t last_update_ms, float zoom) {
     if (!renderer) return;
     
     SDL_Renderer* r = renderer->renderer;
     
-    int bar_height = 30;
+    int bar_height = 48;
     int bar_y = renderer->window_height - bar_height;
     
     // Status bar background
@@ -1085,11 +1087,25 @@ void gui_renderer_draw_status_bar(GuiRenderer* renderer, uint32_t tick, int colo
     char fps_buf[16];
     snprintf(fps_buf, sizeof(fps_buf), "FPS: %.0f", fps);
     gui_renderer_draw_text(renderer, 340, bar_y + 10, fps_buf, 150, 200, 150);
+
+    char tps_buf[16];
+    snprintf(tps_buf, sizeof(tps_buf), "TPS: %.1f", tps);
+    gui_renderer_draw_text(renderer, 430, bar_y + 10, tps_buf, 140, 210, 210);
+
+    char latency_buf[24];
+    snprintf(latency_buf, sizeof(latency_buf), "Net age: %ums", last_update_ms);
+    gui_renderer_draw_text(renderer, 530, bar_y + 10, latency_buf, 190, 170, 140);
+
+    char zoom_buf[20];
+    snprintf(zoom_buf, sizeof(zoom_buf), "Zoom: %.1fx", zoom);
+    gui_renderer_draw_text(renderer, 650, bar_y + 10, zoom_buf, 170, 170, 210);
     
     // Colony count
     char colony_buf[24];
     snprintf(colony_buf, sizeof(colony_buf), "Colonies: %d", colony_count);
     gui_renderer_draw_text(renderer, renderer->window_width - 120, bar_y + 10, colony_buf, 180, 200, 180);
+
+    gui_renderer_draw_text(renderer, 15, bar_y + 28, "Perf: FPS=render  TPS=sim  Net age=time since last world update", 120, 130, 150);
 }
 
 // Draw text using bitmap font

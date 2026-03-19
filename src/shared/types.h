@@ -264,10 +264,12 @@ typedef struct {
     uint32_t* alarm_source;
     
     float* scratch_signals;
+    float* scratch_alarm_signals;
     float* scratch_nutrients;
     float* scratch_toxins;
     float* scratch_eps;
     uint32_t* scratch_sources;
+    uint32_t* scratch_alarm_sources;
 
     struct {
         bool enabled;

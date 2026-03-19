@@ -80,6 +80,41 @@ server_args() {
     printf '%s\n' "${args[@]}"
 }
 
+read_server_args() {
+    SERVER_ARGS=()
+    while IFS= read -r arg; do
+        SERVER_ARGS+=("$arg")
+    done < <(server_args)
+}
+
+check_server_port_available() {
+    if [[ "$PORT" == "0" ]]; then
+        return 0
+    fi
+
+    if python3 - "$PORT" <<'PY'
+import socket
+import sys
+
+port = int(sys.argv[1])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    sock.bind(("0.0.0.0", port))
+except OSError:
+    sys.exit(1)
+finally:
+    sock.close()
+sys.exit(0)
+PY
+    then
+        return 0
+    fi
+
+    echo "❌ Port $PORT is already in use"
+    echo "   Stop the existing server or choose another port with -p"
+    exit 1
+}
+
 # Parse additional arguments
 shift 2>/dev/null || true
 while [[ $# -gt 0 ]]; do
@@ -157,14 +192,15 @@ echo ""
 case "$MODE" in
     server)
         check_executable "$SERVER_BIN"
+        check_server_port_available
         echo "🦠 Starting server on port $PORT..."
         echo "   World: ${WORLD_WIDTH}x${WORLD_HEIGHT}"
         echo "   Threads: $THREADS"
         echo "   Colonies: $COLONIES"
         echo "   Tick rate: ${TICK_RATE}ms"
         echo ""
-        mapfile -t args < <(server_args)
-        "$SERVER_BIN" "${args[@]}"
+        read_server_args
+        "$SERVER_BIN" "${SERVER_ARGS[@]}"
         ;;
     
     client)
@@ -192,6 +228,7 @@ case "$MODE" in
     gui+)
         check_executable "$SERVER_BIN"
         check_executable "$GUI_BIN"
+        check_server_port_available
         
         echo "🦠 Starting server on port $PORT..."
         echo "   World: ${WORLD_WIDTH}x${WORLD_HEIGHT}"
@@ -200,8 +237,8 @@ case "$MODE" in
         echo ""
         
         # Start server in background
-        mapfile -t args < <(server_args)
-        "$SERVER_BIN" "${args[@]}" &
+        read_server_args
+        "$SERVER_BIN" "${SERVER_ARGS[@]}" &
         SERVER_PID=$!
         
         # Wait for server to start
@@ -219,10 +256,6 @@ case "$MODE" in
         
         # Start GUI client in foreground
         "$GUI_BIN" -h "$HOST" -p "$PORT"
-        GUI_PID=$!
-        
-        # Wait for GUI to exit
-        wait "$GUI_PID" 2>/dev/null || true
         
         # Cleanup
         cleanup
@@ -231,6 +264,7 @@ case "$MODE" in
     both)
         check_executable "$SERVER_BIN"
         check_executable "$CLIENT_BIN"
+        check_server_port_available
         
         echo "🦠 Starting server on port $PORT..."
         echo "   World: ${WORLD_WIDTH}x${WORLD_HEIGHT}"
@@ -239,8 +273,8 @@ case "$MODE" in
         echo ""
         
         # Start server in background
-        mapfile -t args < <(server_args)
-        "$SERVER_BIN" "${args[@]}" &
+        read_server_args
+        "$SERVER_BIN" "${SERVER_ARGS[@]}" &
         SERVER_PID=$!
         
         # Wait for server to start
@@ -258,10 +292,6 @@ case "$MODE" in
         
         # Start client in foreground
         "$CLIENT_BIN" -h "$HOST" -p "$PORT"
-        CLIENT_PID=$!
-        
-        # Wait for client to exit
-        wait "$CLIENT_PID" 2>/dev/null || true
         
         # Cleanup
         cleanup

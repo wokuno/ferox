@@ -79,6 +79,17 @@ static int count_colony_cells(World* world, uint32_t colony_id) {
     return count;
 }
 
+static int count_atomic_grid_cells(AtomicCell* cells, int width, int height, uint32_t colony_id) {
+    int count = 0;
+    int total = width * height;
+    for (int i = 0; i < total; i++) {
+        if (atomic_load_explicit(&cells[i].colony_id, memory_order_relaxed) == colony_id) {
+            count++;
+        }
+    }
+    return count;
+}
+
 static void fill_colony_rect(World* world, uint32_t colony_id, int start_x, int start_y, int width, int height) {
     for (int y = start_y; y < start_y + height; y++) {
         for (int x = start_x; x < start_x + width; x++) {
@@ -831,6 +842,58 @@ TEST(atomic_tick_preserves_cell_count) {
     col = world_get_colony(world, id);
     ASSERT_EQ((int)col->cell_count, 10);
     
+    atomic_world_destroy(aworld);
+    threadpool_destroy(pool);
+    world_destroy(world);
+}
+
+TEST(atomic_spread_step_swaps_buffers_for_new_claims) {
+    World* world = world_create(7, 7);
+    ASSERT_NOT_NULL(world);
+
+    Colony colony = create_test_colony();
+    colony.genome.spread_rate = 1.0f;
+    colony.genome.metabolism = 1.0f;
+    colony.genome.nutrient_sensitivity = 1.0f;
+    for (int i = 0; i < 8; i++) {
+        colony.genome.spread_weights[i] = 1.0f;
+    }
+    uint32_t id = world_add_colony(world, colony);
+    ASSERT_NE(id, 0);
+
+    for (int i = 0; i < world->width * world->height; i++) {
+        world->nutrients[i] = 1.0f;
+        world->toxins[i] = 0.0f;
+    }
+
+    Cell* seed = world_get_cell(world, 3, 3);
+    ASSERT_NOT_NULL(seed);
+    seed->colony_id = id;
+    seed->age = 1;
+
+    Colony* stored = world_get_colony(world, id);
+    ASSERT_NOT_NULL(stored);
+    stored->cell_count = 1;
+    stored->behavior_actions[COLONY_ACTION_EXPAND] = 1.0f;
+    stored->behavior_actions[COLONY_ACTION_DORMANCY] = 0.0f;
+
+    ThreadPool* pool = threadpool_create(1);
+    ASSERT_NOT_NULL(pool);
+
+    AtomicWorld* aworld = atomic_world_create(world, pool, 1);
+    ASSERT_NOT_NULL(aworld);
+
+    atomic_spread_step(aworld);
+
+    AtomicCell* current = grid_current(&aworld->grid);
+    AtomicCell* previous = grid_next(&aworld->grid);
+    int current_count = count_atomic_grid_cells(current, world->width, world->height, id);
+    int previous_count = count_atomic_grid_cells(previous, world->width, world->height, id);
+
+    ASSERT_EQ(current_count, 9);
+    ASSERT_EQ(previous_count, 1);
+    ASSERT_EQ((int)atomic_get_population(aworld, id), 9);
+
     atomic_world_destroy(aworld);
     threadpool_destroy(pool);
     world_destroy(world);
@@ -1947,6 +2010,99 @@ TEST(atomic_tick_runs_graph_shaped_combat_maintenance) {
     threadpool_destroy(pool);
     world_destroy(world);
 }
+
+TEST(simulation_resolve_combat_is_order_independent_for_row_direction) {
+    rng_seed(424242);
+
+    World* world_a = world_create(12, 12);
+    World* world_b = world_create(12, 12);
+    ASSERT_NOT_NULL(world_a);
+    ASSERT_NOT_NULL(world_b);
+
+    Colony attacker = create_test_colony();
+    attacker.genome.spread_rate = 0.0f;
+    attacker.genome.aggression = 1.0f;
+    attacker.genome.toxin_production = 0.8f;
+    attacker.genome.defense_priority = 0.2f;
+    attacker.genome.learning_rate = 0.0f;
+    for (int i = 0; i < COLONY_SENSOR_COUNT; i++) attacker.genome.behavior_sensor_gains[i] = 1.0f;
+    attacker.genome.behavior_action_biases[COLONY_ACTION_ATTACK] = 1.0f;
+    attacker.genome.behavior_action_weights[COLONY_ACTION_ATTACK][COLONY_DRIVE_HOSTILITY] = 1.0f;
+
+    Colony defender = create_test_colony();
+    defender.genome.spread_rate = 0.0f;
+    defender.genome.aggression = 0.0f;
+    defender.genome.resilience = 0.3f;
+    defender.genome.defense_priority = 0.1f;
+    defender.genome.learning_rate = 0.0f;
+
+    uint32_t attacker_a = world_add_colony(world_a, attacker);
+    uint32_t defender_a = world_add_colony(world_a, defender);
+    uint32_t attacker_b = world_add_colony(world_b, attacker);
+    uint32_t defender_b = world_add_colony(world_b, defender);
+    ASSERT_NE(attacker_a, 0);
+    ASSERT_NE(defender_a, 0);
+    ASSERT_NE(attacker_b, 0);
+    ASSERT_NE(defender_b, 0);
+
+    fill_colony_rect(world_a, attacker_a, 2, 2, 4, 8);
+    fill_colony_rect(world_a, defender_a, 6, 2, 4, 8);
+    fill_colony_rect(world_b, attacker_b, 2, 2, 4, 8);
+    fill_colony_rect(world_b, defender_b, 6, 2, 4, 8);
+
+    Colony* attacker_colony_a = world_get_colony(world_a, attacker_a);
+    Colony* defender_colony_a = world_get_colony(world_a, defender_a);
+    Colony* attacker_colony_b = world_get_colony(world_b, attacker_b);
+    Colony* defender_colony_b = world_get_colony(world_b, defender_b);
+    ASSERT_NOT_NULL(attacker_colony_a);
+    ASSERT_NOT_NULL(defender_colony_a);
+    ASSERT_NOT_NULL(attacker_colony_b);
+    ASSERT_NOT_NULL(defender_colony_b);
+
+    attacker_colony_a->cell_count = 32;
+    defender_colony_a->cell_count = 32;
+    attacker_colony_b->cell_count = 32;
+    defender_colony_b->cell_count = 32;
+
+    for (int y = 2; y < 10; y++) {
+        for (int x = 2; x < 10; x++) {
+            int idx = y * world_a->width + x;
+            world_a->nutrients[idx] = 1.0f;
+            world_b->nutrients[idx] = 1.0f;
+            world_a->toxins[idx] = 0.0f;
+            world_b->toxins[idx] = 0.0f;
+
+            Cell* cell_a = &world_a->cells[idx];
+            Cell* cell_b = &world_b->cells[idx];
+            if (cell_a->colony_id == attacker_a) cell_a->is_border = (x == 5);
+            if (cell_a->colony_id == defender_a) cell_a->is_border = (x == 6);
+            if (cell_b->colony_id == attacker_b) cell_b->is_border = (x == 5);
+            if (cell_b->colony_id == defender_b) cell_b->is_border = (x == 6);
+        }
+    }
+
+    attacker_colony_a->behavior_actions[COLONY_ACTION_ATTACK] = 1.0f;
+    attacker_colony_b->behavior_actions[COLONY_ACTION_ATTACK] = 1.0f;
+    defender_colony_a->behavior_actions[COLONY_ACTION_DEFEND] = 0.0f;
+    defender_colony_b->behavior_actions[COLONY_ACTION_DEFEND] = 0.0f;
+
+    world_a->tick = 0;
+    world_b->tick = 1;
+
+    rng_seed(9999);
+    simulation_resolve_combat(world_a);
+    rng_seed(9999);
+    simulation_resolve_combat(world_b);
+
+    for (int i = 0; i < world_a->width * world_a->height; i++) {
+        ASSERT_EQ((int)world_a->cells[i].colony_id, (int)world_b->cells[i].colony_id);
+    }
+    ASSERT_EQ((int)attacker_colony_a->cell_count, (int)attacker_colony_b->cell_count);
+    ASSERT_EQ((int)defender_colony_a->cell_count, (int)defender_colony_b->cell_count);
+
+    world_destroy(world_a);
+    world_destroy(world_b);
+}
 // Run Tests
 // ============================================================================
 
@@ -1983,6 +2139,7 @@ int run_simulation_logic_tests(void) {
     RUN_TEST(atomic_sync_to_world_writes_back);
     RUN_TEST(atomic_sync_roundtrip_preserves_state);
     RUN_TEST(atomic_tick_preserves_cell_count);
+    RUN_TEST(atomic_spread_step_swaps_buffers_for_new_claims);
     
     printf("\nCell Count Stability Tests:\n");
     RUN_TEST(cell_count_stable_without_spreading);
@@ -2017,6 +2174,7 @@ int run_simulation_logic_tests(void) {
     RUN_TEST(horizontal_gene_transfer_occurs_under_contact);
     RUN_TEST(atomic_tick_updates_behavior_state);
     RUN_TEST(atomic_tick_runs_graph_shaped_combat_maintenance);
+    RUN_TEST(simulation_resolve_combat_is_order_independent_for_row_direction);
     
     printf("\nVisual Stability Tests:\n");
     RUN_TEST(visual_radius_stability);

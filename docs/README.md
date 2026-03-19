@@ -260,6 +260,7 @@ ferox/
 - [Progress](PROGRESS.md) - Current project status and active workstreams
 - [Contributing](CONTRIBUTING.md) - Development guidelines
 - [Development Cycle](DEVELOPMENT_CYCLE.md) - Issue intake, project tracking, validation, docs updates, and merge flow
+- [GitHub Project Hygiene](PROJECT_HYGIENE.md) - Maintainer runbook for labels, project fields, waves, umbrella issues, and docs follow-through
 
 ## GitHub Project Hygiene
 
@@ -270,6 +271,7 @@ ferox/
 - Keep linked planning docs updated in the same PR as implementation work.
 - Follow `DEVELOPMENT_CYCLE.md` for the standard capture -> triage -> implement ->
   validate -> document -> review -> merge loop.
+- Use `PROJECT_HYGIENE.md` for day-to-day project triage and issue maintenance.
 
 ## License
 
