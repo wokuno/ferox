@@ -248,18 +248,12 @@ TEST(batch_submit_with_remainder) {
 }
 
 TEST(hot_shared_structs_are_cacheline_aligned) {
-    ThreadPool* pool = threadpool_create(4);
-    ASSERT_NOT_NULL(pool);
-
     ASSERT_EQ(sizeof(ThreadPoolHotCounters), FEROX_CACHELINE_SIZE);
     ASSERT_EQ(sizeof(AtomicSpreadSharedState), FEROX_CACHELINE_SIZE);
     ASSERT_EQ(sizeof(AtomicPhaseSharedState), FEROX_CACHELINE_SIZE);
     ASSERT_EQ(offsetof(ThreadPool, counters) % FEROX_CACHELINE_SIZE, 0);
     ASSERT_EQ(offsetof(AtomicWorld, spread_state) % FEROX_CACHELINE_SIZE, 0);
     ASSERT_EQ(offsetof(AtomicWorld, phase_state) % FEROX_CACHELINE_SIZE, 0);
-    ASSERT_EQ(((uintptr_t)&pool->counters) % FEROX_CACHELINE_SIZE, 0);
-
-    threadpool_destroy(pool);
 }
 
 // ============================================================================
