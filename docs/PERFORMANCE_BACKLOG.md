@@ -86,7 +86,7 @@ Priority values:
 - [ ] `PERF-051` `P1` `open` Prototype MPSC ingress ring + combiner drain for submit-side lock reduction (`#141`).
 - [ ] `PERF-052` `P1` `open` Add sparse/dense frontier representation switching (index-list vs bitset) (`#142`).
 - [x] `PERF-053` `P1` `done` Add hardware profile detection plus CPU/Apple/AMD runtime target selection and reporting.
-- [ ] `PERF-054` `P0` `open` Rebaseline performance and transport costs for the new `400x200` / `50` colony default profile (`#89`, `#91`, `#88`, `#143`).
+- [x] `PERF-054` `P0` `done` Rebaseline performance and transport costs for the new `400x200` / `50` colony default profile (`#89`, `#91`, `#88`, `#143`).
 - [ ] `PERF-055` `P1` `open` Continue atomic ecology parity and richer behavior rollout (`#92`, `#87`, `#101`, `#102`, `#103`, `#104`, `#105`).
 
 ## Additional Issue-Backed Follow-Ups

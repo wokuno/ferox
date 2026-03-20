@@ -1,0 +1,314 @@
+[
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic phase: age",
+    "samples": 3,
+    "median_ms": 77.98,
+    "mean_ms": 77.9733,
+    "median_ops_per_sec": 641.21
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic phase: serial core",
+    "samples": 3,
+    "median_ms": 41.29,
+    "mean_ms": 41.1133,
+    "median_ops_per_sec": 1211.09
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic phase: spread",
+    "samples": 3,
+    "median_ms": 20.1,
+    "mean_ms": 20.16,
+    "median_ops_per_sec": 2487.31
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic phase: sync_from_world",
+    "samples": 3,
+    "median_ms": 3.23,
+    "mean_ms": 3.2267,
+    "median_ops_per_sec": 15494.27
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic phase: sync_to_world",
+    "samples": 3,
+    "median_ms": 1.78,
+    "mean_ms": 1.7733,
+    "median_ops_per_sec": 28137.33
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic phase: total",
+    "samples": 3,
+    "median_ms": 144.42,
+    "mean_ms": 144.25,
+    "median_ops_per_sec": 346.21
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic_age phase",
+    "samples": 3,
+    "median_ms": 2.21,
+    "mean_ms": 2.19,
+    "median_ops_per_sec": 54347.83
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic_spread phase",
+    "samples": 3,
+    "median_ms": 1.69,
+    "mean_ms": 1.7933,
+    "median_ops_per_sec": 71005.91
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic_tick (1 thread)",
+    "samples": 3,
+    "median_ms": 122.7,
+    "mean_ms": 123.39,
+    "median_ops_per_sec": 326.0
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic_tick (2 threads)",
+    "samples": 3,
+    "median_ms": 107.82,
+    "mean_ms": 108.8433,
+    "median_ops_per_sec": 370.98
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "atomic_tick (4 threads)",
+    "samples": 6,
+    "median_ms": 150.305,
+    "mean_ms": 160.0017,
+    "median_ops_per_sec": 345.715
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "broadcast build snapshot",
+    "samples": 3,
+    "median_ms": 3.98,
+    "mean_ms": 4.0667,
+    "median_ops_per_sec": 40160.64
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "broadcast build+serialize",
+    "samples": 3,
+    "median_ms": 8.67,
+    "mean_ms": 8.72,
+    "median_ops_per_sec": 18452.31
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "broadcast end-to-end (0 clients)",
+    "samples": 3,
+    "median_ms": 8.74,
+    "mean_ms": 8.5667,
+    "median_ops_per_sec": 18308.73
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "frontier telemetry compute",
+    "samples": 3,
+    "median_ms": 258.05,
+    "mean_ms": 263.88,
+    "median_ops_per_sec": 232.51
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "frontier_telemetry_compute",
+    "samples": 3,
+    "median_ms": 5.21,
+    "mean_ms": 5.23,
+    "median_ops_per_sec": 15343.31
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "name+color generation",
+    "samples": 3,
+    "median_ms": 14.56,
+    "mean_ms": 14.79,
+    "median_ops_per_sec": 6870019.35
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "protocol deserialize only",
+    "samples": 3,
+    "median_ms": 6.07,
+    "mean_ms": 6.1767,
+    "median_ops_per_sec": 39545.23
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "protocol serialize only",
+    "samples": 3,
+    "median_ms": 5.85,
+    "mean_ms": 5.8667,
+    "median_ops_per_sec": 41004.62
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "protocol serialize+deserialize",
+    "samples": 3,
+    "median_ms": 9.65,
+    "mean_ms": 9.82,
+    "median_ops_per_sec": 24867.89
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "server snapshot build",
+    "samples": 3,
+    "median_ms": 8.32,
+    "mean_ms": 8.2567,
+    "median_ops_per_sec": 38480.04
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "simulation_resolve_combat",
+    "samples": 3,
+    "median_ms": 13.64,
+    "mean_ms": 13.1233,
+    "median_ops_per_sec": 2932.12
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "simulation_resolve_combat_sparse_border",
+    "samples": 3,
+    "median_ms": 4.97,
+    "mean_ms": 5.4967,
+    "median_ops_per_sec": 8045.05
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "simulation_spread",
+    "samples": 3,
+    "median_ms": 12.23,
+    "mean_ms": 12.06,
+    "median_ops_per_sec": 6539.69
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "simulation_tick (serial)",
+    "samples": 3,
+    "median_ms": 441.52,
+    "mean_ms": 441.6033,
+    "median_ops_per_sec": 158.54
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "simulation_tick baseline",
+    "samples": 3,
+    "median_ms": 324.8,
+    "mean_ms": 331.1333,
+    "median_ops_per_sec": 184.73
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "simulation_update_nutrients",
+    "samples": 3,
+    "median_ms": 6.92,
+    "mean_ms": 7.59,
+    "median_ops_per_sec": 23114.71
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "simulation_update_scents",
+    "samples": 3,
+    "median_ms": 51.24,
+    "mean_ms": 51.13,
+    "median_ops_per_sec": 3122.74
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "sync_from_world 200x100",
+    "samples": 3,
+    "median_ms": 2.57,
+    "mean_ms": 2.57,
+    "median_ops_per_sec": 31140.52
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "sync_from_world 400x200",
+    "samples": 3,
+    "median_ms": 9.61,
+    "mean_ms": 9.62,
+    "median_ops_per_sec": 8322.93
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "sync_from_world 800x400",
+    "samples": 3,
+    "median_ms": 37.7,
+    "mean_ms": 37.6267,
+    "median_ops_per_sec": 2121.73
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "sync_to_world 200x100",
+    "samples": 3,
+    "median_ms": 0.64,
+    "mean_ms": 0.6367,
+    "median_ops_per_sec": 124610.55
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "sync_to_world 400x200",
+    "samples": 3,
+    "median_ms": 2.57,
+    "mean_ms": 2.5767,
+    "median_ops_per_sec": 31116.3
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "sync_to_world 800x400",
+    "samples": 3,
+    "median_ms": 10.88,
+    "mean_ms": 10.8567,
+    "median_ops_per_sec": 7350.91
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "threadpool batched tasks",
+    "samples": 3,
+    "median_ms": 0.66,
+    "mean_ms": 0.6633,
+    "median_ops_per_sec": 152438992.48
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "threadpool chunked submit",
+    "samples": 3,
+    "median_ms": 8.91,
+    "mean_ms": 8.8533,
+    "median_ops_per_sec": 11228385.79
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "threadpool submit+execute",
+    "samples": 3,
+    "median_ms": 14.52,
+    "mean_ms": 14.5233,
+    "median_ops_per_sec": 6886578.1
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "threadpool tiny tasks",
+    "samples": 3,
+    "median_ms": 14.49,
+    "mean_ms": 14.4267,
+    "median_ops_per_sec": 6901787.41
+  },
+  {
+    "scenario": "release_scale2",
+    "metric": "world create/init/destroy",
+    "samples": 3,
+    "median_ms": 11.49,
+    "mean_ms": 11.3367,
+    "median_ops_per_sec": 31334.32
+  }
+]

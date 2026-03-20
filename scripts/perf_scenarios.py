@@ -287,7 +287,10 @@ def main() -> int:
     parser.add_argument("--build-types", nargs="+", default=["Debug", "Release"])
     parser.add_argument("--scales", nargs="+", type=int, default=[1, 2])
     parser.add_argument("--repeats", type=int, default=2)
-    parser.add_argument("--test-regex", default="PerformanceEvalTests|SimdEvalTests")
+    parser.add_argument(
+        "--test-regex",
+        default="PerformanceEvalTests|PerformanceComponentTests|SimdEvalTests",
+    )
     parser.add_argument("--build-root", default="build-perf")
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--output-root", default="artifacts/perf")

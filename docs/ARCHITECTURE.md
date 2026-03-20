@@ -188,9 +188,9 @@ matching builds and keeping `docs/PROTOCOL.md` aligned with the live wire format
 Performance validation is built into the repo (not a one-off script):
 
 - unit: `test_perf_unit_world`, `test_perf_unit_protocol`
-- component: `test_perf_component_atomic`, `test_threadpool_profile_scan`
+- component: `test_perf_components`, `test_threadpool_profile_scan`
 - system: `test_threadpool_microbench`, `test_performance_profile`
-- multi-run aggregation: `scripts/perf_multi_iter.py`
+- multi-run aggregation: `scripts/perf_scenarios.py`
 
 `test_performance_profile` also carries an additive architecture-specific atomic
 microbench lane that emits common relaxed-operation costs on every host and

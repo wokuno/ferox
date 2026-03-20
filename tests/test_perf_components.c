@@ -20,6 +20,10 @@
 static int tests_passed = 0;
 static int tests_failed = 0;
 
+#define PERF_DEFAULT_WIDTH 400
+#define PERF_DEFAULT_HEIGHT 200
+#define PERF_DEFAULT_COLONIES 50
+
 #define TEST(name) static void test_##name(void)
 #define RUN_TEST(name) do { \
     printf("  Running %s... ", #name); \
@@ -160,7 +164,8 @@ TEST(simulation_update_nutrients_component_eval) {
     const int scale = get_perf_scale();
     const int iters = 80 * scale;
 
-    World** worlds = create_world_pool(iters, 320, 180, 55, 1401u);
+    World** worlds = create_world_pool(
+        iters, PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 1401u);
     ASSERT_NOT_NULL(worlds);
 
     for (int i = 0; i < iters; i++) {
@@ -183,7 +188,8 @@ TEST(simulation_spread_component_eval) {
     const int scale = get_perf_scale();
     const int iters = 40 * scale;
 
-    World** worlds = create_world_pool(iters, 320, 180, 55, 2402u);
+    World** worlds = create_world_pool(
+        iters, PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 2402u);
     ASSERT_NOT_NULL(worlds);
 
     for (int i = 0; i < iters; i++) {
@@ -206,7 +212,8 @@ TEST(simulation_update_scents_component_eval) {
     const int scale = get_perf_scale();
     const int iters = 80 * scale;
 
-    World** worlds = create_world_pool(iters, 320, 180, 55, 2803u);
+    World** worlds = create_world_pool(
+        iters, PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 2803u);
     ASSERT_NOT_NULL(worlds);
 
     for (int i = 0; i < iters; i++) {
@@ -229,7 +236,8 @@ TEST(simulation_resolve_combat_component_eval) {
     const int scale = get_perf_scale();
     const int iters = 20 * scale;
 
-    World** worlds = create_world_pool(iters, 240, 140, 90, 3204u);
+    World** worlds = create_world_pool(
+        iters, PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 3204u);
     ASSERT_NOT_NULL(worlds);
     evolve_worlds(worlds, iters, 6);
 
@@ -277,7 +285,8 @@ TEST(frontier_telemetry_component_eval) {
     const int scale = get_perf_scale();
     const int iters = 40 * scale;
 
-    World** worlds = create_world_pool(iters, 320, 180, 55, 3605u);
+    World** worlds = create_world_pool(
+        iters, PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 3605u);
     ASSERT_NOT_NULL(worlds);
     evolve_worlds(worlds, iters, 10);
 
@@ -299,7 +308,8 @@ TEST(atomic_spread_phase_component_eval) {
     const int scale = get_perf_scale();
     const int iters = 60 * scale;
 
-    World* world = create_seeded_world(320, 180, 55, 3403u);
+    World* world = create_seeded_world(
+        PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 3403u);
     ASSERT_NOT_NULL(world);
 
     ThreadPool* pool = threadpool_create(4);
@@ -343,11 +353,11 @@ TEST(snapshot_build_component_eval) {
     const int scale = get_perf_scale();
     const int iters = 160 * scale;
 
-    Server* server = server_create_headless(320, 180, 4);
+    Server* server = server_create_headless(PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, 4);
     ASSERT_NOT_NULL(server);
 
     rng_seed(4404u);
-    world_init_random_colonies(server->world, 72);
+    world_init_random_colonies(server->world, PERF_DEFAULT_COLONIES);
     for (int i = 0; i < 3; i++) {
         simulation_tick(server->world);
     }

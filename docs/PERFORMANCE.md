@@ -27,6 +27,66 @@ For regression checks, run at least 3 times and compare medians instead of singl
 - Performance thresholds in `test_performance_eval.c` are intentionally loose for host variance and instrumentation overhead.
 - For comparative performance work, run `./scripts/test.sh perf` on a stable local machine with the same `FEROX_PERF_SCALE`.
 
+## 2026-03-19 Default-Profile Rebaseline Procedure
+
+Issue `#143` resets the default-profile baseline around the live launcher shape:
+`400x200` world, `50` initial colonies, release build, and repeated runs.
+
+Recommended capture flow:
+
+```bash
+./scripts/build.sh release
+python3 scripts/perf_scenarios.py --build-types Release --scales 2 --repeats 3
+ctest --test-dir build --output-on-failure -R "PerformanceComponentTests|PerformanceProfilingTests"
+```
+
+Capture and compare these default-profile metrics:
+
+- broad tick cost: `simulation_tick (serial)`, `atomic_tick (1/2/4 threads)`, and `atomic/serial time ratio`
+- transport cost: `broadcast build snapshot`, `broadcast build+serialize`, `broadcast end-to-end (0 clients)`
+- transport payload size: average snapshot KiB and encoded KiB
+- scheduler overhead: `threadpool tiny tasks`, `threadpool chunked submit`, `threadpool batched tasks`, and `tiny/batched ratio`
+- corroborating focused metrics: `server snapshot build`, protocol throughput, atomic phase share, and sync throughput lines
+
+Use the generated `artifacts/perf/<timestamp>/` directory as the raw evidence and
+update `docs/PERF_TARGETS.md` plus the checked-in baseline data when the medians
+have been confirmed.
+
+## 2026-03-19 Default-Profile Rebaseline Results
+
+Confirmed release medians from `artifacts/perf/20260319-172155/` for the default
+`400x200` / `50` colony profile (`FEROX_PERF_SCALE=2`, `3` repeats):
+
+- `simulation_tick (serial)`: **457.65 ms**
+- `atomic_tick (1 thread)`: **122.50 ms**
+- `atomic_tick (2 threads)`: **107.12 ms**
+- `atomic_tick (4 threads)`: **151.92 ms**
+- atomic/serial time ratio: **0.63x**
+- `broadcast build snapshot`: **3.99 ms**
+- `broadcast build+serialize`: **8.51 ms**
+- `broadcast end-to-end (0 clients)`: **8.50 ms**
+- `server snapshot build`: **8.15 ms**
+- `protocol serialize+deserialize`: **9.47 ms**
+- `threadpool tiny tasks`: **23.74 ms**
+- `threadpool batched tasks`: **0.72 ms**
+- tiny/batched ratio: **41.28x**
+
+Transport payload snapshot from the same pass:
+
+- average snapshot payload: about **159.96 KiB**
+- average encoded payload: about **4.82 KiB**
+
+Interpretation:
+
+- The new default profile is now explicitly captured in checked-in baseline data
+  via `config/perf_baseline_default_profile.json`.
+- Broad transport costs are modest relative to the serial tick on this host.
+- The scheduler still shows a clear tiny-task overhead signal even after the
+  worker follow-on submit fast path merged, so follow-up work should keep
+  batching/coarser work units in scope for external submit-heavy lanes.
+- `atomic_tick (2 threads)` currently beats `4 threads)` on this host, which is a
+  reminder not to assume the largest worker count is the best default-profile lane.
+
 ## 2026-03-19 Hot Shared Struct Guardrails
 
 Low-risk cacheline guardrails now live in shared headers for the most contended scheduler and atomic-spread metadata:

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "profile": {
+    "width": 400,
+    "height": 200,
+    "initial_colonies": 50,
+    "build_type": "Release",
+    "scale": 2,
+    "repeats": 3
+  },
+  "artifact_dir": "artifacts/perf/20260319-172155",
+  "metrics": {
+    "simulation_tick_serial_ms": 457.65,
+    "atomic_tick_1_thread_ms": 122.5,
+    "atomic_tick_2_threads_ms": 107.12,
+    "atomic_tick_4_threads_ms": 151.92,
+    "broadcast_build_snapshot_ms": 3.99,
+    "broadcast_build_serialize_ms": 8.51,
+    "broadcast_end_to_end_ms": 8.5,
+    "threadpool_tiny_tasks_ms": 23.74,
+    "threadpool_chunked_submit_ms": 13.68,
+    "threadpool_batched_tasks_ms": 0.72,
+    "server_snapshot_build_ms": 8.15,
+    "protocol_serialize_deserialize_ms": 9.47
+  },
+  "ratios": {
+    "atomic_serial_time_ratio": 0.6267,
+    "tiny_batched_ratio": 41.2767
+  }
+}

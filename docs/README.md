@@ -101,14 +101,14 @@
 ctest --test-dir build --output-on-failure
 
 # Run focused performance diagnostics
-ctest --test-dir build --output-on-failure -R "ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerfComponentAtomicTests"
+ctest --test-dir build --output-on-failure -R "ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerformanceComponentTests"
 ```
 
 ### Performance Workflow
 
 ```bash
-# Multi-iteration median summary (recommended)
-./scripts/perf_multi_iter.py -n 7 --profile balanced
+# Default-profile repeated-run capture (recommended)
+python3 scripts/perf_scenarios.py --build-types Release --scales 2 --repeats 3
 ```
 
 ### Keyboard Controls
@@ -133,9 +133,9 @@ Server binary defaults shown (scripts/run.sh may use different defaults):
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-p, --port` | 8080 | TCP port to listen on (0 for auto-assign) |
-| `-w, --width` | 200 | World grid width |
-| `-H, --height` | 100 | World grid height |
-| `-c, --colonies` | 20 | Initial colony count |
+| `-w, --width` | 400 | World grid width |
+| `-H, --height` | 200 | World grid height |
+| `-c, --colonies` | 50 | Initial colony count |
 | `-t, --threads` | detected logical CPUs | Thread pool size |
 | `-r, --rate` | 100 | Milliseconds per tick |
 | `-a, --accelerator` | `auto` | Runtime target: `auto`, `cpu`, `apple`, or `amd` |
@@ -255,7 +255,6 @@ ferox/
 - [Colony Intelligence](COLONY_INTELLIGENCE.md) - Current behavior model, gaps, and future graph vision
 - [Performance Targets](PERF_TARGETS.md) - Current median baselines and target thresholds
 - [Performance Backlog](PERFORMANCE_BACKLOG.md) - Prioritized optimization roadmap
-- [Performance History](PERFORMANCE_HISTORY.md) - Detailed record of changes, experiments, and outcomes
 - [Scaling and Behavior Plan](SCALING_AND_BEHAVIOR_PLAN.md) - Current rollout plan and linked GitHub issues
 - [Progress](PROGRESS.md) - Current project status and active workstreams
 - [Contributing](CONTRIBUTING.md) - Development guidelines

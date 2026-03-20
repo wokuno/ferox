@@ -32,7 +32,7 @@ hardware-aware runtime tuning.
 - Client-side large-world rendering improvements for the GUI grid path
 - Comprehensive CMake/CTest matrix with correctness, stress, and perf tests
 - Performance tooling and operational docs:
-  - `scripts/perf_multi_iter.py`
+  - `scripts/perf_scenarios.py`
   - `scripts/profile.sh`
   - `scripts/profile_c2c.sh`
   - `scripts/benchmark_export.sh`
@@ -54,25 +54,26 @@ hardware-aware runtime tuning.
 
 ## Measurement Baseline (Latest Multi-Iteration Run)
 
-Run command:
+Current rebaseline command sequence for issue `#143`:
 
 ```bash
-./scripts/perf_multi_iter.py -n 7 --profile balanced
+./scripts/build.sh release
+python3 scripts/perf_scenarios.py --build-types Release --scales 2 --repeats 3
+ctest --test-dir build --output-on-failure -R "PerformanceComponentTests|PerformanceProfilingTests"
 ```
 
-Observed medians:
+Tracked baseline targets and acceptance bands live in `docs/PERF_TARGETS.md`.
+Human-readable observations from each rebaseline pass stay in
+`docs/PERFORMANCE.md`.
 
-- `tiny_speedup`: `1.03x`
-- `tick_speedup`: `1.15x`
-- `spread_speedup`: `1.91x`
-- `component atomic`:
-  - `baseline` (serial interval 1): `~88.73 ms / 18 ticks`
-  - `serial2`: `~47.76 ms / 18 ticks`
-  - `serial3`: `~34.83 ms / 18 ticks`
-  - `serial3_no_frontier`: `~71.91 ms / 18 ticks`
+Latest confirmed medians for issue `#143` (`artifacts/perf/20260319-172155`):
 
-Current thresholds and next target values are maintained in
-`docs/PERF_TARGETS.md`.
+- `simulation_tick (serial)`: `457.65 ms`
+- `atomic_tick (2 threads)`: `107.12 ms`
+- `atomic_tick (4 threads)`: `151.92 ms`
+- `broadcast build+serialize`: `8.51 ms`
+- `server snapshot build`: `8.15 ms`
+- `tiny/batched ratio`: `41.2767x`
 
 ## Known Constraints
 

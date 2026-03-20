@@ -50,7 +50,8 @@ worlds, richer colony behavior, and the follow-on work now tracked in GitHub.
 ## Validation Focus
 
 - correctness: `ctest --test-dir build --output-on-failure -R "SimulationLogicTests|Phase3Tests|HardwareProfileTests"`
-- atomic behavior/perf: `ctest --test-dir build --output-on-failure -R "PerfComponentAtomicTests|PerformanceProfilingTests"`
+- default-profile rebaseline: `python3 scripts/perf_scenarios.py --build-types Release --scales 2 --repeats 3`
+- atomic behavior/perf: `ctest --test-dir build --output-on-failure -R "PerformanceComponentTests|PerformanceProfilingTests"`
 - hardware report: `./build/src/server/ferox_server --print-hardware`
 
 ## Next Recommended Moves

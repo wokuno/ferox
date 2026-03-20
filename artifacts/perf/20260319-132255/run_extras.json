@@ -1,0 +1,44 @@
+[
+  {
+    "scenario": "release_scale2",
+    "build_type": "Release",
+    "scale": 2,
+    "repeat": 1,
+    "returncode": 0,
+    "extras": {
+      "protocol_throughput_mb_s": 565.36,
+      "atomic_serial_time_ratio": 0.63,
+      "speedup_2thread": 1.13,
+      "speedup_4thread": 1.22,
+      "tiny_batched_ratio": 22.09
+    }
+  },
+  {
+    "scenario": "release_scale2",
+    "build_type": "Release",
+    "scale": 2,
+    "repeat": 2,
+    "returncode": 0,
+    "extras": {
+      "protocol_throughput_mb_s": 595.53,
+      "atomic_serial_time_ratio": 0.73,
+      "speedup_2thread": 1.13,
+      "speedup_4thread": 1.19,
+      "tiny_batched_ratio": 22.45
+    }
+  },
+  {
+    "scenario": "release_scale2",
+    "build_type": "Release",
+    "scale": 2,
+    "repeat": 3,
+    "returncode": 0,
+    "extras": {
+      "protocol_throughput_mb_s": 596.27,
+      "atomic_serial_time_ratio": 0.61,
+      "speedup_2thread": 1.14,
+      "speedup_4thread": 1.19,
+      "tiny_batched_ratio": 20.67
+    }
+  }
+]

@@ -26,6 +26,10 @@
 static int tests_passed = 0;
 static int tests_failed = 0;
 
+#define PERF_DEFAULT_WIDTH 400
+#define PERF_DEFAULT_HEIGHT 200
+#define PERF_DEFAULT_COLONIES 50
+
 #define TEST(name) static void test_##name(void)
 #define RUN_TEST(name) do { \
     printf("  Running %s... ", #name); \
@@ -297,11 +301,11 @@ TEST(server_broadcast_path_breakdown_eval) {
     const int scale = get_perf_scale();
     const int iters = 80 * scale;
 
-    Server* server = server_create_headless(320, 180, 4);
+    Server* server = server_create_headless(PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, 4);
     ASSERT_NOT_NULL(server);
 
     rng_seed(1337);
-    world_init_random_colonies(server->world, 72);
+    world_init_random_colonies(server->world, PERF_DEFAULT_COLONIES);
     for (int i = 0; i < 3; i++) {
         simulation_tick(server->world);
     }
@@ -374,7 +378,8 @@ TEST(simulation_tick_throughput) {
     const int scale = get_perf_scale();
     const int ticks = 35 * scale;
 
-    World* world = create_seeded_world(280, 160, 45, 4242);
+    World* world = create_seeded_world(
+        PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 4242u);
     ASSERT_NOT_NULL(world);
 
     for (int i = 0; i < 5; i++) simulation_tick(world);  // warm-up
@@ -396,7 +401,8 @@ TEST(frontier_telemetry_seeded_run_eval) {
     const int ticks = 30 * scale;
     const uint32_t seed = 48048u;
 
-    World* world = create_seeded_world(220, 140, 40, seed);
+    World* world = create_seeded_world(
+        PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, seed);
     ASSERT_NOT_NULL(world);
 
     FrontierTelemetry sample;
@@ -433,9 +439,11 @@ TEST(atomic_tick_throughput_and_speedup_eval) {
     const int scale = get_perf_scale();
     const int ticks = 30 * scale;
 
-    World* serial_world = create_seeded_world(320, 180, 55, 5252);
+    World* serial_world = create_seeded_world(
+        PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 5252u);
     ASSERT_NOT_NULL(serial_world);
-    World* parallel_world = create_seeded_world(320, 180, 55, 5252);
+    World* parallel_world = create_seeded_world(
+        PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 5252u);
     ASSERT_NOT_NULL(parallel_world);
 
     // Serial baseline
@@ -505,7 +513,8 @@ TEST(atomic_tick_thread_scaling_eval) {
 
     for (int idx = 0; idx < 3; idx++) {
         int threads = thread_options[idx];
-        World* world = create_seeded_world(320, 180, 55, 9000u);
+        World* world = create_seeded_world(
+            PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 9000u);
         ASSERT_NOT_NULL(world);
 
         ThreadPool* pool = threadpool_create(threads);
@@ -544,7 +553,8 @@ TEST(atomic_tick_phase_breakdown_eval) {
     const int scale = get_perf_scale();
     const int ticks = 25 * scale;
 
-    World* world = create_seeded_world(360, 220, 60, 6006u);
+    World* world = create_seeded_world(
+        PERF_DEFAULT_WIDTH, PERF_DEFAULT_HEIGHT, PERF_DEFAULT_COLONIES, 6006u);
     ASSERT_NOT_NULL(world);
 
     ThreadPool* pool = threadpool_create(4);
@@ -607,9 +617,9 @@ TEST(atomic_sync_throughput_scaling_eval) {
     const int scale = get_perf_scale();
     const int iters = 40 * scale;
     const int sizes[3][2] = {
-        {200, 120},
-        {400, 240},
-        {800, 480}
+        {200, 100},
+        {400, 200},
+        {800, 400}
     };
     double sync_to_cells_per_sec[3] = {0.0, 0.0, 0.0};
     double sync_from_cells_per_sec[3] = {0.0, 0.0, 0.0};
@@ -665,10 +675,10 @@ TEST(atomic_sync_throughput_scaling_eval) {
     }
 
     if (sync_to_cells_per_sec[0] > 0.0 && sync_from_cells_per_sec[0] > 0.0) {
-        printf("    [perf] sync_to scaling vs 200x120: 400x240=%.2fx 800x480=%.2fx\n",
+        printf("    [perf] sync_to scaling vs 200x100: 400x200=%.2fx 800x400=%.2fx\n",
                sync_to_cells_per_sec[1] / sync_to_cells_per_sec[0],
                sync_to_cells_per_sec[2] / sync_to_cells_per_sec[0]);
-        printf("    [perf] sync_from scaling vs 200x120: 400x240=%.2fx 800x480=%.2fx\n",
+        printf("    [perf] sync_from scaling vs 200x100: 400x200=%.2fx 800x400=%.2fx\n",
                sync_from_cells_per_sec[1] / sync_from_cells_per_sec[0],
                sync_from_cells_per_sec[2] / sync_from_cells_per_sec[0]);
     }
