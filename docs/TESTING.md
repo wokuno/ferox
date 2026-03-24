@@ -129,3 +129,6 @@ feedback checks for manual spawn acceptance/rejection in:
 - `ProtocolEdgeTests`
 - `ServerBranchCoverageTests`
 - `Phase6Tests`
+
+That same coverage now also checks `CMD_SELECT_COLONY` accept/reject/clear
+feedback so selection failures no longer remain silent in the command surface.

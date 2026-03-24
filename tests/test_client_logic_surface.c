@@ -374,6 +374,39 @@ static void test_handle_message_dispatches_world_messages(void) {
     assert(client.has_command_status == true);
 }
 
+static void test_handle_message_updates_selection_status(void) {
+    g_tests_run++;
+    reset_stubs();
+    Client client;
+    memset(&client, 0, sizeof(client));
+    uint8_t payload[COMMAND_STATUS_SERIALIZED_SIZE] = {0};
+
+    client.selected_colony = 44;
+    client.has_selected_detail = true;
+
+    g_protocol.next_command_status.command = CMD_SELECT_COLONY;
+    g_protocol.next_command_status.status_code = PROTO_COMMAND_STATUS_ACCEPTED;
+    g_protocol.next_command_status.entity_id = 77;
+    strcpy(g_protocol.next_command_status.message, "Selection accepted");
+    client_handle_message(&client, MSG_ACK, payload, COMMAND_STATUS_SERIALIZED_SIZE);
+    assert(client.selected_colony == 77);
+    assert(client.has_command_status == true);
+
+    g_protocol.next_command_status.status_code = PROTO_COMMAND_STATUS_REJECTED;
+    g_protocol.next_command_status.entity_id = 99;
+    strcpy(g_protocol.next_command_status.message, "Selection rejected: colony not found");
+    client_handle_message(&client, MSG_ERROR, payload, COMMAND_STATUS_SERIALIZED_SIZE);
+    assert(client.selected_colony == 0);
+    assert(client.has_selected_detail == false);
+
+    g_protocol.next_command_status.status_code = PROTO_COMMAND_STATUS_ACCEPTED;
+    g_protocol.next_command_status.entity_id = 0;
+    strcpy(g_protocol.next_command_status.message, "Selection cleared");
+    client_handle_message(&client, MSG_ACK, payload, COMMAND_STATUS_SERIALIZED_SIZE);
+    assert(client.selected_colony == 0);
+    assert(client.has_selected_detail == false);
+}
+
 static void test_update_world_guards_and_failures(void) {
     g_tests_run++;
     reset_stubs();
@@ -475,6 +508,7 @@ int main(void) {
     test_select_next_colony_empty_world_resets();
     test_get_selected_colony_filters_dead_and_missing();
     test_handle_message_dispatches_world_messages();
+    test_handle_message_updates_selection_status();
     test_update_world_guards_and_failures();
     test_process_input_pause_speed_scroll_select_reset();
     test_process_input_quit_sets_running_false();

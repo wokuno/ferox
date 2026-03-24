@@ -368,8 +368,11 @@ CMD_SELECT_COLONY payload for colony 42:
 Current live use:
 
 - accepted `CMD_SPAWN_COLONY` requests return `MSG_ACK`
+- accepted `CMD_SELECT_COLONY` requests also return `MSG_ACK`
 - the payload records the originating command id, a status code, the spawned
-  colony id, and a short fixed-width message
+  or selected colony id, and a short fixed-width message
+- clearing selection with `CMD_SELECT_COLONY` and `colony_id = 0` returns
+  `PROTO_COMMAND_STATUS_ACCEPTED` with `entity_id = 0`
 
 ### MSG_ERROR
 
@@ -379,8 +382,10 @@ command-side outcomes.
 Current live use:
 
 - rejected `CMD_SPAWN_COLONY` requests return `MSG_ERROR`
+- rejected `CMD_SELECT_COLONY` requests also return `MSG_ERROR`
 - out-of-bounds requests use `PROTO_COMMAND_STATUS_OUT_OF_BOUNDS`
 - occupied-target requests use `PROTO_COMMAND_STATUS_CONFLICT`
+- unknown or inactive selection targets use `PROTO_COMMAND_STATUS_REJECTED`
 
 `ProtoCommandStatus` wire layout:
 

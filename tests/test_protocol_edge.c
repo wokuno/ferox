@@ -571,6 +571,28 @@ TEST(command_status_roundtrip) {
     ASSERT(strcmp(decoded.message, status.message) == 0, "command status message should roundtrip");
 }
 
+TEST(command_status_select_clears_roundtrip) {
+    ProtoCommandStatus status;
+    memset(&status, 0, sizeof(status));
+    status.command = CMD_SELECT_COLONY;
+    status.status_code = PROTO_COMMAND_STATUS_ACCEPTED;
+    status.entity_id = 0;
+    strncpy(status.message, "Selection cleared", COMMAND_STATUS_MESSAGE_SIZE - 1);
+
+    uint8_t buffer[COMMAND_STATUS_SERIALIZED_SIZE];
+    int size = protocol_serialize_command_status(&status, buffer);
+    ASSERT_EQ(size, COMMAND_STATUS_SERIALIZED_SIZE);
+
+    ProtoCommandStatus decoded;
+    memset(&decoded, 0, sizeof(decoded));
+    size = protocol_deserialize_command_status(buffer, &decoded);
+    ASSERT_EQ(size, COMMAND_STATUS_SERIALIZED_SIZE);
+    ASSERT_EQ(decoded.command, (uint32_t)CMD_SELECT_COLONY);
+    ASSERT_EQ(decoded.status_code, (uint32_t)PROTO_COMMAND_STATUS_ACCEPTED);
+    ASSERT_EQ(decoded.entity_id, 0u);
+    ASSERT(strcmp(decoded.message, "Selection cleared") == 0, "selection-clear status should roundtrip");
+}
+
 TEST(world_state_without_grid_uses_fixed_prefix) {
     ProtoWorld world;
     proto_world_init(&world);
@@ -956,6 +978,7 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(spawn_colony_command);
     RUN_TEST(command_wire_examples_match_spec);
     RUN_TEST(command_status_roundtrip);
+    RUN_TEST(command_status_select_clears_roundtrip);
     
     printf("\nNull Input Tests:\n");
     RUN_TEST(null_inputs_handled);

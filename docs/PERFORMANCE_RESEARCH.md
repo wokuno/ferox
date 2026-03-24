@@ -258,6 +258,7 @@ Rejected from this list so far:
 - A per-colony scalar cache for nutrient/scent update math was not a robust cross-machine win and was reverted.
 - A helper-based raw-grid decode cleanup in `protocol_deserialize_grid_rle()` regressed `test_perf_unit_protocol` noisy-grid medians and was reverted.
 - Structured spawn-feedback wiring (`MSG_ACK`/`MSG_ERROR`) is now no longer a recommended next experiment because the protocol/client correctness slice has been implemented.
+- Selection-feedback wiring is also no longer a recommended next experiment because `CMD_SELECT_COLONY` now uses the same immediate command-status surface.
 
 ## What Not To Chase First
 

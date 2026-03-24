@@ -145,6 +145,16 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
                 if (protocol_deserialize_command_status(payload, &status) >= 0) {
                     client->last_command_status = status;
                     client->has_command_status = true;
+                    if (status.command == (uint32_t)CMD_SELECT_COLONY) {
+                        if (status.entity_id == 0) {
+                            client->selected_colony = 0;
+                            client->renderer->selected_colony = 0;
+                            client->has_selected_detail = false;
+                        } else {
+                            client->selected_colony = status.entity_id;
+                            client->renderer->selected_colony = status.entity_id;
+                        }
+                    }
                 }
             }
             break;
@@ -154,7 +164,9 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
                 if (protocol_deserialize_command_status(payload, &status) >= 0) {
                     client->last_command_status = status;
                     client->has_command_status = true;
-                    if (status.command == (uint32_t)CMD_SELECT_COLONY && status.entity_id == client->selected_colony) {
+                    if (status.command == (uint32_t)CMD_SELECT_COLONY) {
+                        client->selected_colony = 0;
+                        client->renderer->selected_colony = 0;
                         client->has_selected_detail = false;
                     }
                 }

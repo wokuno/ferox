@@ -452,10 +452,11 @@ static int test_client_handles_command_status_messages(void) {
 
     ProtoCommandStatus status;
     memset(&status, 0, sizeof(status));
-    status.command = CMD_SPAWN_COLONY;
+    c->selected_colony = 99;
+    status.command = CMD_SELECT_COLONY;
     status.status_code = PROTO_COMMAND_STATUS_ACCEPTED;
     status.entity_id = 11;
-    strcpy(status.message, "Spawn accepted");
+    strcpy(status.message, "Selection accepted");
 
     uint8_t buffer[COMMAND_STATUS_SERIALIZED_SIZE];
     int len = protocol_serialize_command_status(&status, buffer);
@@ -469,15 +470,17 @@ static int test_client_handles_command_status_messages(void) {
         client_destroy(c);
         return 0;
     }
-    if (c->last_command_status.command != CMD_SPAWN_COLONY ||
+    if (c->last_command_status.command != CMD_SELECT_COLONY ||
         c->last_command_status.status_code != PROTO_COMMAND_STATUS_ACCEPTED ||
-        strcmp(c->last_command_status.message, "Spawn accepted") != 0) {
+        strcmp(c->last_command_status.message, "Selection accepted") != 0 ||
+        c->selected_colony != 11) {
         client_destroy(c);
         return 0;
     }
 
-    status.status_code = PROTO_COMMAND_STATUS_CONFLICT;
-    strcpy(status.message, "Spawn rejected: occupied target");
+    status.status_code = PROTO_COMMAND_STATUS_REJECTED;
+    status.entity_id = 77;
+    strcpy(status.message, "Selection rejected: colony not found");
     len = protocol_serialize_command_status(&status, buffer);
     if (len != COMMAND_STATUS_SERIALIZED_SIZE) {
         client_destroy(c);
@@ -486,8 +489,9 @@ static int test_client_handles_command_status_messages(void) {
 
     client_handle_message(c, MSG_ERROR, buffer, (size_t)len);
     if (!c->has_command_status ||
-        c->last_command_status.status_code != PROTO_COMMAND_STATUS_CONFLICT ||
-        strcmp(c->last_command_status.message, "Spawn rejected: occupied target") != 0) {
+        c->last_command_status.status_code != PROTO_COMMAND_STATUS_REJECTED ||
+        strcmp(c->last_command_status.message, "Selection rejected: colony not found") != 0 ||
+        c->selected_colony != 0) {
         client_destroy(c);
         return 0;
     }

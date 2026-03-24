@@ -172,6 +172,45 @@ static MessageType server_spawn_colony(Server* server,
     return MSG_ACK;
 }
 
+static MessageType server_select_colony(Server* server,
+                                        ClientSession* client,
+                                        const CommandSelectColony* select,
+                                        ProtoCommandStatus* status) {
+    server_fill_command_status(status, CMD_SELECT_COLONY,
+                               PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+                               0,
+                               "Selection failed");
+    if (!server || !client || !select || !status) {
+        return MSG_ERROR;
+    }
+
+    if (select->colony_id == 0) {
+        client->selected_colony = 0;
+        server_fill_command_status(status, CMD_SELECT_COLONY,
+                                   PROTO_COMMAND_STATUS_ACCEPTED,
+                                   0,
+                                   "Selection cleared");
+        return MSG_ACK;
+    }
+
+    Colony* colony = world_get_colony(server->world, select->colony_id);
+    if (!colony) {
+        client->selected_colony = 0;
+        server_fill_command_status(status, CMD_SELECT_COLONY,
+                                   PROTO_COMMAND_STATUS_REJECTED,
+                                   select->colony_id,
+                                   "Selection rejected: colony not found");
+        return MSG_ERROR;
+    }
+
+    client->selected_colony = select->colony_id;
+    server_fill_command_status(status, CMD_SELECT_COLONY,
+                               PROTO_COMMAND_STATUS_ACCEPTED,
+                               select->colony_id,
+                               "Selection accepted");
+    return MSG_ACK;
+}
+
 static float clamp_unit(float value) {
     if (value < 0.0f) return 0.0f;
     if (value > 1.0f) return 1.0f;
@@ -998,8 +1037,18 @@ void server_handle_command(Server* server, ClientSession* client, CommandType cm
         case CMD_SELECT_COLONY:
             if (data) {
                 CommandSelectColony* sel = (CommandSelectColony*)data;
-                client->selected_colony = sel->colony_id;
-                server_send_colony_info(server, client, sel->colony_id);
+                ProtoCommandStatus status;
+                MessageType reply_type = server_select_colony(server, client, sel, &status);
+                server_send_command_status(server, client, reply_type, &status);
+                if (reply_type == MSG_ACK && client->selected_colony != 0) {
+                    server_send_colony_info(server, client, client->selected_colony);
+                    printf("Selected colony %u for client %u\n", client->selected_colony, client->id);
+                } else if (reply_type == MSG_ACK) {
+                    printf("Cleared colony selection for client %u\n", client->id);
+                } else {
+                    printf("Rejected colony selection %u for client %u: %s\n",
+                           sel->colony_id, client->id, status.message);
+                }
             }
             break;
             

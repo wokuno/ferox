@@ -133,23 +133,56 @@ TEST(server_handle_command_data_branches_for_select_and_spawn) {
 
     CommandSelectColony select_colony = {.colony_id = 42};
     server_handle_command(server, client, CMD_SELECT_COLONY, &select_colony);
-    ASSERT_EQ(client->selected_colony, 42u);
-
     ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
     client->socket->fd = fds[0];
 
-    server_handle_command(server, client, CMD_SPAWN_COLONY, NULL);
-
-    CommandSpawnColony spawn = {.x = 2.0f, .y = 4.0f};
-    server_handle_command(server, client, CMD_SPAWN_COLONY, &spawn);
+    server_handle_command(server, client, CMD_SELECT_COLONY, &select_colony);
     MessageType last_status_type;
     ProtoCommandStatus last_status;
+    ASSERT_EQ(read_command_status_message(fds[1], &last_status_type, &last_status), 0);
+    ASSERT_EQ(last_status_type, MSG_ERROR);
+    ASSERT_EQ(last_status.command, (uint32_t)CMD_SELECT_COLONY);
+    ASSERT_EQ(last_status.status_code, (uint32_t)PROTO_COMMAND_STATUS_REJECTED);
+    ASSERT_EQ(last_status.entity_id, 42u);
+    ASSERT_EQ(client->selected_colony, 0u);
+
+    CommandSpawnColony select_spawn = {.x = 2.0f, .y = 4.0f};
+    server_handle_command(server, client, CMD_SPAWN_COLONY, &select_spawn);
+    ASSERT_EQ(read_command_status_message(fds[1], &last_status_type, &last_status), 0);
+    ASSERT_EQ(last_status_type, MSG_ACK);
+    uint32_t spawned_colony_id = last_status.entity_id;
+    ASSERT_NE(spawned_colony_id, 0u);
+
+    select_colony.colony_id = spawned_colony_id;
+    server_handle_command(server, client, CMD_SELECT_COLONY, &select_colony);
+    ASSERT_EQ(read_command_status_message(fds[1], &last_status_type, &last_status), 0);
+    ASSERT_EQ(last_status_type, MSG_ACK);
+    ASSERT_EQ(last_status.command, (uint32_t)CMD_SELECT_COLONY);
+    ASSERT_EQ(last_status.status_code, (uint32_t)PROTO_COMMAND_STATUS_ACCEPTED);
+    ASSERT_EQ(last_status.entity_id, spawned_colony_id);
+    ASSERT_EQ(client->selected_colony, spawned_colony_id);
+    ASSERT_EQ(read_command_status_message(fds[1], &last_status_type, NULL), 0);
+    ASSERT_EQ(last_status_type, MSG_COLONY_INFO);
+
+    select_colony.colony_id = 0;
+    server_handle_command(server, client, CMD_SELECT_COLONY, &select_colony);
+    ASSERT_EQ(read_command_status_message(fds[1], &last_status_type, &last_status), 0);
+    ASSERT_EQ(last_status_type, MSG_ACK);
+    ASSERT_EQ(last_status.command, (uint32_t)CMD_SELECT_COLONY);
+    ASSERT_EQ(last_status.status_code, (uint32_t)PROTO_COMMAND_STATUS_ACCEPTED);
+    ASSERT_EQ(last_status.entity_id, 0u);
+    ASSERT_EQ(client->selected_colony, 0u);
+
+    server_handle_command(server, client, CMD_SPAWN_COLONY, NULL);
+
+    CommandSpawnColony spawn = {.x = 6.0f, .y = 4.0f};
+    server_handle_command(server, client, CMD_SPAWN_COLONY, &spawn);
     ASSERT_EQ(read_command_status_message(fds[1], &last_status_type, &last_status), 0);
     ASSERT_EQ(last_status_type, MSG_ACK);
     ASSERT_EQ(last_status.command, (uint32_t)CMD_SPAWN_COLONY);
     ASSERT_EQ(last_status.status_code, (uint32_t)PROTO_COMMAND_STATUS_ACCEPTED);
 
-    Cell* spawned_cell = world_get_cell(server->world, 2, 4);
+    Cell* spawned_cell = world_get_cell(server->world, 6, 4);
     ASSERT_TRUE(spawned_cell != NULL);
     ASSERT_NE(spawned_cell->colony_id, 0u);
 
@@ -158,7 +191,7 @@ TEST(server_handle_command_data_branches_for_select_and_spawn) {
     ASSERT_EQ(spawned->cell_count, 1u);
     ASSERT_EQ(spawned->max_cell_count, 1u);
 
-    CommandSpawnColony blocked_spawn = {.x = 2.0f, .y = 4.0f};
+    CommandSpawnColony blocked_spawn = {.x = 6.0f, .y = 4.0f};
     size_t colony_count_before_blocked = server->world->colony_count;
     server_handle_command(server, client, CMD_SPAWN_COLONY, &blocked_spawn);
     ASSERT_EQ(server->world->colony_count, colony_count_before_blocked);
