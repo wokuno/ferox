@@ -459,17 +459,30 @@ static void test_process_input_pause_speed_scroll_select_reset(void) {
     assert(client.local_world.paused == false);
     assert(g_protocol.last_serialized_cmd == CMD_RESUME);
 
+    // Speed factor must match server (2.0x) so optimistic display is correct
+    g_next_action = INPUT_SPEED_UP;
+    client.local_world.speed_multiplier = 1.0f;
+    client_process_input(&client);
+    assert(client.local_world.speed_multiplier == 2.0f);
+    assert(g_protocol.last_serialized_cmd == CMD_SPEED_UP);
+
+    g_next_action = INPUT_SLOW_DOWN;
+    client.local_world.speed_multiplier = 2.0f;
+    client_process_input(&client);
+    assert(client.local_world.speed_multiplier == 1.0f);
+    assert(g_protocol.last_serialized_cmd == CMD_SLOW_DOWN);
+
+    // Upper bound clamping
     g_next_action = INPUT_SPEED_UP;
     client.local_world.speed_multiplier = 90.0f;
     client_process_input(&client);
     assert(client.local_world.speed_multiplier == 10.0f);
-    assert(g_protocol.last_serialized_cmd == CMD_SPEED_UP);
 
+    // Lower bound clamping
     g_next_action = INPUT_SLOW_DOWN;
     client.local_world.speed_multiplier = 0.11f;
     client_process_input(&client);
     assert(client.local_world.speed_multiplier == 0.1f);
-    assert(g_protocol.last_serialized_cmd == CMD_SLOW_DOWN);
 
     g_next_action = INPUT_SCROLL_LEFT;
     client_process_input(&client);

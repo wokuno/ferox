@@ -331,7 +331,7 @@ static void client_process_input(Client* client) {
             
         case INPUT_SPEED_UP:
             client_send_command(client, CMD_SPEED_UP, NULL);
-            client->local_world.speed_multiplier *= 1.5f;
+            client->local_world.speed_multiplier *= 2.0f;
             if (client->local_world.speed_multiplier > 10.0f) {
                 client->local_world.speed_multiplier = 10.0f;
             }
@@ -339,7 +339,7 @@ static void client_process_input(Client* client) {
             
         case INPUT_SLOW_DOWN:
             client_send_command(client, CMD_SLOW_DOWN, NULL);
-            client->local_world.speed_multiplier /= 1.5f;
+            client->local_world.speed_multiplier /= 2.0f;
             if (client->local_world.speed_multiplier < 0.1f) {
                 client->local_world.speed_multiplier = 0.1f;
             }

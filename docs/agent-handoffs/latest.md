@@ -1,48 +1,32 @@
 # Agent Handoff
 
-- Run label: `20260324-184054-reset-command-feedback`
-- Outcome: kept experiment; reset requests now return immediate structured `MSG_ACK` / `MSG_ERROR` feedback and clear stale client selection state on accepted rebuilds.
-- Hypothesis: if `CMD_RESET` reuses `ProtoCommandStatus` over `MSG_ACK` / `MSG_ERROR`, then clients and focused correctness tests can distinguish accepted versus failed world resets immediately and clear stale local selection/detail state on success instead of relying on later snapshot side effects.
+- Run label: `20260324-233546-client-speed-factor-alignment`
+- Outcome: kept experiment; client speed adjustment factor aligned with server (2.0x instead of 1.5x) to eliminate optimistic display mismatch.
+- Hypothesis: if the client's speed adjustment factor matches the server's (2.0x), the displayed speed between user action and next server broadcast will be correct.
 
 ## What Changed
 
-- Updated `src/server/server.c` so `CMD_RESET` now:
-  - routes through a narrow `server_reset_world()` helper
-  - returns `MSG_ACK` with `PROTO_COMMAND_STATUS_ACCEPTED` on successful world rebuild
-  - returns `MSG_ERROR` with `PROTO_COMMAND_STATUS_INTERNAL_ERROR` if the rebuild fails
-  - clears all connected clients' `selected_colony` values immediately after a successful reset so later broadcasts do not chase stale ids
-- Updated terminal and GUI clients so reset acknowledgements clear stale local selection/detail state immediately:
+- Fixed speed multiplier factor in both clients from `*= 1.5f` / `/= 1.5f` to `*= 2.0f` / `/= 2.0f`:
   - `src/client/client.c`
   - `src/gui/gui_client.c`
-- Updated focused coverage in:
-  - `tests/test_server_branch_coverage.c`
-  - `tests/test_phase5.c`
-  - `tests/test_phase6.c`
-  - `tests/test_client_logic_surface.c`
-  - `tests/test_protocol_edge.c`
-- Updated docs:
-  - `docs/PROTOCOL.md`
-  - `docs/ARCHITECTURE.md`
-  - `docs/TESTING.md`
-  - `docs/PERFORMANCE_RESEARCH.md`
-  - `docs/lab-notes/20260324-184054-reset-command-feedback.md`
+- Added factor-matching assertions to both test files:
+  - `tests/test_client_logic_surface.c` — verifies 1.0→2.0 on speed-up and 2.0→1.0 on slow-down
+  - `tests/test_server_branch_coverage.c` — adds `ASSERT_FLOAT_EQ` macro and server-side factor checks
 
 ## Validation
 
-- Focused correctness suite passed:
-  - `ctest --test-dir build --output-on-failure -R "ProtocolEdgeTests|ServerBranchCoverageTests|Phase5Tests|Phase6Tests"`
-- Additional client-surface test passed:
-  - `./build/tests/test_client_logic_surface`
-- Focused rebuild passed:
-  - `cmake --build build -j4 --target test_protocol_edge test_server_branch_coverage test_phase5 test_phase6`
+- Full ctest suite: 27/27 passed
+- Standalone client surface test: 8/8 passed
+- Focused suite (Phase5, Phase6, ServerBranch, ProtocolEdge): 4/4 passed
 
 ## Notes For Next Agent
 
 - There are unrelated pre-existing user changes in docs/scripts/root files; do not revert them.
-- `ProtoCommandStatus` is now live for manual spawn, colony selection, and reset.
-- Pause/resume and speed-control commands still rely on optimistic local client state with no structured ack for clamp/no-op outcomes.
-- `tests/test_client_logic_surface.c` is still a standalone manually compiled surface test rather than a CMake target.
+- `test_client_logic_surface.c` is still a standalone manually compiled test, not a CMake target. It `#include`s `../src/client/client.c` directly, which conflicts with normal library linking.
+- CMD_PAUSE/RESUME/SPEED_UP/SLOW_DOWN still do not send structured feedback; these are trivially successful fire-and-forget commands.
+- PROTOCOL.md still says `CMD_RESET | none` for response payload, but the code now sends ACK/ERROR. Updating that doc is a separate task.
+- The speed sequence from server baseline 1.0x is: 2.0, 4.0, 8.0, 10.0 (clamped). Both client and server now produce the same sequence.
 
 ## Recommended Next Experiment
 
-Extend the command-status surface to speed-limit clamping or pause/resume so optimistic local playback state can be reconciled immediately rather than waiting for later snapshots.
+Wire `test_client_logic_surface.c` into the CMake test matrix as a proper CTest target so client-side logic regressions are caught by `ctest` automatically. This requires solving the `#include client.c` pattern — either by compiling the test as a single translation unit or by extracting testable client logic into a separate compilation unit.

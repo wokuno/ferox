@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,7 @@ static int current_test_failed = 0;
 #define ASSERT_TRUE(cond) ASSERT((cond), #cond)
 #define ASSERT_EQ(a, b) ASSERT((a) == (b), #a " == " #b)
 #define ASSERT_NE(a, b) ASSERT((a) != (b), #a " != " #b)
+#define ASSERT_FLOAT_EQ(a, b) ASSERT(fabsf((a) - (b)) < 0.0001f, #a " == " #b)
 
 static NetSocket* make_mock_socket(bool connected, int fd) {
     NetSocket* socket = (NetSocket*)calloc(1, sizeof(NetSocket));
@@ -71,6 +73,14 @@ TEST(server_handle_command_clamps_speed_limits) {
     ASSERT_TRUE(socket != NULL);
     ClientSession* client = server_add_client(server, socket);
     ASSERT_TRUE(client != NULL);
+
+    // Factor must be 2.0x to match client optimistic display
+    server->speed_multiplier = 1.0f;
+    server_handle_command(server, client, CMD_SPEED_UP, NULL);
+    ASSERT_FLOAT_EQ(server->speed_multiplier, 2.0f);
+
+    server_handle_command(server, client, CMD_SLOW_DOWN, NULL);
+    ASSERT_FLOAT_EQ(server->speed_multiplier, 1.0f);
 
     server->speed_multiplier = 9.0f;
     server_handle_command(server, client, CMD_SPEED_UP, NULL);
