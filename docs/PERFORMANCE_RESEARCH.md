@@ -234,11 +234,11 @@ Risk:
 
 In order:
 
-1. Dirty-tile or frontier-list telemetry that pushes beyond the current one-pass rewrite.
-2. Tiled stencil benchmark for `simulation_update_nutrients()` and the remaining transport-heavy paths.
-3. Multirate telemetry and scent update experiments.
-4. Combat broadphase extension from contested cells to tile-level mixed-frontier metadata if the combat hotspot grows again.
-5. Quantized-field perf branch if the memory-bound hypothesis still dominates.
+1. Re-measure the broader `broadcast build snapshot` lane with repeated `test_performance_eval` runs to see how much of the focused snapshot gain carries end-to-end.
+2. Dirty-tile or frontier-list telemetry that pushes beyond the current one-pass rewrite.
+3. Tiled stencil benchmark for `simulation_update_nutrients()` and the remaining transport-heavy paths.
+4. Multirate telemetry and scent update experiments.
+5. Combat broadphase extension from contested cells to tile-level mixed-frontier metadata if the combat hotspot grows again.
 
 Implemented from this list already:
 
@@ -247,6 +247,7 @@ Implemented from this list already:
 - Combat broadphase now skips non-contested border cells and has a focused sparse-border perf test.
 - Frontier telemetry now also uses direct-index lineage histograms instead of linear bucket scans.
 - Snapshot building now uses a direct `colony_id -> proto_idx` lookup table during the grid pass instead of repeated protocol-list searches.
+- Snapshot building now also maps `colony_id -> proto_index` directly during centroid accumulation, removing the extra `world_index` indirection from the grid pass.
 - Transport now has a no-biofilm fast path so the common zero-EPS case does not pay attenuation work in nutrient, toxin, and scent updates.
 
 Rejected from this list so far:

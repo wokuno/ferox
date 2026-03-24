@@ -98,6 +98,26 @@ Low-risk cacheline guardrails now live in shared headers for the most contended 
 
 This change is intentionally structural only: it does not alter scheduling policy, memory-order semantics, or feature defaults.
 
+## 2026-03-24 Snapshot Colony-Id Lookup Follow-up
+
+Kept:
+
+- `server_build_protocol_world_snapshot()` now builds its temporary lookup table directly by `colony_id` instead of mapping `colony_id -> world_index -> proto_index` during the grid pass.
+- The temporary lookup uses a small stack-backed `uint16_t` table for the common case and falls back to heap allocation only when the world's sparse id capacity exceeds that stack size.
+- `tests/test_phase2.c` now covers sparse high colony ids so snapshot building stays correct when only a few active colonies remain after many historical id allocations.
+
+Measured effect on this host (`FEROX_PERF_SCALE=5`, `test_perf_components`, `3` runs):
+
+- baseline `server snapshot build`: `18.75 ms`, `18.90 ms`, `18.76 ms` (median `18.76 ms`)
+- candidate `server snapshot build`: `15.38 ms`, `15.85 ms`, `15.61 ms` (median `15.61 ms`)
+- median improvement: about `16.8%`
+
+Interpretation:
+
+- This is a clean keep because all three candidate runs beat all three baseline runs.
+- The win is modest in code size but meaningful in the focused transport-build hotspot because it removes one extra dependent lookup from every occupied-cell accumulation in the snapshot grid pass.
+- The next transport-side check should confirm whether the same change also improves the broader `broadcast build snapshot` lane in repeated `test_performance_eval` runs.
+
 ## 2026-03-19 Atomic Order Audit Scope
 
 Issue `#115` is scoped as a docs-first audit of the existing C11 atomic sites,

@@ -482,19 +482,30 @@ int server_build_protocol_world_snapshot(const World* world,
     proto_world->speed_multiplier = speed_multiplier;
 
     uint32_t count = 0;
-    uint32_t* proto_index_by_world_index = NULL;
+    uint16_t proto_index_by_colony_id_stack[512];
+    uint16_t* proto_index_by_colony_id = NULL;
+    size_t proto_index_by_colony_id_capacity = 0;
     float sum_x[MAX_COLONIES] = {0};
     float sum_y[MAX_COLONIES] = {0};
     uint32_t sample_count[MAX_COLONIES] = {0};
 
-    if (world->colony_count > 0) {
-        proto_index_by_world_index = (uint32_t*)malloc(world->colony_count * sizeof(uint32_t));
-        if (!proto_index_by_world_index) {
+    if (world->colony_index_capacity > 0) {
+        proto_index_by_colony_id_capacity = world->colony_index_capacity;
+        if (proto_index_by_colony_id_capacity <=
+            (sizeof(proto_index_by_colony_id_stack) / sizeof(proto_index_by_colony_id_stack[0]))) {
+            proto_index_by_colony_id = proto_index_by_colony_id_stack;
+        } else {
+            proto_index_by_colony_id = (uint16_t*)malloc(proto_index_by_colony_id_capacity *
+                                                         sizeof(uint16_t));
+        }
+
+        if (!proto_index_by_colony_id) {
             return -1;
         }
-        for (size_t i = 0; i < world->colony_count; i++) {
-            proto_index_by_world_index[i] = UINT32_MAX;
-        }
+
+        memset(proto_index_by_colony_id,
+               0xFF,
+               proto_index_by_colony_id_capacity * sizeof(uint16_t));
     }
 
     for (size_t i = 0; i < world->colony_count && count < MAX_COLONIES; i++) {
@@ -520,8 +531,8 @@ int server_build_protocol_world_snapshot(const World* world,
         proto_colony->y = 0.0f;
         proto_colony->radius = 0.0f;
 
-        if (proto_index_by_world_index) {
-            proto_index_by_world_index[i] = count;
+        if (proto_index_by_colony_id && (size_t)colony->id < proto_index_by_colony_id_capacity) {
+            proto_index_by_colony_id[colony->id] = (uint16_t)count;
         }
         count++;
     }
@@ -533,7 +544,9 @@ int server_build_protocol_world_snapshot(const World* world,
     if (inline_grid) {
         proto_world_alloc_grid(proto_world, proto_world->width, proto_world->height);
         if (!proto_world->grid) {
-            free(proto_index_by_world_index);
+            if (proto_index_by_colony_id != proto_index_by_colony_id_stack) {
+                free(proto_index_by_colony_id);
+            }
             proto_world_free(proto_world);
             return -1;
         }
@@ -549,17 +562,13 @@ int server_build_protocol_world_snapshot(const World* world,
                 proto_world->grid[idx] = (uint16_t)colony_id;
             }
 
-            if (colony_id == 0 || !proto_index_by_world_index || (size_t)colony_id >= world->colony_index_capacity) {
+            if (colony_id == 0 || !proto_index_by_colony_id ||
+                (size_t)colony_id >= proto_index_by_colony_id_capacity) {
                 continue;
             }
 
-            uint32_t world_index = world->colony_index_map[colony_id];
-            if (world_index == UINT32_MAX || world_index >= world->colony_count) {
-                continue;
-            }
-
-            uint32_t proto_index = proto_index_by_world_index[world_index];
-            if (proto_index == UINT32_MAX || proto_index >= count) {
+            uint16_t proto_index = proto_index_by_colony_id[colony_id];
+            if (proto_index == UINT16_MAX || proto_index >= count) {
                 continue;
             }
 
@@ -579,7 +588,9 @@ int server_build_protocol_world_snapshot(const World* world,
     }
 
     proto_world->colony_count = count;
-    free(proto_index_by_world_index);
+    if (proto_index_by_colony_id != proto_index_by_colony_id_stack) {
+        free(proto_index_by_colony_id);
+    }
     return 0;
 }
 

@@ -8,6 +8,7 @@
 #include "../src/shared/utils.h"
 #include "../src/server/world.h"
 #include "../src/server/genetics.h"
+#include "../src/server/server.h"
 #include "../src/server/simulation.h"
 
 // Test framework macros
@@ -197,6 +198,70 @@ TEST(world_init_random_colonies_creates_active_colonies) {
     ASSERT_EQ(active_count, 5);
     
     world_destroy(world);
+}
+
+TEST(server_build_protocol_world_snapshot_handles_sparse_high_colony_ids) {
+    Server* server = server_create_headless(32, 16, 2);
+    ASSERT_NOT_NULL(server);
+
+    World* world = server->world;
+    ASSERT_NOT_NULL(world);
+
+    uint32_t kept_low = 0;
+    uint32_t kept_high = 0;
+    for (int i = 0; i < 520; i++) {
+        Colony colony;
+        memset(&colony, 0, sizeof(Colony));
+        colony.genome = genome_create_random();
+        colony.active = true;
+        uint32_t id = world_add_colony(world, colony);
+        ASSERT_NE(id, 0);
+        if (i == 0) {
+            kept_low = id;
+        }
+        kept_high = id;
+    }
+
+    for (size_t i = 0; i < world->colony_count; i++) {
+        Colony* colony = &world->colonies[i];
+        colony->active = (colony->id == kept_low || colony->id == kept_high);
+        colony->cell_count = 0;
+        colony->max_cell_count = 0;
+    }
+
+    Cell* low_cell = world_get_cell(world, 2, 3);
+    Cell* high_cell = world_get_cell(world, 29, 12);
+    ASSERT_NOT_NULL(low_cell);
+    ASSERT_NOT_NULL(high_cell);
+    low_cell->colony_id = kept_low;
+    high_cell->colony_id = kept_high;
+    world_get_colony(world, kept_low)->cell_count = 1;
+    world_get_colony(world, kept_low)->max_cell_count = 1;
+    world_get_colony(world, kept_high)->cell_count = 1;
+    world_get_colony(world, kept_high)->max_cell_count = 1;
+
+    ProtoWorld snapshot;
+    ASSERT_EQ(server_build_protocol_world_snapshot(world, false, 1.0f, &snapshot), 0);
+    ASSERT_EQ(snapshot.colony_count, 2u);
+    ASSERT_NOT_NULL(snapshot.grid);
+    ASSERT_EQ(snapshot.grid[3 * world->width + 2], kept_low);
+    ASSERT_EQ(snapshot.grid[12 * world->width + 29], kept_high);
+
+    int found_low = 0;
+    int found_high = 0;
+    for (uint32_t i = 0; i < snapshot.colony_count; i++) {
+        if (snapshot.colonies[i].id == kept_low) {
+            found_low = 1;
+        }
+        if (snapshot.colonies[i].id == kept_high) {
+            found_high = 1;
+        }
+    }
+    ASSERT_TRUE(found_low);
+    ASSERT_TRUE(found_high);
+
+    proto_world_free(&snapshot);
+    server_destroy(server);
 }
 
 // ============================================================================
@@ -453,6 +518,7 @@ int main(void) {
     RUN_TEST(world_add_colony_returns_id_and_increments_count);
     RUN_TEST(world_remove_colony_deactivates_and_clears_cells);
     RUN_TEST(world_init_random_colonies_creates_active_colonies);
+    RUN_TEST(server_build_protocol_world_snapshot_handles_sparse_high_colony_ids);
     
     printf("\nGenetics Tests:\n");
     RUN_TEST(genome_create_random_produces_values_in_valid_ranges);
