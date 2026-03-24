@@ -1,40 +1,40 @@
 # Agent Handoff
 
-- Run label: `20260324-171525-broadcast-inline-grid-allocation`
-- Outcome: committed improvement candidate; broader broadcast-path follow-up stayed green and showed repeated-run median improvement.
-- Hypothesis: allocating the inline snapshot grid directly inside `server_build_protocol_world_snapshot()` would reduce broader broadcast costs by removing a redundant zero-fill before the grid-copy pass overwrites every cell.
+- Run label: `20260324-171905-one-pass-world-state-serialization`
+- Outcome: committed improvement candidate; inline-grid world-state serialization stayed green and showed repeated-run median improvement in the broader transport lane.
+- Hypothesis: writing encoded grid payloads directly into the final world-state output buffer would reduce serialization overhead by removing a temporary allocation and copy stage.
 
 ## What Changed
 
-- `src/server/server.c`
-  - `server_build_protocol_world_snapshot()` now allocates inline snapshot grids directly with `malloc` and sets `grid_size` / `has_grid` explicitly.
-  - This removes the eager `memset` previously done by `proto_world_alloc_grid()` on a hot path that immediately rewrites the full grid.
+- `src/shared/protocol.c`
+  - `protocol_serialize_world_state()` now reserves enough space for the useful worst-case grid payload and encodes directly into the final output buffer.
+  - Shared grid-encoding helpers now support both direct-to-buffer world-state serialization and the standalone `protocol_serialize_grid_rle()` API.
 - `tests/test_protocol_edge.c`
-  - Added `world_state_with_grid_roundtrip_preserves_cells` so populated world-state grids still round-trip through serialization and deserialization.
+  - Added `world_state_with_noisy_grid_roundtrip_preserves_cells` to cover the raw-mode-heavy world-state path.
 - Docs updated:
   - `docs/PERFORMANCE.md`
   - `docs/PERFORMANCE_RESEARCH.md`
-  - `docs/lab-notes/20260324-171525-broadcast-inline-grid-allocation.md`
+  - `docs/lab-notes/20260324-171905-one-pass-world-state-serialization.md`
 
 ## Validation
 
 - Tests passed:
   - `./build/tests/test_protocol_edge`
-  - `./build/tests/test_phase2`
+  - `./build/tests/test_perf_unit_protocol`
 - Benchmarks executed after tests passed (`FEROX_PERF_SCALE=5`, `./build/tests/test_performance_eval`, `3` runs):
-  - baseline `broadcast build snapshot`: `9.56`, `9.29`, `9.41 ms` (median `9.41 ms`)
-  - candidate `broadcast build snapshot`: `7.01`, `6.98`, `7.26 ms` (median `7.01 ms`)
-  - baseline `broadcast build+serialize`: `20.62`, `20.47`, `21.27 ms` (median `20.62 ms`)
-  - candidate `broadcast build+serialize`: `17.01`, `17.05`, `18.02 ms` (median `17.05 ms`)
-  - baseline `broadcast end-to-end (0 clients)`: `20.38`, `20.22`, `21.41 ms` (median `20.38 ms`)
-  - candidate `broadcast end-to-end (0 clients)`: `17.22`, `17.17`, `17.59 ms` (median `17.22 ms`)
+  - baseline `protocol serialize only`: `13.27`, `13.75`, `13.85 ms` (median `13.75 ms`)
+  - candidate `protocol serialize only`: `14.12`, `12.91`, `13.25 ms` (median `13.25 ms`)
+  - baseline `broadcast build+serialize`: `16.99`, `17.66`, `18.05 ms` (median `17.66 ms`)
+  - candidate `broadcast build+serialize`: `16.59`, `16.48`, `17.32 ms` (median `16.59 ms`)
+  - baseline `broadcast end-to-end (0 clients)`: `17.16`, `17.90`, `18.04 ms` (median `17.90 ms`)
+  - candidate `broadcast end-to-end (0 clients)`: `16.50`, `16.51`, `17.20 ms` (median `16.51 ms`)
 
 ## Notes For Next Agent
 
-- The previous focused snapshot lookup win now has broader transport corroboration on this host.
+- The transport path now has three consecutive narrow keeps: lookup indirection removal, inline-grid zero-fill removal, and one-pass world-state serialization.
 - There are unrelated pre-existing user changes in docs/scripts/root files; do not revert them.
-- No revert is needed for this run because every candidate broadcast run beat every baseline broadcast run.
+- This keep is real but smaller/noisier than the prior two transport passes, so the next experiment should still prefer a tightly measurable protocol micro-path.
 
 ## Recommended Next Experiment
 
-Target `protocol_serialize_world_state()` in the inline-grid path to reduce serialization overhead now that `broadcast build snapshot` has dropped again. The most promising narrow slices are temporary allocation/copy reduction around the encoded buffer or the grid raw-vs-RLE decision path.
+Target the raw-grid path inside `protocol_serialize_grid_rle()` or `protocol_deserialize_grid_rle()` to reduce per-cell byte-order write/read overhead now that the extra staging buffer is gone.

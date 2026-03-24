@@ -667,6 +667,47 @@ TEST(world_state_with_grid_roundtrip_preserves_cells) {
     proto_world_free(&world);
 }
 
+TEST(world_state_with_noisy_grid_roundtrip_preserves_cells) {
+    ProtoWorld world;
+    proto_world_init(&world);
+    world.width = 128;
+    world.height = 64;
+    world.tick = 88;
+    world.colony_count = 8;
+    world.paused = false;
+    world.speed_multiplier = 1.0f;
+
+    for (uint32_t i = 0; i < world.colony_count; i++) {
+        world.colonies[i].id = i + 1u;
+    }
+
+    proto_world_alloc_grid(&world, world.width, world.height);
+    ASSERT_NOT_NULL(world.grid);
+
+    for (uint32_t i = 0; i < world.grid_size; i++) {
+        world.grid[i] = (uint16_t)(((i * 131u) & 0x00FFu) + 1u);
+    }
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_state(&world, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(buffer);
+
+    ProtoWorld decoded;
+    proto_world_init(&decoded);
+    result = protocol_deserialize_world_state(buffer, len, &decoded);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(decoded.has_grid, true);
+    ASSERT_EQ(decoded.grid_size, world.grid_size);
+    ASSERT_NOT_NULL(decoded.grid);
+    ASSERT_BYTES_EQ(decoded.grid, world.grid, world.grid_size * sizeof(uint16_t), "noisy world grid should survive roundtrip");
+
+    free(buffer);
+    proto_world_free(&decoded);
+    proto_world_free(&world);
+}
+
 // ============================================================================
 // Null Input Tests
 // ============================================================================
@@ -879,6 +920,7 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(grid_rle_raw_mode_roundtrip);
     RUN_TEST(grid_rle_rejects_unknown_mode);
     RUN_TEST(world_state_with_grid_roundtrip_preserves_cells);
+    RUN_TEST(world_state_with_noisy_grid_roundtrip_preserves_cells);
     
     printf("\nColony Name Tests:\n");
     RUN_TEST(maximum_length_colony_name);

@@ -141,6 +141,29 @@ Interpretation:
 - The focused snapshot lookup win does carry into the broader broadcast path, and removing the redundant inline-grid zero-fill contributes another measurable transport-side reduction.
 - After this keep, `build snapshot` is a smaller share of `build+serialize`, so the next narrow transport experiment should target serialization overhead rather than snapshot construction again.
 
+## 2026-03-24 One-Pass World-State Serialization Follow-up
+
+Kept:
+
+- `protocol_serialize_world_state()` now writes encoded grid payloads directly into the final world-state output buffer instead of allocating a temporary grid buffer and copying it afterward.
+- The shared raw/RLE decision logic now supports both direct-to-output world-state serialization and the standalone grid codec entry point.
+- `tests/test_protocol_edge.c` now includes a larger noisy-grid world-state roundtrip so the raw-mode-heavy path stays covered.
+
+Measured effect on this host (`FEROX_PERF_SCALE=5`, `test_performance_eval`, `3` runs):
+
+- baseline `protocol serialize only`: `13.27 ms`, `13.75 ms`, `13.85 ms` (median `13.75 ms`)
+- candidate `protocol serialize only`: `14.12 ms`, `12.91 ms`, `13.25 ms` (median `13.25 ms`)
+- baseline `broadcast build+serialize`: `16.99 ms`, `17.66 ms`, `18.05 ms` (median `17.66 ms`)
+- candidate `broadcast build+serialize`: `16.59 ms`, `16.48 ms`, `17.32 ms` (median `16.59 ms`)
+- baseline `broadcast end-to-end (0 clients)`: `17.16 ms`, `17.90 ms`, `18.04 ms` (median `17.90 ms`)
+- candidate `broadcast end-to-end (0 clients)`: `16.50 ms`, `16.51 ms`, `17.20 ms` (median `16.51 ms`)
+
+Interpretation:
+
+- This is a keep, but a modest one: medians improved and the broad transport lanes moved together, though the serialization-only lane still shows some run-to-run noise.
+- The main benefit is removing one whole temporary allocation/copy stage from the hot inline-grid world-state path while preserving wire behavior.
+- The next transport-side slice should target per-cell raw-grid encode/decode overhead rather than more buffer-lifetime churn.
+
 ## 2026-03-19 Atomic Order Audit Scope
 
 Issue `#115` is scoped as a docs-first audit of the existing C11 atomic sites,

@@ -234,7 +234,7 @@ Risk:
 
 In order:
 
-1. Narrow `protocol_serialize_world_state()` overhead in the inline-grid broadcast path now that snapshot build has dropped again.
+1. Narrow raw-grid encode/decode per-cell overhead now that `protocol_serialize_world_state()` no longer double-buffers inline-grid payloads.
 2. Dirty-tile or frontier-list telemetry that pushes beyond the current one-pass rewrite.
 3. Tiled stencil benchmark for `simulation_update_nutrients()` and the remaining transport-heavy paths.
 4. Multirate telemetry and scent update experiments.
@@ -249,6 +249,7 @@ Implemented from this list already:
 - Snapshot building now uses a direct `colony_id -> proto_idx` lookup table during the grid pass instead of repeated protocol-list searches.
 - Snapshot building now also maps `colony_id -> proto_index` directly during centroid accumulation, removing the extra `world_index` indirection from the grid pass.
 - Snapshot building now also skips the redundant zero-fill in inline-grid allocation because the subsequent snapshot scan writes every grid cell unconditionally.
+- `protocol_serialize_world_state()` now writes encoded inline-grid payloads directly into the final output buffer instead of staging them in a temporary `grid_buffer` first.
 - Transport now has a no-biofilm fast path so the common zero-EPS case does not pay attenuation work in nutrient, toxin, and scent updates.
 
 Rejected from this list so far:
