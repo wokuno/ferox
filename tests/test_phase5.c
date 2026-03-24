@@ -177,8 +177,8 @@ int test_server_handles_pause_resume_commands(void) {
     // Test select colony command
     CommandSelectColony select_cmd = { .colony_id = 42 };
     server_handle_command(server, client, CMD_SELECT_COLONY, &select_cmd);
-    TEST_ASSERT_EQ(client->selected_colony, 42, "Selected colony should be updated");
-    
+    TEST_ASSERT_EQ(client->selected_colony, 0, "Missing colony selection should be rejected");
+
     server_remove_client(server, client);
     server_destroy(server);
     return 0;

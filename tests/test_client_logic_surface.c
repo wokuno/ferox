@@ -405,6 +405,16 @@ static void test_handle_message_updates_selection_status(void) {
     client_handle_message(&client, MSG_ACK, payload, COMMAND_STATUS_SERIALIZED_SIZE);
     assert(client.selected_colony == 0);
     assert(client.has_selected_detail == false);
+
+    client.selected_colony = 88;
+    client.has_selected_detail = true;
+    g_protocol.next_command_status.command = CMD_RESET;
+    g_protocol.next_command_status.status_code = PROTO_COMMAND_STATUS_ACCEPTED;
+    g_protocol.next_command_status.entity_id = 0;
+    strcpy(g_protocol.next_command_status.message, "Reset accepted");
+    client_handle_message(&client, MSG_ACK, payload, COMMAND_STATUS_SERIALIZED_SIZE);
+    assert(client.selected_colony == 0);
+    assert(client.has_selected_detail == false);
 }
 
 static void test_update_world_guards_and_failures(void) {

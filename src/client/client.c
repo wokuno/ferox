@@ -144,6 +144,9 @@ void client_handle_message(Client* client, MessageType type, const uint8_t* payl
                         } else {
                             client->selected_colony = status.entity_id;
                         }
+                    } else if (status.command == (uint32_t)CMD_RESET) {
+                        client->selected_colony = 0;
+                        client->has_selected_detail = false;
                     }
                 }
             }

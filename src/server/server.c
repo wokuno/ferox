@@ -173,9 +173,9 @@ static MessageType server_spawn_colony(Server* server,
 }
 
 static MessageType server_select_colony(Server* server,
-                                        ClientSession* client,
-                                        const CommandSelectColony* select,
-                                        ProtoCommandStatus* status) {
+                                         ClientSession* client,
+                                         const CommandSelectColony* select,
+                                         ProtoCommandStatus* status) {
     server_fill_command_status(status, CMD_SELECT_COLONY,
                                PROTO_COMMAND_STATUS_INTERNAL_ERROR,
                                0,
@@ -208,6 +208,64 @@ static MessageType server_select_colony(Server* server,
                                PROTO_COMMAND_STATUS_ACCEPTED,
                                select->colony_id,
                                "Selection accepted");
+    return MSG_ACK;
+}
+
+static void server_clear_selected_colonies(Server* server) {
+    if (!server) {
+        return;
+    }
+
+    for (ClientSession* client = server->clients; client; client = client->next) {
+        client->selected_colony = 0;
+    }
+}
+
+static MessageType server_reset_world(Server* server,
+                                      ClientSession* client,
+                                      ProtoCommandStatus* status) {
+    server_fill_command_status(status, CMD_RESET,
+                               PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+                               0,
+                               "Reset failed");
+    if (!server || !status) {
+        return MSG_ERROR;
+    }
+
+    World* new_world = world_create(server->world_width, server->world_height);
+    AtomicWorld* new_atomic_world = NULL;
+    if (new_world) {
+        world_init_random_colonies(new_world, server->default_colonies);
+        new_atomic_world = atomic_world_create(new_world, server->pool, server->pool->thread_count);
+    }
+
+    if (!new_world || !new_atomic_world) {
+        atomic_world_destroy(new_atomic_world);
+        world_destroy(new_world);
+        server_fill_command_status(status, CMD_RESET,
+                                   PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+                                   0,
+                                   "Reset failed: world rebuild");
+        if (client) {
+            printf("World reset failed for client %u\n", client->id);
+        }
+        return MSG_ERROR;
+    }
+
+    atomic_world_destroy(server->atomic_world);
+    world_destroy(server->world);
+    server->world = new_world;
+    server->atomic_world = new_atomic_world;
+    if (server->parallel_ctx) {
+        server->parallel_ctx->world = server->world;
+        parallel_init_regions(server->parallel_ctx, server->world_width, server->world_height);
+    }
+
+    server_clear_selected_colonies(server);
+    server_fill_command_status(status, CMD_RESET,
+                               PROTO_COMMAND_STATUS_ACCEPTED,
+                               0,
+                               "Reset accepted");
     return MSG_ACK;
 }
 
@@ -1005,33 +1063,16 @@ void server_handle_command(Server* server, ClientSession* client, CommandType cm
             break;
             
         case CMD_RESET:
-            // Reset world while keeping the previous world alive until the new
-            // one and its atomic wrapper are ready.
             {
-                World* new_world = world_create(server->world_width, server->world_height);
-                AtomicWorld* new_atomic_world = NULL;
-                if (new_world) {
-                    world_init_random_colonies(new_world, server->default_colonies);
-                    new_atomic_world = atomic_world_create(new_world, server->pool, server->pool->thread_count);
-                }
-
-                if (!new_world || !new_atomic_world) {
-                    atomic_world_destroy(new_atomic_world);
-                    world_destroy(new_world);
-                    printf("World reset failed for client %u\n", client->id);
-                    break;
-                }
-
-                atomic_world_destroy(server->atomic_world);
-                world_destroy(server->world);
-                server->world = new_world;
-                server->atomic_world = new_atomic_world;
-                if (server->parallel_ctx) {
-                    server->parallel_ctx->world = server->world;
-                    parallel_init_regions(server->parallel_ctx, server->world_width, server->world_height);
+                ProtoCommandStatus status;
+                MessageType reply_type = server_reset_world(server, client, &status);
+                server_send_command_status(server, client, reply_type, &status);
+                if (reply_type == MSG_ACK) {
+                    printf("World reset by client %u\n", client->id);
+                } else {
+                    printf("Rejected world reset for client %u: %s\n", client->id, status.message);
                 }
             }
-            printf("World reset by client %u\n", client->id);
             break;
             
         case CMD_SELECT_COLONY:

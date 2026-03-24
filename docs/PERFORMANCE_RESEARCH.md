@@ -259,6 +259,7 @@ Rejected from this list so far:
 - A helper-based raw-grid decode cleanup in `protocol_deserialize_grid_rle()` regressed `test_perf_unit_protocol` noisy-grid medians and was reverted.
 - Structured spawn-feedback wiring (`MSG_ACK`/`MSG_ERROR`) is now no longer a recommended next experiment because the protocol/client correctness slice has been implemented.
 - Selection-feedback wiring is also no longer a recommended next experiment because `CMD_SELECT_COLONY` now uses the same immediate command-status surface.
+- Reset-feedback wiring is also no longer a recommended next experiment because `CMD_RESET` now uses the same immediate command-status surface and clears stale client selection state on acceptance.
 
 ## What Not To Chase First
 

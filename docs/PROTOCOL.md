@@ -369,10 +369,14 @@ Current live use:
 
 - accepted `CMD_SPAWN_COLONY` requests return `MSG_ACK`
 - accepted `CMD_SELECT_COLONY` requests also return `MSG_ACK`
+- accepted `CMD_RESET` requests also return `MSG_ACK`
 - the payload records the originating command id, a status code, the spawned
-  or selected colony id, and a short fixed-width message
+  or selected colony id when relevant, plus a short fixed-width message
 - clearing selection with `CMD_SELECT_COLONY` and `colony_id = 0` returns
   `PROTO_COMMAND_STATUS_ACCEPTED` with `entity_id = 0`
+- successful `CMD_RESET` returns `PROTO_COMMAND_STATUS_ACCEPTED` with
+  `entity_id = 0`, and clients should treat it as a signal to clear any stale
+  local colony selection/detail state until the next snapshot arrives
 
 ### MSG_ERROR
 
@@ -383,9 +387,11 @@ Current live use:
 
 - rejected `CMD_SPAWN_COLONY` requests return `MSG_ERROR`
 - rejected `CMD_SELECT_COLONY` requests also return `MSG_ERROR`
+- failed `CMD_RESET` rebuilds also return `MSG_ERROR`
 - out-of-bounds requests use `PROTO_COMMAND_STATUS_OUT_OF_BOUNDS`
 - occupied-target requests use `PROTO_COMMAND_STATUS_CONFLICT`
 - unknown or inactive selection targets use `PROTO_COMMAND_STATUS_REJECTED`
+- reset rebuild failures use `PROTO_COMMAND_STATUS_INTERNAL_ERROR`
 
 `ProtoCommandStatus` wire layout:
 

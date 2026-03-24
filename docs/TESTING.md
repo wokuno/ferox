@@ -132,3 +132,10 @@ feedback checks for manual spawn acceptance/rejection in:
 
 That same coverage now also checks `CMD_SELECT_COLONY` accept/reject/clear
 feedback so selection failures no longer remain silent in the command surface.
+
+That command-status coverage now also checks `CMD_RESET` acceptance so reset
+rebuilds no longer rely on optimistic client state or later snapshots alone in:
+
+- `ProtocolEdgeTests`
+- `ServerBranchCoverageTests`
+- `Phase6Tests`

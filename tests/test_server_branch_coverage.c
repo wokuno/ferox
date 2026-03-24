@@ -93,16 +93,29 @@ TEST(server_handle_command_reset_rebuilds_world) {
     Server* server = server_create(0, 21, 13, 2);
     ASSERT_TRUE(server != NULL);
 
-    NetSocket* socket = make_mock_socket(true, -1);
+    int fds[2] = {-1, -1};
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+
+    NetSocket* socket = make_mock_socket(true, fds[0]);
     ASSERT_TRUE(socket != NULL);
     ClientSession* client = server_add_client(server, socket);
     ASSERT_TRUE(client != NULL);
+
+    client->selected_colony = 77;
 
     World* old_world = server->world;
     AtomicWorld* old_atomic = server->atomic_world;
     ParallelContext* old_parallel = server->parallel_ctx;
 
     server_handle_command(server, client, CMD_RESET, NULL);
+
+    MessageType status_type;
+    ProtoCommandStatus status;
+    ASSERT_EQ(read_command_status_message(fds[1], &status_type, &status), 0);
+    ASSERT_EQ(status_type, MSG_ACK);
+    ASSERT_EQ(status.command, (uint32_t)CMD_RESET);
+    ASSERT_EQ(status.status_code, (uint32_t)PROTO_COMMAND_STATUS_ACCEPTED);
+    ASSERT_EQ(status.entity_id, 0u);
 
     ASSERT_TRUE(server->world != NULL);
     ASSERT_TRUE(server->atomic_world != NULL);
@@ -112,8 +125,10 @@ TEST(server_handle_command_reset_rebuilds_world) {
     ASSERT_EQ(server->parallel_ctx, old_parallel);
     ASSERT_EQ(server->world->width, 21);
     ASSERT_EQ(server->world->height, 13);
+    ASSERT_EQ(client->selected_colony, 0u);
 
     server_destroy(server);
+    close(fds[1]);
 }
 
 TEST(server_handle_command_data_branches_for_select_and_spawn) {

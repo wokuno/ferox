@@ -154,6 +154,10 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
                             client->selected_colony = status.entity_id;
                             client->renderer->selected_colony = status.entity_id;
                         }
+                    } else if (status.command == (uint32_t)CMD_RESET) {
+                        client->selected_colony = 0;
+                        client->renderer->selected_colony = 0;
+                        client->has_selected_detail = false;
                     }
                 }
             }

@@ -496,6 +496,28 @@ static int test_client_handles_command_status_messages(void) {
         return 0;
     }
 
+    status.command = CMD_RESET;
+    status.status_code = PROTO_COMMAND_STATUS_ACCEPTED;
+    status.entity_id = 0;
+    strcpy(status.message, "Reset accepted");
+    len = protocol_serialize_command_status(&status, buffer);
+    if (len != COMMAND_STATUS_SERIALIZED_SIZE) {
+        client_destroy(c);
+        return 0;
+    }
+
+    c->selected_colony = 55;
+    client_handle_message(c, MSG_ACK, buffer, (size_t)len);
+    if (!c->has_command_status ||
+        c->last_command_status.command != CMD_RESET ||
+        c->last_command_status.status_code != PROTO_COMMAND_STATUS_ACCEPTED ||
+        strcmp(c->last_command_status.message, "Reset accepted") != 0 ||
+        c->selected_colony != 0 ||
+        c->has_selected_detail) {
+        client_destroy(c);
+        return 0;
+    }
+
     client_destroy(c);
     return 1;
 }
