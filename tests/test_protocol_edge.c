@@ -624,6 +624,49 @@ TEST(grid_rle_rejects_unknown_mode) {
     ASSERT_EQ(protocol_deserialize_grid_rle(buffer, sizeof(buffer), decoded, 4u), -1);
 }
 
+TEST(world_state_with_grid_roundtrip_preserves_cells) {
+    ProtoWorld world;
+    proto_world_init(&world);
+    world.width = 4;
+    world.height = 3;
+    world.tick = 77;
+    world.colony_count = 2;
+    world.paused = false;
+    world.speed_multiplier = 1.0f;
+
+    world.colonies[0].id = 1;
+    world.colonies[1].id = 2;
+
+    proto_world_alloc_grid(&world, world.width, world.height);
+    ASSERT_NOT_NULL(world.grid);
+
+    uint16_t expected_grid[] = {
+        0u, 1u, 1u, 0u,
+        2u, 2u, 0u, 0u,
+        0u, 1u, 2u, 0u,
+    };
+    memcpy(world.grid, expected_grid, sizeof(expected_grid));
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_state(&world, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(buffer);
+
+    ProtoWorld decoded;
+    proto_world_init(&decoded);
+    result = protocol_deserialize_world_state(buffer, len, &decoded);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(decoded.has_grid, true);
+    ASSERT_EQ(decoded.grid_size, world.grid_size);
+    ASSERT_NOT_NULL(decoded.grid);
+    ASSERT_BYTES_EQ(decoded.grid, expected_grid, sizeof(expected_grid), "world grid should survive roundtrip");
+
+    free(buffer);
+    proto_world_free(&decoded);
+    proto_world_free(&world);
+}
+
 // ============================================================================
 // Null Input Tests
 // ============================================================================
@@ -835,6 +878,7 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(world_state_without_grid_uses_fixed_prefix);
     RUN_TEST(grid_rle_raw_mode_roundtrip);
     RUN_TEST(grid_rle_rejects_unknown_mode);
+    RUN_TEST(world_state_with_grid_roundtrip_preserves_cells);
     
     printf("\nColony Name Tests:\n");
     RUN_TEST(maximum_length_colony_name);

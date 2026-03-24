@@ -1,37 +1,40 @@
 # Agent Handoff
 
-- Run label: `20260324-165209-snapshot-colony-id-lookup`
-- Outcome: committed improvement candidate; focused snapshot-build experiment stayed green and showed repeated-run median improvement.
-- Hypothesis: replacing the snapshot path's `colony_id -> world_index -> proto_index` mapping with a direct `colony_id -> proto_index` table would reduce `server snapshot build` time without breaking sparse-id correctness.
+- Run label: `20260324-171525-broadcast-inline-grid-allocation`
+- Outcome: committed improvement candidate; broader broadcast-path follow-up stayed green and showed repeated-run median improvement.
+- Hypothesis: allocating the inline snapshot grid directly inside `server_build_protocol_world_snapshot()` would reduce broader broadcast costs by removing a redundant zero-fill before the grid-copy pass overwrites every cell.
 
 ## What Changed
 
 - `src/server/server.c`
-  - `server_build_protocol_world_snapshot()` now uses a direct `colony_id -> proto_index` lookup table.
-  - Common small-capacity cases use a stack table; larger sparse-id cases fall back to heap allocation.
-- `tests/test_phase2.c`
-  - Added coverage for sparse high colony ids so snapshot building is validated when only a few active colonies remain after many id allocations.
+  - `server_build_protocol_world_snapshot()` now allocates inline snapshot grids directly with `malloc` and sets `grid_size` / `has_grid` explicitly.
+  - This removes the eager `memset` previously done by `proto_world_alloc_grid()` on a hot path that immediately rewrites the full grid.
+- `tests/test_protocol_edge.c`
+  - Added `world_state_with_grid_roundtrip_preserves_cells` so populated world-state grids still round-trip through serialization and deserialization.
 - Docs updated:
   - `docs/PERFORMANCE.md`
   - `docs/PERFORMANCE_RESEARCH.md`
-  - `docs/lab-notes/20260324-165209-snapshot-colony-id-lookup.md`
+  - `docs/lab-notes/20260324-171525-broadcast-inline-grid-allocation.md`
 
 ## Validation
 
 - Tests passed:
+  - `./build/tests/test_protocol_edge`
   - `./build/tests/test_phase2`
-  - `FEROX_PERF_SCALE=5 ./build/tests/test_perf_components`
-- Benchmarks executed after tests passed:
-  - baseline `server snapshot build`: `18.75`, `18.90`, `18.76 ms` (median `18.76 ms`)
-  - candidate `server snapshot build`: `15.38`, `15.85`, `15.61 ms` (median `15.61 ms`)
-  - median improvement: about `16.8%`
+- Benchmarks executed after tests passed (`FEROX_PERF_SCALE=5`, `./build/tests/test_performance_eval`, `3` runs):
+  - baseline `broadcast build snapshot`: `9.56`, `9.29`, `9.41 ms` (median `9.41 ms`)
+  - candidate `broadcast build snapshot`: `7.01`, `6.98`, `7.26 ms` (median `7.01 ms`)
+  - baseline `broadcast build+serialize`: `20.62`, `20.47`, `21.27 ms` (median `20.62 ms`)
+  - candidate `broadcast build+serialize`: `17.01`, `17.05`, `18.02 ms` (median `17.05 ms`)
+  - baseline `broadcast end-to-end (0 clients)`: `20.38`, `20.22`, `21.41 ms` (median `20.38 ms`)
+  - candidate `broadcast end-to-end (0 clients)`: `17.22`, `17.17`, `17.59 ms` (median `17.22 ms`)
 
 ## Notes For Next Agent
 
-- The current win is focused and low-risk; it should be corroborated in the broader `broadcast build snapshot` lane before claiming full end-to-end transport improvement.
+- The previous focused snapshot lookup win now has broader transport corroboration on this host.
 - There are unrelated pre-existing user changes in docs/scripts/root files; do not revert them.
-- No revert is needed for this run because the focused benchmark improved consistently across all three post-change runs.
+- No revert is needed for this run because every candidate broadcast run beat every baseline broadcast run.
 
 ## Recommended Next Experiment
 
-Run repeated `test_performance_eval` measurements for `broadcast build snapshot` and `broadcast build+serialize` to confirm whether the focused snapshot lookup win carries into the broader broadcast path.
+Target `protocol_serialize_world_state()` in the inline-grid path to reduce serialization overhead now that `broadcast build snapshot` has dropped again. The most promising narrow slices are temporary allocation/copy reduction around the encoded buffer or the grid raw-vs-RLE decision path.

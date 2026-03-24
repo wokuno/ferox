@@ -542,7 +542,7 @@ int server_build_protocol_world_snapshot(const World* world,
     uint32_t grid_size = proto_world->width * proto_world->height;
     bool inline_grid = (grid_size > 0 && grid_size <= MAX_INLINE_GRID_SIZE);
     if (inline_grid) {
-        proto_world_alloc_grid(proto_world, proto_world->width, proto_world->height);
+        proto_world->grid = (uint16_t*)malloc((size_t)grid_size * sizeof(uint16_t));
         if (!proto_world->grid) {
             if (proto_index_by_colony_id != proto_index_by_colony_id_stack) {
                 free(proto_index_by_colony_id);
@@ -550,6 +550,8 @@ int server_build_protocol_world_snapshot(const World* world,
             proto_world_free(proto_world);
             return -1;
         }
+        proto_world->grid_size = grid_size;
+        proto_world->has_grid = true;
     }
 
     for (int y = 0; y < world->height; y++) {

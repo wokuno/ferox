@@ -234,7 +234,7 @@ Risk:
 
 In order:
 
-1. Re-measure the broader `broadcast build snapshot` lane with repeated `test_performance_eval` runs to see how much of the focused snapshot gain carries end-to-end.
+1. Narrow `protocol_serialize_world_state()` overhead in the inline-grid broadcast path now that snapshot build has dropped again.
 2. Dirty-tile or frontier-list telemetry that pushes beyond the current one-pass rewrite.
 3. Tiled stencil benchmark for `simulation_update_nutrients()` and the remaining transport-heavy paths.
 4. Multirate telemetry and scent update experiments.
@@ -248,6 +248,7 @@ Implemented from this list already:
 - Frontier telemetry now also uses direct-index lineage histograms instead of linear bucket scans.
 - Snapshot building now uses a direct `colony_id -> proto_idx` lookup table during the grid pass instead of repeated protocol-list searches.
 - Snapshot building now also maps `colony_id -> proto_index` directly during centroid accumulation, removing the extra `world_index` indirection from the grid pass.
+- Snapshot building now also skips the redundant zero-fill in inline-grid allocation because the subsequent snapshot scan writes every grid cell unconditionally.
 - Transport now has a no-biofilm fast path so the common zero-EPS case does not pay attenuation work in nutrient, toxin, and scent updates.
 
 Rejected from this list so far:
