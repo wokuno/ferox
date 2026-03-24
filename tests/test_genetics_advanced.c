@@ -436,6 +436,174 @@ TEST(genome_zero_mutation_rate_causes_no_change) {
 }
 
 // ============================================================================
+// Horizontal Gene Transfer Tests
+// ============================================================================
+
+TEST(hgt_null_recipient_is_noop) {
+    Genome donor = create_test_genome(0.8f, 0.5f, 0.8f, 0.8f, 0.8f);
+    // Should not crash
+    genome_transfer_genes(NULL, &donor, 0.5f);
+}
+
+TEST(hgt_null_donor_is_noop) {
+    Genome recipient = create_test_genome(0.2f, 0.5f, 0.2f, 0.2f, 0.2f);
+    Genome before = recipient;
+    genome_transfer_genes(&recipient, NULL, 0.5f);
+    // Recipient unchanged
+    ASSERT_FLOAT_NEAR(recipient.toxin_resistance, before.toxin_resistance, 0.0001f);
+    ASSERT_FLOAT_NEAR(recipient.efficiency, before.efficiency, 0.0001f);
+}
+
+TEST(hgt_zero_strength_is_noop) {
+    Genome recipient = create_test_genome(0.2f, 0.5f, 0.2f, 0.2f, 0.2f);
+    Genome donor = create_test_genome(0.9f, 0.5f, 0.9f, 0.9f, 0.9f);
+    Genome before = recipient;
+    rng_seed(42);
+    genome_transfer_genes(&recipient, &donor, 0.0f);
+    ASSERT_FLOAT_NEAR(recipient.toxin_resistance, before.toxin_resistance, 0.0001f);
+    ASSERT_FLOAT_NEAR(recipient.nutrient_sensitivity, before.nutrient_sensitivity, 0.0001f);
+    ASSERT_FLOAT_NEAR(recipient.efficiency, before.efficiency, 0.0001f);
+    ASSERT_FLOAT_NEAR(recipient.dormancy_resistance, before.dormancy_resistance, 0.0001f);
+}
+
+TEST(hgt_negative_strength_is_noop) {
+    Genome recipient = create_test_genome(0.2f, 0.5f, 0.2f, 0.2f, 0.2f);
+    Genome donor = create_test_genome(0.9f, 0.5f, 0.9f, 0.9f, 0.9f);
+    Genome before = recipient;
+    rng_seed(42);
+    genome_transfer_genes(&recipient, &donor, -0.5f);
+    ASSERT_FLOAT_NEAR(recipient.toxin_resistance, before.toxin_resistance, 0.0001f);
+    ASSERT_FLOAT_NEAR(recipient.efficiency, before.efficiency, 0.0001f);
+}
+
+TEST(hgt_full_strength_copies_eligible_traits) {
+    // With transfer_strength = 1.0, transferred traits should become donor values
+    // Run many iterations to exercise all probabilistic branches
+    rng_seed(99);
+    Genome recipient = create_test_genome(0.1f, 0.1f, 0.1f, 0.1f, 0.1f);
+    Genome donor = create_test_genome(0.9f, 0.9f, 0.9f, 0.9f, 0.9f);
+
+    bool toxin_transferred = false;
+    bool nutrient_transferred = false;
+    bool efficiency_transferred = false;
+    bool dormancy_transferred = false;
+
+    for (int i = 0; i < 200; i++) {
+        Genome r = recipient;
+        genome_transfer_genes(&r, &donor, 1.0f);
+        // When a trait is transferred at strength 1.0:
+        // recipient += (donor - recipient) * 1.0 => recipient = donor
+        if (fabsf(r.toxin_resistance - donor.toxin_resistance) < 0.0001f) toxin_transferred = true;
+        if (fabsf(r.nutrient_sensitivity - donor.nutrient_sensitivity) < 0.0001f) nutrient_transferred = true;
+        if (fabsf(r.efficiency - donor.efficiency) < 0.0001f) efficiency_transferred = true;
+        if (fabsf(r.dormancy_resistance - donor.dormancy_resistance) < 0.0001f) dormancy_transferred = true;
+    }
+    // With 200 iterations, probability of never triggering a 20% chance = 0.8^200 ≈ 0
+    ASSERT_TRUE(toxin_transferred);
+    ASSERT_TRUE(nutrient_transferred);
+    ASSERT_TRUE(efficiency_transferred);
+    ASSERT_TRUE(dormancy_transferred);
+}
+
+TEST(hgt_partial_strength_blends_toward_donor) {
+    rng_seed(42);
+    Genome recipient = create_test_genome(0.0f, 0.5f, 0.0f, 0.0f, 0.0f);
+    Genome donor = create_test_genome(1.0f, 0.5f, 1.0f, 1.0f, 1.0f);
+
+    // Run many transfers and collect any that change toxin_resistance
+    float original_toxin = recipient.toxin_resistance;
+    bool found_blend = false;
+    for (int i = 0; i < 200; i++) {
+        Genome r = recipient;
+        genome_transfer_genes(&r, &donor, 0.5f);
+        if (fabsf(r.toxin_resistance - original_toxin) > 0.0001f) {
+            // Blended value should be halfway: 0.0 + (1.0 - 0.0) * 0.5 = 0.5
+            ASSERT_FLOAT_NEAR(r.toxin_resistance, 0.5f, 0.0001f);
+            found_blend = true;
+            break;
+        }
+    }
+    ASSERT_TRUE(found_blend);
+}
+
+TEST(hgt_repeated_transfers_converge_toward_donor) {
+    rng_seed(42);
+    Genome recipient = create_test_genome(0.0f, 0.5f, 0.0f, 0.0f, 0.0f);
+    Genome donor = create_test_genome(1.0f, 0.5f, 1.0f, 1.0f, 1.0f);
+    float initial_dist = genome_distance(&recipient, &donor);
+
+    // Apply many transfers at moderate strength
+    for (int i = 0; i < 500; i++) {
+        genome_transfer_genes(&recipient, &donor, 0.3f);
+    }
+
+    float final_dist = genome_distance(&recipient, &donor);
+    // Genetic distance should decrease (convergence)
+    ASSERT_LT(final_dist, initial_dist);
+    // Transferred traits should be close to donor values
+    ASSERT_FLOAT_NEAR(recipient.toxin_resistance, donor.toxin_resistance, 0.05f);
+    ASSERT_FLOAT_NEAR(recipient.nutrient_sensitivity, donor.nutrient_sensitivity, 0.05f);
+    ASSERT_FLOAT_NEAR(recipient.efficiency, donor.efficiency, 0.05f);
+    ASSERT_FLOAT_NEAR(recipient.dormancy_resistance, donor.dormancy_resistance, 0.05f);
+}
+
+TEST(hgt_behavior_drive_transfer_updates_weights) {
+    rng_seed(42);
+    Genome recipient = create_test_genome(0.0f, 0.5f, 0.0f, 0.0f, 0.0f);
+    Genome donor = create_test_genome(1.0f, 0.5f, 1.0f, 1.0f, 1.0f);
+
+    bool drive_transferred = false;
+    for (int i = 0; i < 200; i++) {
+        Genome r = recipient;
+        genome_transfer_genes(&r, &donor, 1.0f);
+        // Check if any drive bias moved toward donor
+        for (int d = 0; d < COLONY_DRIVE_COUNT; d++) {
+            if (fabsf(r.behavior_drive_biases[d] - recipient.behavior_drive_biases[d]) > 0.0001f) {
+                // Bias should now equal donor (at strength 1.0)
+                ASSERT_FLOAT_NEAR(r.behavior_drive_biases[d], donor.behavior_drive_biases[d], 0.0001f);
+                // Weights for that drive should also match donor
+                for (int s = 0; s < COLONY_SENSOR_COUNT; s++) {
+                    ASSERT_FLOAT_NEAR(r.behavior_drive_weights[d][s],
+                                      donor.behavior_drive_weights[d][s], 0.0001f);
+                }
+                drive_transferred = true;
+                break;
+            }
+        }
+        if (drive_transferred) break;
+    }
+    ASSERT_TRUE(drive_transferred);
+}
+
+TEST(hgt_behavior_action_transfer_updates_weights) {
+    rng_seed(77);
+    Genome recipient = create_test_genome(0.0f, 0.5f, 0.0f, 0.0f, 0.0f);
+    Genome donor = create_test_genome(1.0f, 0.5f, 1.0f, 1.0f, 1.0f);
+
+    bool action_transferred = false;
+    for (int i = 0; i < 200; i++) {
+        Genome r = recipient;
+        genome_transfer_genes(&r, &donor, 1.0f);
+        // Check if any action bias moved toward donor
+        for (int a = 0; a < COLONY_ACTION_COUNT; a++) {
+            if (fabsf(r.behavior_action_biases[a] - recipient.behavior_action_biases[a]) > 0.0001f) {
+                // Bias should now equal donor (at strength 1.0)
+                ASSERT_FLOAT_NEAR(r.behavior_action_biases[a], donor.behavior_action_biases[a], 0.0001f);
+                // Drive weights for that action should also match donor
+                for (int d = 0; d < COLONY_DRIVE_COUNT; d++) {
+                    ASSERT_FLOAT_NEAR(r.behavior_action_weights[a][d],
+                                      donor.behavior_action_weights[a][d], 0.0001f);
+                }
+                action_transferred = true;
+                break;
+            }
+        }
+        if (action_transferred) break;
+    }
+    ASSERT_TRUE(action_transferred);
+}
+
+// ============================================================================
 // Color Mutation Tests
 // ============================================================================
 
@@ -499,6 +667,17 @@ int run_genetics_advanced_tests(void) {
     RUN_TEST(genome_mutations_cause_genetic_drift);
     RUN_TEST(genome_zero_mutation_rate_causes_no_change);
     
+    printf("\nHorizontal Gene Transfer Tests:\n");
+    RUN_TEST(hgt_null_recipient_is_noop);
+    RUN_TEST(hgt_null_donor_is_noop);
+    RUN_TEST(hgt_zero_strength_is_noop);
+    RUN_TEST(hgt_negative_strength_is_noop);
+    RUN_TEST(hgt_full_strength_copies_eligible_traits);
+    RUN_TEST(hgt_partial_strength_blends_toward_donor);
+    RUN_TEST(hgt_repeated_transfers_converge_toward_donor);
+    RUN_TEST(hgt_behavior_drive_transfer_updates_weights);
+    RUN_TEST(hgt_behavior_action_transfer_updates_weights);
+
     printf("\nColor Tests:\n");
     RUN_TEST(genome_colors_stay_in_valid_rgb_range);
     
