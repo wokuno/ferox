@@ -6,6 +6,7 @@
 #include "server.h"
 #include "simulation.h"
 #include "parallel.h"
+#include "genetics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,7 @@
 // So we include protocol.h here and use the types directly knowing they come from types.h (via world.h)
 // The protocol functions work with the protocol-defined structures, so we'll build them inline
 #include "../shared/protocol.h"
+#include "../shared/names.h"
 
 // Forward declarations for thread functions
 static void* accept_thread_func(void* arg);
@@ -39,6 +41,135 @@ static void copy_colony_name(char dst[MAX_COLONY_NAME], const char* src) {
     }
     memcpy(dst, src, len);
     dst[len] = '\0';
+}
+
+static void copy_spawn_colony_name(char* dst, size_t dst_size,
+                                   const char src[MAX_COLONY_NAME]) {
+    if (!dst || dst_size == 0) {
+        return;
+    }
+
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+
+    size_t len = 0;
+    while (len < MAX_COLONY_NAME && src[len] != '\0') {
+        len++;
+    }
+    if (len >= dst_size) {
+        len = dst_size - 1;
+    }
+
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
+static void server_fill_command_status(ProtoCommandStatus* status,
+                                       CommandType cmd,
+                                       ProtoCommandStatusCode code,
+                                       uint32_t entity_id,
+                                       const char* message) {
+    if (!status) {
+        return;
+    }
+
+    memset(status, 0, sizeof(*status));
+    status->command = (uint32_t)cmd;
+    status->status_code = (uint32_t)code;
+    status->entity_id = entity_id;
+    if (message) {
+        copy_spawn_colony_name(status->message, sizeof(status->message), message);
+    }
+}
+
+static void server_send_command_status(Server* server,
+                                       ClientSession* client,
+                                       MessageType type,
+                                       const ProtoCommandStatus* status) {
+    (void)server;
+    if (!client || !client->socket || client->socket->fd < 0 || !status) {
+        return;
+    }
+
+    uint8_t buffer[COMMAND_STATUS_SERIALIZED_SIZE];
+    int len = protocol_serialize_command_status(status, buffer);
+    if (len > 0) {
+        protocol_send_message(client->socket->fd, type, buffer, (size_t)len);
+    }
+}
+
+static MessageType server_spawn_colony(Server* server,
+                                       const CommandSpawnColony* spawn,
+                                       ProtoCommandStatus* status) {
+    server_fill_command_status(status, CMD_SPAWN_COLONY,
+                               PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+                               0,
+                               "Spawn failed");
+    if (!server || !server->world || !spawn || !status) {
+        return MSG_ERROR;
+    }
+
+    int x = (int)lroundf(spawn->x);
+    int y = (int)lroundf(spawn->y);
+    Cell* cell = world_get_cell(server->world, x, y);
+    if (!cell) {
+        server_fill_command_status(status, CMD_SPAWN_COLONY,
+                                   PROTO_COMMAND_STATUS_OUT_OF_BOUNDS,
+                                   0,
+                                   "Spawn rejected: out of bounds");
+        return MSG_ERROR;
+    }
+    if (cell->colony_id != 0) {
+        server_fill_command_status(status, CMD_SPAWN_COLONY,
+                                   PROTO_COMMAND_STATUS_CONFLICT,
+                                   cell->colony_id,
+                                   "Spawn rejected: occupied target");
+        return MSG_ERROR;
+    }
+
+    Colony colony;
+    memset(&colony, 0, sizeof(colony));
+    if (spawn->name[0] != '\0') {
+        copy_spawn_colony_name(colony.name, sizeof(colony.name), spawn->name);
+    } else {
+        generate_scientific_name(colony.name, sizeof(colony.name));
+    }
+    colony.genome = genome_create_random();
+    colony.color = colony.genome.body_color;
+    colony.cell_count = 1;
+    colony.max_cell_count = 1;
+    colony.active = true;
+    colony.age = 0;
+    colony.parent_id = 0;
+    colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
+    colony.wobble_phase = (float)(rand() % 628) / 100.0f;
+
+    uint32_t colony_id = world_add_colony(server->world, colony);
+    if (colony_id == 0) {
+        server_fill_command_status(status, CMD_SPAWN_COLONY,
+                                   PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+                                   0,
+                                   "Spawn failed: colony allocation");
+        return MSG_ERROR;
+    }
+
+    uint32_t cell_idx = (uint32_t)(y * server->world->width + x);
+    cell->colony_id = colony_id;
+    cell->age = 0;
+    cell->is_border = false;
+    world_colony_add_cell(server->world, colony_id, cell_idx);
+
+    if (server->atomic_world) {
+        atomic_world_sync_from_world(server->atomic_world);
+    }
+
+    server_fill_command_status(status, CMD_SPAWN_COLONY,
+                               PROTO_COMMAND_STATUS_ACCEPTED,
+                               colony_id,
+                               "Spawn accepted");
+    return MSG_ACK;
 }
 
 static float clamp_unit(float value) {
@@ -875,10 +1006,16 @@ void server_handle_command(Server* server, ClientSession* client, CommandType cm
         case CMD_SPAWN_COLONY:
             if (data) {
                 CommandSpawnColony* spawn = (CommandSpawnColony*)data;
-                // Create a simple colony at the specified position
-                // This would need proper implementation using world_add_colony
-                printf("Spawn colony request at (%.1f, %.1f) by client %u\n", 
-                       spawn->x, spawn->y, client->id);
+                ProtoCommandStatus status;
+                MessageType reply_type = server_spawn_colony(server, spawn, &status);
+                server_send_command_status(server, client, reply_type, &status);
+                if (reply_type == MSG_ACK) {
+                    printf("Spawned colony %u at (%.1f, %.1f) for client %u\n",
+                           status.entity_id, spawn->x, spawn->y, client->id);
+                } else {
+                    printf("Rejected spawn colony request at (%.1f, %.1f) for client %u: %s\n",
+                           spawn->x, spawn->y, client->id, status.message);
+                }
             }
             break;
     }

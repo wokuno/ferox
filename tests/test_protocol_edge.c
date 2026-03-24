@@ -549,6 +549,28 @@ TEST(command_wire_examples_match_spec) {
     ASSERT_BYTES_EQ(select_buffer, expected_select, sizeof(expected_select), "CMD_SELECT_COLONY bytes should match spec example");
 }
 
+TEST(command_status_roundtrip) {
+    ProtoCommandStatus status;
+    memset(&status, 0, sizeof(status));
+    status.command = CMD_SPAWN_COLONY;
+    status.status_code = PROTO_COMMAND_STATUS_CONFLICT;
+    status.entity_id = 17;
+    strncpy(status.message, "Spawn rejected: occupied target", COMMAND_STATUS_MESSAGE_SIZE - 1);
+
+    uint8_t buffer[COMMAND_STATUS_SERIALIZED_SIZE];
+    int size = protocol_serialize_command_status(&status, buffer);
+    ASSERT_EQ(size, COMMAND_STATUS_SERIALIZED_SIZE);
+
+    ProtoCommandStatus decoded;
+    memset(&decoded, 0, sizeof(decoded));
+    size = protocol_deserialize_command_status(buffer, &decoded);
+    ASSERT_EQ(size, COMMAND_STATUS_SERIALIZED_SIZE);
+    ASSERT_EQ(decoded.command, status.command);
+    ASSERT_EQ(decoded.status_code, status.status_code);
+    ASSERT_EQ(decoded.entity_id, status.entity_id);
+    ASSERT(strcmp(decoded.message, status.message) == 0, "command status message should roundtrip");
+}
+
 TEST(world_state_without_grid_uses_fixed_prefix) {
     ProtoWorld world;
     proto_world_init(&world);
@@ -933,6 +955,7 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(select_colony_command);
     RUN_TEST(spawn_colony_command);
     RUN_TEST(command_wire_examples_match_spec);
+    RUN_TEST(command_status_roundtrip);
     
     printf("\nNull Input Tests:\n");
     RUN_TEST(null_inputs_handled);

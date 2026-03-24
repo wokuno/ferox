@@ -537,7 +537,8 @@ void renderer_draw_colony_info(Renderer* renderer, const ProtoColony* colony, co
     renderer_reset_colors(renderer);
 }
 
-void renderer_draw_status(Renderer* renderer, uint32_t tick, int colony_count, bool paused, float speed) {
+void renderer_draw_status(Renderer* renderer, uint32_t tick, int colony_count, bool paused, float speed,
+                          const ProtoCommandStatus* command_status) {
     int status_y = renderer->view_height + 4;
     
     // Status bar background
@@ -563,6 +564,14 @@ void renderer_draw_status(Renderer* renderer, uint32_t tick, int colony_count, b
     }
     
     // Controls hint
+    if (command_status && command_status->message[0] != '\0') {
+        renderer_set_color_fg(renderer,
+                              command_status->status_code == PROTO_COMMAND_STATUS_ACCEPTED ? 110 : 220,
+                              command_status->status_code == PROTO_COMMAND_STATUS_ACCEPTED ? 210 : 150,
+                              120);
+        renderer_writef(renderer, "%s  ", command_status->message);
+    }
+
     renderer_set_color_fg(renderer, 128, 128, 128);
     renderer_write(renderer, "Q:Quit  P:Pause  +/-:Speed  Arrows:Scroll  TAB:Select");
     

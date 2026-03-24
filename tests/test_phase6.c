@@ -444,6 +444,58 @@ static int test_client_handles_colony_detail_messages(void) {
     return 1;
 }
 
+static int test_client_handles_command_status_messages(void) {
+    Client* c = client_create();
+    if (!c) {
+        return 0;
+    }
+
+    ProtoCommandStatus status;
+    memset(&status, 0, sizeof(status));
+    status.command = CMD_SPAWN_COLONY;
+    status.status_code = PROTO_COMMAND_STATUS_ACCEPTED;
+    status.entity_id = 11;
+    strcpy(status.message, "Spawn accepted");
+
+    uint8_t buffer[COMMAND_STATUS_SERIALIZED_SIZE];
+    int len = protocol_serialize_command_status(&status, buffer);
+    if (len != COMMAND_STATUS_SERIALIZED_SIZE) {
+        client_destroy(c);
+        return 0;
+    }
+
+    client_handle_message(c, MSG_ACK, buffer, (size_t)len);
+    if (!c->has_command_status) {
+        client_destroy(c);
+        return 0;
+    }
+    if (c->last_command_status.command != CMD_SPAWN_COLONY ||
+        c->last_command_status.status_code != PROTO_COMMAND_STATUS_ACCEPTED ||
+        strcmp(c->last_command_status.message, "Spawn accepted") != 0) {
+        client_destroy(c);
+        return 0;
+    }
+
+    status.status_code = PROTO_COMMAND_STATUS_CONFLICT;
+    strcpy(status.message, "Spawn rejected: occupied target");
+    len = protocol_serialize_command_status(&status, buffer);
+    if (len != COMMAND_STATUS_SERIALIZED_SIZE) {
+        client_destroy(c);
+        return 0;
+    }
+
+    client_handle_message(c, MSG_ERROR, buffer, (size_t)len);
+    if (!c->has_command_status ||
+        c->last_command_status.status_code != PROTO_COMMAND_STATUS_CONFLICT ||
+        strcmp(c->last_command_status.message, "Spawn rejected: occupied target") != 0) {
+        client_destroy(c);
+        return 0;
+    }
+
+    client_destroy(c);
+    return 1;
+}
+
 int main(void) {
     printf("Phase 6 Tests: Client Implementation\n");
     printf("=====================================\n\n");
@@ -464,6 +516,7 @@ int main(void) {
     TEST(client_get_selected_returns_correct_colony);
     TEST(client_world_state_can_be_updated);
     TEST(client_handles_colony_detail_messages);
+    TEST(client_handles_command_status_messages);
     
     printf("\nInput Tests:\n");
     TEST(input_is_not_initialized_by_default);

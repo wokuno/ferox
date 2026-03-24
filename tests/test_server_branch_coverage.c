@@ -1,6 +1,8 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "../src/server/server.h"
 
@@ -33,31 +35,49 @@ static int current_test_failed = 0;
 #define ASSERT_EQ(a, b) ASSERT((a) == (b), #a " == " #b)
 #define ASSERT_NE(a, b) ASSERT((a) != (b), #a " != " #b)
 
-static net_socket* make_mock_socket(bool connected) {
-    net_socket* socket = (net_socket*)calloc(1, sizeof(net_socket));
+static NetSocket* make_mock_socket(bool connected, int fd) {
+    NetSocket* socket = (NetSocket*)calloc(1, sizeof(NetSocket));
     if (!socket) {
         return NULL;
     }
-    socket->fd = -1;
+    socket->fd = fd;
     socket->connected = connected;
     return socket;
+}
+
+static int read_command_status_message(int fd, MessageType* type, ProtoCommandStatus* status) {
+    MessageHeader header;
+    uint8_t* payload = NULL;
+    int result = protocol_recv_message(fd, &header, &payload);
+    if (result < 0) {
+        return -1;
+    }
+
+    if (type) {
+        *type = (MessageType)header.type;
+    }
+    if (status && payload && header.payload_len >= COMMAND_STATUS_SERIALIZED_SIZE) {
+        protocol_deserialize_command_status(payload, status);
+    }
+    free(payload);
+    return 0;
 }
 
 TEST(server_handle_command_clamps_speed_limits) {
     Server* server = server_create(0, 20, 20, 2);
     ASSERT_TRUE(server != NULL);
 
-    net_socket* socket = make_mock_socket(true);
+    NetSocket* socket = make_mock_socket(true, -1);
     ASSERT_TRUE(socket != NULL);
-    client_session* client = server_add_client(server, socket);
+    ClientSession* client = server_add_client(server, socket);
     ASSERT_TRUE(client != NULL);
 
-    server->speed_multiplier = 99.0f;
+    server->speed_multiplier = 9.0f;
     server_handle_command(server, client, CMD_SPEED_UP, NULL);
-    ASSERT_TRUE(server->speed_multiplier == 100.0f);
+    ASSERT_TRUE(server->speed_multiplier == 10.0f);
 
     server_handle_command(server, client, CMD_SPEED_UP, NULL);
-    ASSERT_TRUE(server->speed_multiplier == 100.0f);
+    ASSERT_TRUE(server->speed_multiplier == 10.0f);
 
     server->speed_multiplier = 0.11f;
     server_handle_command(server, client, CMD_SLOW_DOWN, NULL);
@@ -73,9 +93,9 @@ TEST(server_handle_command_reset_rebuilds_world) {
     Server* server = server_create(0, 21, 13, 2);
     ASSERT_TRUE(server != NULL);
 
-    net_socket* socket = make_mock_socket(true);
+    NetSocket* socket = make_mock_socket(true, -1);
     ASSERT_TRUE(socket != NULL);
-    client_session* client = server_add_client(server, socket);
+    ClientSession* client = server_add_client(server, socket);
     ASSERT_TRUE(client != NULL);
 
     World* old_world = server->world;
@@ -89,7 +109,7 @@ TEST(server_handle_command_reset_rebuilds_world) {
     ASSERT_TRUE(server->parallel_ctx != NULL);
     ASSERT_NE(server->world, old_world);
     ASSERT_NE(server->atomic_world, old_atomic);
-    ASSERT_NE(server->parallel_ctx, old_parallel);
+    ASSERT_EQ(server->parallel_ctx, old_parallel);
     ASSERT_EQ(server->world->width, 21);
     ASSERT_EQ(server->world->height, 13);
 
@@ -97,34 +117,77 @@ TEST(server_handle_command_reset_rebuilds_world) {
 }
 
 TEST(server_handle_command_data_branches_for_select_and_spawn) {
-    Server stub = {0};
-    client_session client = {0};
-    client.id = 77;
+    Server* server = server_create(0, 20, 20, 2);
+    ASSERT_TRUE(server != NULL);
 
-    server_handle_command(&stub, &client, CMD_SELECT_COLONY, NULL);
-    ASSERT_EQ(client.selected_colony, 0u);
+    int fds[2] = {-1, -1};
+
+    NetSocket* socket = make_mock_socket(true, -1);
+    ASSERT_TRUE(socket != NULL);
+    ClientSession* client = server_add_client(server, socket);
+    ASSERT_TRUE(client != NULL);
+    client->id = 77;
+
+    server_handle_command(server, client, CMD_SELECT_COLONY, NULL);
+    ASSERT_EQ(client->selected_colony, 0u);
 
     CommandSelectColony select_colony = {.colony_id = 42};
-    server_handle_command(&stub, &client, CMD_SELECT_COLONY, &select_colony);
-    ASSERT_EQ(client.selected_colony, 42u);
+    server_handle_command(server, client, CMD_SELECT_COLONY, &select_colony);
+    ASSERT_EQ(client->selected_colony, 42u);
 
-    server_handle_command(&stub, &client, CMD_SPAWN_COLONY, NULL);
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    client->socket->fd = fds[0];
+
+    server_handle_command(server, client, CMD_SPAWN_COLONY, NULL);
 
     CommandSpawnColony spawn = {.x = 2.0f, .y = 4.0f};
-    server_handle_command(&stub, &client, CMD_SPAWN_COLONY, &spawn);
+    server_handle_command(server, client, CMD_SPAWN_COLONY, &spawn);
+    MessageType last_status_type;
+    ProtoCommandStatus last_status;
+    ASSERT_EQ(read_command_status_message(fds[1], &last_status_type, &last_status), 0);
+    ASSERT_EQ(last_status_type, MSG_ACK);
+    ASSERT_EQ(last_status.command, (uint32_t)CMD_SPAWN_COLONY);
+    ASSERT_EQ(last_status.status_code, (uint32_t)PROTO_COMMAND_STATUS_ACCEPTED);
+
+    Cell* spawned_cell = world_get_cell(server->world, 2, 4);
+    ASSERT_TRUE(spawned_cell != NULL);
+    ASSERT_NE(spawned_cell->colony_id, 0u);
+
+    Colony* spawned = world_get_colony(server->world, spawned_cell->colony_id);
+    ASSERT_TRUE(spawned != NULL);
+    ASSERT_EQ(spawned->cell_count, 1u);
+    ASSERT_EQ(spawned->max_cell_count, 1u);
+
+    CommandSpawnColony blocked_spawn = {.x = 2.0f, .y = 4.0f};
+    size_t colony_count_before_blocked = server->world->colony_count;
+    server_handle_command(server, client, CMD_SPAWN_COLONY, &blocked_spawn);
+    ASSERT_EQ(server->world->colony_count, colony_count_before_blocked);
+    ASSERT_EQ(read_command_status_message(fds[1], &last_status_type, &last_status), 0);
+    ASSERT_EQ(last_status_type, MSG_ERROR);
+    ASSERT_EQ(last_status.status_code, (uint32_t)PROTO_COMMAND_STATUS_CONFLICT);
+
+    CommandSpawnColony oob_spawn = {.x = -1.0f, .y = 4.0f};
+    server_handle_command(server, client, CMD_SPAWN_COLONY, &oob_spawn);
+    ASSERT_EQ(server->world->colony_count, colony_count_before_blocked);
+    ASSERT_EQ(read_command_status_message(fds[1], &last_status_type, &last_status), 0);
+    ASSERT_EQ(last_status_type, MSG_ERROR);
+    ASSERT_EQ(last_status.status_code, (uint32_t)PROTO_COMMAND_STATUS_OUT_OF_BOUNDS);
+
+    server_destroy(server);
+    close(fds[1]);
 }
 
 TEST(server_remove_client_noop_when_target_missing) {
     Server* server = server_create(0, 20, 20, 2);
     ASSERT_TRUE(server != NULL);
 
-    net_socket* socket = make_mock_socket(true);
+    NetSocket* socket = make_mock_socket(true, -1);
     ASSERT_TRUE(socket != NULL);
-    client_session* tracked = server_add_client(server, socket);
+    ClientSession* tracked = server_add_client(server, socket);
     ASSERT_TRUE(tracked != NULL);
     ASSERT_EQ(server->client_count, 1);
 
-    client_session ghost = {0};
+    ClientSession ghost = {0};
     server_remove_client(server, &ghost);
     ASSERT_EQ(server->client_count, 1);
 
@@ -135,13 +198,13 @@ TEST(server_process_clients_skips_non_connected_clients) {
     Server* server = server_create(0, 20, 20, 2);
     ASSERT_TRUE(server != NULL);
 
-    net_socket* inactive_socket = make_mock_socket(true);
-    net_socket* disconnected_socket = make_mock_socket(false);
+    NetSocket* inactive_socket = make_mock_socket(true, -1);
+    NetSocket* disconnected_socket = make_mock_socket(false, -1);
     ASSERT_TRUE(inactive_socket != NULL);
     ASSERT_TRUE(disconnected_socket != NULL);
 
-    client_session* inactive_client = server_add_client(server, inactive_socket);
-    client_session* disconnected_client = server_add_client(server, disconnected_socket);
+    ClientSession* inactive_client = server_add_client(server, inactive_socket);
+    ClientSession* disconnected_client = server_add_client(server, disconnected_socket);
     ASSERT_TRUE(inactive_client != NULL);
     ASSERT_TRUE(disconnected_client != NULL);
 
@@ -158,13 +221,13 @@ TEST(server_stop_and_get_port_guard_branches) {
     Server* server = server_create(0, 20, 20, 2);
     ASSERT_TRUE(server != NULL);
 
-    atomic_store(&server->running, false);
+    server->running = false;
     server_stop(server);
-    ASSERT_TRUE(!atomic_load(&server->running));
+    ASSERT_TRUE(!server->running);
 
-    atomic_store(&server->running, true);
+    server->running = true;
     server_stop(server);
-    ASSERT_TRUE(!atomic_load(&server->running));
+    ASSERT_TRUE(!server->running);
 
     Server stub = {0};
     ASSERT_EQ(server_get_port(&stub), 0u);

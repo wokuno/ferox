@@ -13,7 +13,10 @@ Ferox is organized into shared, server, client, and GUI modules:
 - `src/gui/`: SDL-based GUI client
 
 The server is the simulation authority. Clients receive serialized world state
-updates and send commands (pause, speed control, selection, reset).
+updates and send commands (pause, speed control, selection, reset, and manual
+spawn requests). Manual spawn requests now also receive immediate structured
+accept/reject feedback over `MSG_ACK` or `MSG_ERROR` instead of relying only on
+later snapshot observation.
 
 ## Server Execution Model
 

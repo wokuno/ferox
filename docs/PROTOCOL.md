@@ -341,6 +341,16 @@ typedef enum CommandType {
 | `CMD_SELECT_COLONY` | `uint32_t colony_id` |
 | `CMD_SPAWN_COLONY` | `float x`, `float y`, `char name[32]` |
 
+Current server behavior for `CMD_SPAWN_COLONY`:
+
+- rounds the requested coordinates to integer grid cells
+- creates a one-cell colony only when the target cell is in bounds and empty
+- uses the provided fixed-width name when non-empty, otherwise generates a
+  scientific fallback name
+- rejects occupied or out-of-bounds targets without mutating the world
+- now follows the command with structured `MSG_ACK` or `MSG_ERROR` feedback so
+  clients can distinguish accepted versus rejected requests immediately
+
 Examples:
 
 ```text
@@ -353,13 +363,42 @@ CMD_SELECT_COLONY payload for colony 42:
 
 ### MSG_ACK
 
-`MSG_ACK` exists in the enum but the current server/client implementation does
-not actively emit or consume an ACK payload.
+`MSG_ACK` now carries `ProtoCommandStatus` for accepted command-side outcomes.
+
+Current live use:
+
+- accepted `CMD_SPAWN_COLONY` requests return `MSG_ACK`
+- the payload records the originating command id, a status code, the spawned
+  colony id, and a short fixed-width message
 
 ### MSG_ERROR
 
-`MSG_ERROR` exists in the enum but the current server/client implementation does
-not currently send structured error payloads.
+`MSG_ERROR` now carries the same `ProtoCommandStatus` payload shape for rejected
+command-side outcomes.
+
+Current live use:
+
+- rejected `CMD_SPAWN_COLONY` requests return `MSG_ERROR`
+- out-of-bounds requests use `PROTO_COMMAND_STATUS_OUT_OF_BOUNDS`
+- occupied-target requests use `PROTO_COMMAND_STATUS_CONFLICT`
+
+`ProtoCommandStatus` wire layout:
+
+| Field | Size | Type |
+|-------|------|------|
+| `command` | 4 | `uint32_t` |
+| `status_code` | 4 | `uint32_t` |
+| `entity_id` | 4 | `uint32_t` |
+| `message` | 64 | fixed byte array |
+
+```c
+typedef struct ProtoCommandStatus {
+    uint32_t command;
+    uint32_t status_code;
+    uint32_t entity_id;
+    char message[64];
+} ProtoCommandStatus;
+```
 
 ## Grid Codec
 

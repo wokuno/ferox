@@ -12,9 +12,11 @@ typedef struct Client {
     Renderer* renderer;
     ProtoWorld local_world;       // Local copy of world state
     ProtoColonyDetail selected_detail;
+    ProtoCommandStatus last_command_status;
     bool connected;
     bool running;
     bool has_selected_detail;
+    bool has_command_status;
     uint32_t selected_colony;
     uint32_t selected_index;  // Index in colony array for cycling
     bool pending_grid_active;

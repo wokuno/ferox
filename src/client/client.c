@@ -9,6 +9,15 @@
 #define SCROLL_SPEED 5
 #define FRAME_DELAY_US 33333  // ~30 FPS
 
+static void client_clear_command_status(Client* client) {
+    if (!client) {
+        return;
+    }
+
+    memset(&client->last_command_status, 0, sizeof(client->last_command_status));
+    client->has_command_status = false;
+}
+
 Client* client_create(void) {
     Client* client = (Client*)malloc(sizeof(Client));
     if (!client) return NULL;
@@ -26,6 +35,7 @@ Client* client_create(void) {
     client->running = false;
     client->selected_colony = 0;
     client->selected_index = 0;
+    client_clear_command_status(client);
     
     // Initialize local world
     memset(&client->local_world, 0, sizeof(ProtoWorld));
@@ -122,11 +132,26 @@ void client_handle_message(Client* client, MessageType type, const uint8_t* payl
             break;
             
         case MSG_ACK:
-            // Command acknowledged
+            if (payload && len >= COMMAND_STATUS_SERIALIZED_SIZE) {
+                ProtoCommandStatus status;
+                if (protocol_deserialize_command_status(payload, &status) >= 0) {
+                    client->last_command_status = status;
+                    client->has_command_status = true;
+                }
+            }
             break;
-            
+             
         case MSG_ERROR:
-            // Handle error
+            if (payload && len >= COMMAND_STATUS_SERIALIZED_SIZE) {
+                ProtoCommandStatus status;
+                if (protocol_deserialize_command_status(payload, &status) >= 0) {
+                    client->last_command_status = status;
+                    client->has_command_status = true;
+                    if (status.command == (uint32_t)CMD_SELECT_COLONY && status.entity_id == client->selected_colony) {
+                        client->has_selected_detail = false;
+                    }
+                }
+            }
             break;
             
         default:
@@ -143,6 +168,9 @@ void client_update_world(Client* client, const uint8_t* data, size_t len) {
     client->pending_grid_next_index = 0;
     if (client->has_selected_detail && client->selected_detail.base.id != client->selected_colony) {
         client->has_selected_detail = false;
+    }
+    if (client->has_command_status && client->last_command_status.command == (uint32_t)CMD_SPAWN_COLONY) {
+        client_clear_command_status(client);
     }
     
     if (protocol_deserialize_world_state(data, len, &client->local_world) < 0) {
@@ -212,6 +240,7 @@ void client_select_next_colony(Client* client) {
         client->selected_colony = 0;
         client->selected_index = 0;
         client->has_selected_detail = false;
+        client_clear_command_status(client);
         return;
     }
     
@@ -244,12 +273,14 @@ void client_select_next_colony(Client* client) {
     // No alive colonies
     client->selected_colony = 0;
     client->has_selected_detail = false;
+    client_clear_command_status(client);
 }
 
 void client_deselect_colony(Client* client) {
     if (!client) return;
     client->selected_colony = 0;
     client->has_selected_detail = false;
+    client_clear_command_status(client);
 }
 
 const ProtoColony* client_get_selected_colony(Client* client) {
@@ -392,7 +423,8 @@ static void client_render(Client* client) {
                          client->local_world.tick,
                          alive_count,
                          client->local_world.paused,
-                         client->local_world.speed_multiplier);
+                         client->local_world.speed_multiplier,
+                         client->has_command_status ? &client->last_command_status : NULL);
     
     renderer_present(client->renderer);
 }

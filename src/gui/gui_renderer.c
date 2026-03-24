@@ -1039,7 +1039,8 @@ void gui_renderer_draw_colony_info(GuiRenderer* renderer, const ProtoColony* col
 
 void gui_renderer_draw_status_bar(GuiRenderer* renderer, uint32_t tick, int colony_count,
                                    bool paused, float speed, float fps, float tps,
-                                   uint32_t last_update_ms, float zoom) {
+                                   uint32_t last_update_ms, float zoom,
+                                   const ProtoCommandStatus* command_status) {
     if (!renderer) return;
     
     SDL_Renderer* r = renderer->renderer;
@@ -1105,7 +1106,14 @@ void gui_renderer_draw_status_bar(GuiRenderer* renderer, uint32_t tick, int colo
     snprintf(colony_buf, sizeof(colony_buf), "Colonies: %d", colony_count);
     gui_renderer_draw_text(renderer, renderer->window_width - 120, bar_y + 10, colony_buf, 180, 200, 180);
 
-    gui_renderer_draw_text(renderer, 15, bar_y + 28, "Perf: FPS=render  TPS=sim  Net age=time since last world update", 120, 130, 150);
+    if (command_status && command_status->message[0] != '\0') {
+        uint8_t msg_r = command_status->status_code == PROTO_COMMAND_STATUS_ACCEPTED ? 140 : 220;
+        uint8_t msg_g = command_status->status_code == PROTO_COMMAND_STATUS_ACCEPTED ? 210 : 150;
+        uint8_t msg_b = 140;
+        gui_renderer_draw_text(renderer, 15, bar_y + 28, command_status->message, msg_r, msg_g, msg_b);
+    } else {
+        gui_renderer_draw_text(renderer, 15, bar_y + 28, "Perf: FPS=render  TPS=sim  Net age=time since last world update", 120, 130, 150);
+    }
 }
 
 // Draw text using bitmap font

@@ -1,40 +1,54 @@
 # Agent Handoff
 
-- Run label: `20260324-171905-one-pass-world-state-serialization`
-- Outcome: committed improvement candidate; inline-grid world-state serialization stayed green and showed repeated-run median improvement in the broader transport lane.
-- Hypothesis: writing encoded grid payloads directly into the final world-state output buffer would reduce serialization overhead by removing a temporary allocation and copy stage.
+- Run label: `20260324-175218-spawn-command-feedback`
+- Outcome: kept experiment; manual spawn requests now return immediate structured `MSG_ACK` / `MSG_ERROR` feedback instead of leaving clients to infer outcomes from later snapshots.
+- Hypothesis: if accepted and rejected `CMD_SPAWN_COLONY` outcomes are serialized into a shared `ProtoCommandStatus` payload and sent via `MSG_ACK` / `MSG_ERROR`, then both clients and focused correctness tests can distinguish spawn success, occupancy conflict, and out-of-bounds rejection immediately without waiting for a later world snapshot.
 
 ## What Changed
 
-- `src/shared/protocol.c`
-  - `protocol_serialize_world_state()` now reserves enough space for the useful worst-case grid payload and encodes directly into the final output buffer.
-  - Shared grid-encoding helpers now support both direct-to-buffer world-state serialization and the standalone `protocol_serialize_grid_rle()` API.
-- `tests/test_protocol_edge.c`
-  - Added `world_state_with_noisy_grid_roundtrip_preserves_cells` to cover the raw-mode-heavy world-state path.
-- Docs updated:
-  - `docs/PERFORMANCE.md`
+- Added `ProtoCommandStatus` serialization in `src/shared/protocol.h` and `src/shared/protocol.c`.
+- Updated `src/server/server.c` so manual spawn now:
+  - returns `MSG_ACK` with `PROTO_COMMAND_STATUS_ACCEPTED` and the spawned colony id on success
+  - returns `MSG_ERROR` with `PROTO_COMMAND_STATUS_CONFLICT` or `PROTO_COMMAND_STATUS_OUT_OF_BOUNDS` on rejection
+- Updated terminal and GUI clients to decode/store the latest command-status payload and surface the short message in their status bars:
+  - `src/client/client.c`
+  - `src/client/client.h`
+  - `src/client/renderer.c`
+  - `src/client/renderer.h`
+  - `src/client/main.c`
+  - `src/gui/gui_client.c`
+  - `src/gui/gui_client.h`
+  - `src/gui/gui_renderer.c`
+  - `src/gui/gui_renderer.h`
+- Added focused coverage in:
+  - `tests/test_protocol_edge.c`
+  - `tests/test_server_branch_coverage.c`
+  - `tests/test_phase6.c`
+  - `tests/test_client_logic_surface.c`
+- Updated docs:
+  - `docs/PROTOCOL.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/TESTING.md`
   - `docs/PERFORMANCE_RESEARCH.md`
-  - `docs/lab-notes/20260324-171905-one-pass-world-state-serialization.md`
+  - `docs/lab-notes/20260324-175218-spawn-command-feedback.md`
 
 ## Validation
 
-- Tests passed:
-  - `./build/tests/test_protocol_edge`
-  - `./build/tests/test_perf_unit_protocol`
-- Benchmarks executed after tests passed (`FEROX_PERF_SCALE=5`, `./build/tests/test_performance_eval`, `3` runs):
-  - baseline `protocol serialize only`: `13.27`, `13.75`, `13.85 ms` (median `13.75 ms`)
-  - candidate `protocol serialize only`: `14.12`, `12.91`, `13.25 ms` (median `13.25 ms`)
-  - baseline `broadcast build+serialize`: `16.99`, `17.66`, `18.05 ms` (median `17.66 ms`)
-  - candidate `broadcast build+serialize`: `16.59`, `16.48`, `17.32 ms` (median `16.59 ms`)
-  - baseline `broadcast end-to-end (0 clients)`: `17.16`, `17.90`, `18.04 ms` (median `17.90 ms`)
-  - candidate `broadcast end-to-end (0 clients)`: `16.50`, `16.51`, `17.20 ms` (median `16.51 ms`)
+- Focused correctness suite passed:
+  - `ctest --test-dir build --output-on-failure -R "ProtocolEdgeTests|ServerBranchCoverageTests|Phase6Tests"`
+- Additional client-surface test passed:
+  - `./build/tests/test_client_logic_surface`
+- Full rebuild passed:
+  - `cmake --build build -j4`
 
 ## Notes For Next Agent
 
-- The transport path now has three consecutive narrow keeps: lookup indirection removal, inline-grid zero-fill removal, and one-pass world-state serialization.
 - There are unrelated pre-existing user changes in docs/scripts/root files; do not revert them.
-- This keep is real but smaller/noisier than the prior two transport passes, so the next experiment should still prefer a tightly measurable protocol micro-path.
+- Branch is still `main...origin/main [ahead 3]` from earlier kept work; this run has not committed yet.
+- Structured feedback is currently wired only for `CMD_SPAWN_COLONY`; other commands still mostly rely on implicit behavior.
+- The status payload is intentionally small and fixed-width; it is suitable for extending to other command outcomes without redesigning message framing.
+- `tests/test_client_logic_surface.c` is still a standalone manually compiled surface test rather than a CMake target.
 
 ## Recommended Next Experiment
 
-Target the raw-grid path inside `protocol_serialize_grid_rle()` or `protocol_deserialize_grid_rle()` to reduce per-cell byte-order write/read overhead now that the extra staging buffer is gone.
+Generalize the new `ProtoCommandStatus` surface to at least one additional command family such as selection/reset failures so command feedback becomes a reusable protocol pattern instead of a spawn-only special case.

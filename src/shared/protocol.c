@@ -665,6 +665,37 @@ int protocol_deserialize_world_delta_grid_chunk(const uint8_t* buffer, size_t le
     return 0;
 }
 
+int protocol_serialize_command_status(const ProtoCommandStatus* status, uint8_t* buffer) {
+    if (!status || !buffer) return -1;
+
+    int offset = 0;
+    write_u32(buffer + offset, status->command);
+    offset += 4;
+    write_u32(buffer + offset, status->status_code);
+    offset += 4;
+    write_u32(buffer + offset, status->entity_id);
+    offset += 4;
+    memcpy(buffer + offset, status->message, COMMAND_STATUS_MESSAGE_SIZE);
+    offset += COMMAND_STATUS_MESSAGE_SIZE;
+    return offset;
+}
+
+int protocol_deserialize_command_status(const uint8_t* buffer, ProtoCommandStatus* status) {
+    if (!buffer || !status) return -1;
+
+    int offset = 0;
+    status->command = read_u32(buffer + offset);
+    offset += 4;
+    status->status_code = read_u32(buffer + offset);
+    offset += 4;
+    status->entity_id = read_u32(buffer + offset);
+    offset += 4;
+    memcpy(status->message, buffer + offset, COMMAND_STATUS_MESSAGE_SIZE);
+    status->message[COMMAND_STATUS_MESSAGE_SIZE - 1] = '\0';
+    offset += COMMAND_STATUS_MESSAGE_SIZE;
+    return offset;
+}
+
 int protocol_serialize_command(CommandType cmd, const void* data, uint8_t* buffer) {
     if (!buffer) return -1;
     

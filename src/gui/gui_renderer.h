@@ -61,7 +61,8 @@ void gui_renderer_draw_petri_dish(GuiRenderer* renderer, int world_width, int wo
 void gui_renderer_draw_colony_info(GuiRenderer* renderer, const ProtoColony* colony, const ProtoColonyDetail* detail);
 void gui_renderer_draw_status_bar(GuiRenderer* renderer, uint32_t tick, int colony_count, 
                                    bool paused, float speed, float fps, float tps,
-                                   uint32_t last_update_ms, float zoom);
+                                   uint32_t last_update_ms, float zoom,
+                                   const ProtoCommandStatus* command_status);
 void gui_renderer_draw_controls_help(GuiRenderer* renderer);
 
 // Coordinate conversion

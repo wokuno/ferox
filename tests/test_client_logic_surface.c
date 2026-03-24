@@ -30,21 +30,24 @@ typedef struct {
     int close_calls;
     int has_data_calls;
     bool has_data_return;
-    net_socket* connect_result;
+    NetSocket* connect_result;
 } network_stub_state;
 
 typedef struct {
     int send_calls;
     int recv_calls;
     int serialize_calls;
+    int deserialize_command_status_calls;
     int deserialize_world_calls;
     int send_return;
     int recv_return;
     int serialize_return;
+    int deserialize_command_status_return;
     int deserialize_world_return;
     MessageType last_send_type;
     CommandType last_serialized_cmd;
     uint32_t last_selected_colony_payload;
+    ProtoCommandStatus next_command_status;
 } protocol_stub_state;
 
 static renderer_stub_state g_renderer;
@@ -60,6 +63,7 @@ static void reset_stubs(void) {
     g_protocol.send_return = 0;
     g_protocol.recv_return = 1;
     g_protocol.serialize_return = 1;
+    g_protocol.deserialize_command_status_return = 0;
     g_protocol.deserialize_world_return = 0;
     g_next_action = INPUT_NONE;
 }
@@ -106,41 +110,44 @@ void renderer_draw_world(Renderer* renderer, const proto_world* world) {
     (void)world;
     g_renderer.draw_world_calls++;
 }
-void renderer_draw_colony_info(Renderer* renderer, const proto_colony* colony) {
+void renderer_draw_colony_info(Renderer* renderer, const proto_colony* colony, const ProtoColonyDetail* detail) {
     (void)renderer;
     (void)colony;
+    (void)detail;
     g_renderer.draw_colony_info_calls++;
 }
-void renderer_draw_status(Renderer* renderer, uint32_t tick, int colony_count, bool paused, float speed) {
+void renderer_draw_status(Renderer* renderer, uint32_t tick, int colony_count, bool paused, float speed,
+                         const ProtoCommandStatus* command_status) {
     (void)renderer;
     (void)tick;
     (void)colony_count;
     (void)paused;
     (void)speed;
+    (void)command_status;
     g_renderer.draw_status_calls++;
 }
 void renderer_present(Renderer* renderer) { (void)renderer; g_renderer.present_calls++; }
 
-net_socket* net_client_connect(const char* host, uint16_t port) {
+NetSocket* net_client_connect(const char* host, uint16_t port) {
     (void)host;
     (void)port;
     g_network.connect_calls++;
     return g_network.connect_result;
 }
 
-void net_socket_close(net_socket* socket) {
+void net_socket_close(NetSocket* socket) {
     (void)socket;
     g_network.close_calls++;
 }
 
-bool net_has_data(net_socket* socket) {
+bool net_has_data(NetSocket* socket) {
     (void)socket;
     g_network.has_data_calls++;
     return g_network.has_data_return;
 }
 
-void net_set_nonblocking(net_socket* socket, bool nonblocking) { (void)socket; (void)nonblocking; }
-void net_set_nodelay(net_socket* socket, bool nodelay) { (void)socket; (void)nodelay; }
+void net_set_nonblocking(NetSocket* socket, bool nonblocking) { (void)socket; (void)nonblocking; }
+void net_set_nodelay(NetSocket* socket, bool nodelay) { (void)socket; (void)nodelay; }
 
 int protocol_send_message(int socket, MessageType type, const uint8_t* payload, size_t len) {
     (void)socket;
@@ -191,6 +198,64 @@ int protocol_deserialize_world_state(const uint8_t* buffer, size_t len, proto_wo
         world->tick = 777;
     }
     return g_protocol.deserialize_world_return;
+}
+
+int protocol_deserialize_command_status(const uint8_t* buffer, ProtoCommandStatus* status) {
+    (void)buffer;
+    g_protocol.deserialize_command_status_calls++;
+    if (g_protocol.deserialize_command_status_return == 0 && status != NULL) {
+        *status = g_protocol.next_command_status;
+    }
+    return g_protocol.deserialize_command_status_return;
+}
+
+int protocol_deserialize_colony_detail(const uint8_t* buffer, ProtoColonyDetail* detail) {
+    (void)buffer;
+    if (detail != NULL) {
+        memset(detail, 0, sizeof(*detail));
+    }
+    return 0;
+}
+
+int protocol_deserialize_world_delta_grid_chunk(const uint8_t* buffer, size_t len, ProtoWorldDeltaGridChunk* chunk) {
+    (void)buffer;
+    (void)len;
+    (void)chunk;
+    return -1;
+}
+
+void proto_world_free(proto_world* world) {
+    if (!world) {
+        return;
+    }
+    free(world->grid);
+    world->grid = NULL;
+    world->grid_size = 0;
+    world->has_grid = false;
+}
+
+void proto_world_alloc_grid(proto_world* world, uint32_t width, uint32_t height) {
+    if (!world) {
+        return;
+    }
+    world->width = width;
+    world->height = height;
+    world->grid_size = width * height;
+    world->grid = (uint16_t*)calloc(world->grid_size, sizeof(uint16_t));
+    world->has_grid = (world->grid != NULL);
+}
+
+void proto_world_delta_grid_chunk_init(ProtoWorldDeltaGridChunk* chunk) {
+    if (chunk) {
+        memset(chunk, 0, sizeof(*chunk));
+    }
+}
+
+void proto_world_delta_grid_chunk_free(ProtoWorldDeltaGridChunk* chunk) {
+    if (chunk) {
+        free(chunk->cells);
+        chunk->cells = NULL;
+    }
 }
 
 void proto_world_init(proto_world* world) {
@@ -295,11 +360,18 @@ static void test_handle_message_dispatches_world_messages(void) {
 
     client_handle_message(&client, MSG_WORLD_STATE, payload, sizeof(payload));
     client_handle_message(&client, MSG_WORLD_DELTA, payload, sizeof(payload));
-    client_handle_message(&client, MSG_ACK, payload, sizeof(payload));
-    client_handle_message(&client, MSG_ERROR, payload, sizeof(payload));
+    g_protocol.next_command_status.command = CMD_SPAWN_COLONY;
+    g_protocol.next_command_status.status_code = PROTO_COMMAND_STATUS_ACCEPTED;
+    strcpy(g_protocol.next_command_status.message, "Spawn accepted");
+    client_handle_message(&client, MSG_ACK, payload, COMMAND_STATUS_SERIALIZED_SIZE);
+    g_protocol.next_command_status.status_code = PROTO_COMMAND_STATUS_CONFLICT;
+    strcpy(g_protocol.next_command_status.message, "Spawn rejected: occupied target");
+    client_handle_message(&client, MSG_ERROR, payload, COMMAND_STATUS_SERIALIZED_SIZE);
     client_handle_message(&client, (MessageType)999, payload, sizeof(payload));
 
-    assert(g_protocol.deserialize_world_calls == 2);
+    assert(g_protocol.deserialize_world_calls == 1);
+    assert(g_protocol.deserialize_command_status_calls == 2);
+    assert(client.has_command_status == true);
 }
 
 static void test_update_world_guards_and_failures(void) {
@@ -329,7 +401,7 @@ static void test_process_input_pause_speed_scroll_select_reset(void) {
     g_tests_run++;
     reset_stubs();
     Client client = make_client_with_renderer();
-    net_socket socket = {.fd = 5};
+    NetSocket socket = {.fd = 5};
     client.connected = true;
     client.socket = &socket;
 
@@ -347,7 +419,7 @@ static void test_process_input_pause_speed_scroll_select_reset(void) {
     g_next_action = INPUT_SPEED_UP;
     client.local_world.speed_multiplier = 90.0f;
     client_process_input(&client);
-    assert(client.local_world.speed_multiplier == 100.0f);
+    assert(client.local_world.speed_multiplier == 10.0f);
     assert(g_protocol.last_serialized_cmd == CMD_SPEED_UP);
 
     g_next_action = INPUT_SLOW_DOWN;

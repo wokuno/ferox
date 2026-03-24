@@ -5,13 +5,14 @@ run correctness and performance diagnostics.
 
 ## Test Matrix
 
-Ferox currently defines **25 CTest targets** (see `ctest -N`):
+Ferox currently defines **27 CTest targets** (see `ctest -N`):
 
 - Phase suites: `Phase1Tests` .. `Phase6Tests`
 - Advanced correctness/stability: `GeneticsAdvancedTests`, `WorldAdvancedTests`,
   `SimulationLogicTests`, `VisualStabilityTests`, `CombatSystemTests`, `GuiTests`
 - Stress and edge coverage: `SimulationStressTests`, `ThreadpoolStressTests`,
-  `ProtocolEdgeTests`, `NamesExhaustiveTests`, `ColorsExhaustiveTests`
+  `ProtocolEdgeTests`, `NamesExhaustiveTests`, `ColorsExhaustiveTests`,
+  `WorldBranchCoverageTests`, `ServerBranchCoverageTests`
 - Runtime detection coverage: `HardwareProfileTests`
 - Performance diagnostics:
   - `PerformanceProfilingTests`
@@ -121,3 +122,10 @@ For deeper inspection, build a debug tree and run under `gdb`, `valgrind`, or
 - Add/update perf diagnostics for hot-path changes.
 - Evaluate perf claims using medians across repeated runs.
 - Keep test names and CTest labels consistent with existing conventions.
+
+Recent protocol/client correctness coverage now also includes structured command
+feedback checks for manual spawn acceptance/rejection in:
+
+- `ProtocolEdgeTests`
+- `ServerBranchCoverageTests`
+- `Phase6Tests`

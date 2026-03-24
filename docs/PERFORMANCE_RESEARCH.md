@@ -234,7 +234,7 @@ Risk:
 
 In order:
 
-1. Narrow raw-grid encode/decode per-cell overhead now that `protocol_serialize_world_state()` no longer double-buffers inline-grid payloads.
+1. Narrow raw-grid encode per-cell overhead now that decode-helper cleanup was tried and rejected on `test_perf_unit_protocol`.
 2. Dirty-tile or frontier-list telemetry that pushes beyond the current one-pass rewrite.
 3. Tiled stencil benchmark for `simulation_update_nutrients()` and the remaining transport-heavy paths.
 4. Multirate telemetry and scent update experiments.
@@ -256,6 +256,8 @@ Rejected from this list so far:
 
 - EPS caching inside `simulation_update_scents()` was not a win and was reverted.
 - A per-colony scalar cache for nutrient/scent update math was not a robust cross-machine win and was reverted.
+- A helper-based raw-grid decode cleanup in `protocol_deserialize_grid_rle()` regressed `test_perf_unit_protocol` noisy-grid medians and was reverted.
+- Structured spawn-feedback wiring (`MSG_ACK`/`MSG_ERROR`) is now no longer a recommended next experiment because the protocol/client correctness slice has been implemented.
 
 ## What Not To Chase First
 
