@@ -217,6 +217,25 @@ typedef struct CommandSpawnColony {
     char name[MAX_COLONY_NAME];
 } CommandSpawnColony;
 
+#define COMMAND_STATUS_MESSAGE_SIZE 64
+
+typedef enum ProtoCommandStatusCode {
+    PROTO_COMMAND_STATUS_ACCEPTED = 0,
+    PROTO_COMMAND_STATUS_REJECTED,
+    PROTO_COMMAND_STATUS_OUT_OF_BOUNDS,
+    PROTO_COMMAND_STATUS_CONFLICT,
+    PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+} ProtoCommandStatusCode;
+
+typedef struct ProtoCommandStatus {
+    uint32_t command;
+    uint32_t status_code;
+    uint32_t entity_id;
+    char message[COMMAND_STATUS_MESSAGE_SIZE];
+} ProtoCommandStatus;
+
+#define COMMAND_STATUS_SERIALIZED_SIZE (12 + COMMAND_STATUS_MESSAGE_SIZE)
+
 // Serialization functions
 int protocol_serialize_header(const MessageHeader* header, uint8_t* buffer);
 int protocol_deserialize_header(const uint8_t* buffer, MessageHeader* header);
@@ -230,6 +249,8 @@ int protocol_serialize_colony(const ProtoColony* colony, uint8_t* buffer);
 int protocol_deserialize_colony(const uint8_t* buffer, ProtoColony* colony);
 int protocol_serialize_colony_detail(const ProtoColonyDetail* detail, uint8_t* buffer);
 int protocol_deserialize_colony_detail(const uint8_t* buffer, ProtoColonyDetail* detail);
+int protocol_serialize_command_status(const ProtoCommandStatus* status, uint8_t* buffer);
+int protocol_deserialize_command_status(const uint8_t* buffer, ProtoCommandStatus* status);
 
 int protocol_serialize_command(CommandType cmd, const void* data, uint8_t* buffer);
 int protocol_deserialize_command(const uint8_t* buffer, CommandType* cmd, void* data);

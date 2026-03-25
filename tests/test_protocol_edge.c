@@ -549,6 +549,72 @@ TEST(command_wire_examples_match_spec) {
     ASSERT_BYTES_EQ(select_buffer, expected_select, sizeof(expected_select), "CMD_SELECT_COLONY bytes should match spec example");
 }
 
+TEST(command_status_roundtrip) {
+    ProtoCommandStatus status;
+    memset(&status, 0, sizeof(status));
+    status.command = CMD_SPAWN_COLONY;
+    status.status_code = PROTO_COMMAND_STATUS_CONFLICT;
+    status.entity_id = 17;
+    strncpy(status.message, "Spawn rejected: occupied target", COMMAND_STATUS_MESSAGE_SIZE - 1);
+
+    uint8_t buffer[COMMAND_STATUS_SERIALIZED_SIZE];
+    int size = protocol_serialize_command_status(&status, buffer);
+    ASSERT_EQ(size, COMMAND_STATUS_SERIALIZED_SIZE);
+
+    ProtoCommandStatus decoded;
+    memset(&decoded, 0, sizeof(decoded));
+    size = protocol_deserialize_command_status(buffer, &decoded);
+    ASSERT_EQ(size, COMMAND_STATUS_SERIALIZED_SIZE);
+    ASSERT_EQ(decoded.command, status.command);
+    ASSERT_EQ(decoded.status_code, status.status_code);
+    ASSERT_EQ(decoded.entity_id, status.entity_id);
+    ASSERT(strcmp(decoded.message, status.message) == 0, "command status message should roundtrip");
+}
+
+TEST(command_status_select_clears_roundtrip) {
+    ProtoCommandStatus status;
+    memset(&status, 0, sizeof(status));
+    status.command = CMD_SELECT_COLONY;
+    status.status_code = PROTO_COMMAND_STATUS_ACCEPTED;
+    status.entity_id = 0;
+    strncpy(status.message, "Selection cleared", COMMAND_STATUS_MESSAGE_SIZE - 1);
+
+    uint8_t buffer[COMMAND_STATUS_SERIALIZED_SIZE];
+    int size = protocol_serialize_command_status(&status, buffer);
+    ASSERT_EQ(size, COMMAND_STATUS_SERIALIZED_SIZE);
+
+    ProtoCommandStatus decoded;
+    memset(&decoded, 0, sizeof(decoded));
+    size = protocol_deserialize_command_status(buffer, &decoded);
+    ASSERT_EQ(size, COMMAND_STATUS_SERIALIZED_SIZE);
+    ASSERT_EQ(decoded.command, (uint32_t)CMD_SELECT_COLONY);
+    ASSERT_EQ(decoded.status_code, (uint32_t)PROTO_COMMAND_STATUS_ACCEPTED);
+    ASSERT_EQ(decoded.entity_id, 0u);
+    ASSERT(strcmp(decoded.message, "Selection cleared") == 0, "selection-clear status should roundtrip");
+}
+
+TEST(command_status_reset_roundtrip) {
+    ProtoCommandStatus status;
+    memset(&status, 0, sizeof(status));
+    status.command = CMD_RESET;
+    status.status_code = PROTO_COMMAND_STATUS_ACCEPTED;
+    status.entity_id = 0;
+    strncpy(status.message, "Reset accepted", COMMAND_STATUS_MESSAGE_SIZE - 1);
+
+    uint8_t buffer[COMMAND_STATUS_SERIALIZED_SIZE];
+    int size = protocol_serialize_command_status(&status, buffer);
+    ASSERT_EQ(size, COMMAND_STATUS_SERIALIZED_SIZE);
+
+    ProtoCommandStatus decoded;
+    memset(&decoded, 0, sizeof(decoded));
+    size = protocol_deserialize_command_status(buffer, &decoded);
+    ASSERT_EQ(size, COMMAND_STATUS_SERIALIZED_SIZE);
+    ASSERT_EQ(decoded.command, (uint32_t)CMD_RESET);
+    ASSERT_EQ(decoded.status_code, (uint32_t)PROTO_COMMAND_STATUS_ACCEPTED);
+    ASSERT_EQ(decoded.entity_id, 0u);
+    ASSERT(strcmp(decoded.message, "Reset accepted") == 0, "reset status should roundtrip");
+}
+
 TEST(world_state_without_grid_uses_fixed_prefix) {
     ProtoWorld world;
     proto_world_init(&world);
@@ -622,6 +688,90 @@ TEST(grid_rle_rejects_unknown_mode) {
     };
     uint16_t decoded[4] = {0};
     ASSERT_EQ(protocol_deserialize_grid_rle(buffer, sizeof(buffer), decoded, 4u), -1);
+}
+
+TEST(world_state_with_grid_roundtrip_preserves_cells) {
+    ProtoWorld world;
+    proto_world_init(&world);
+    world.width = 4;
+    world.height = 3;
+    world.tick = 77;
+    world.colony_count = 2;
+    world.paused = false;
+    world.speed_multiplier = 1.0f;
+
+    world.colonies[0].id = 1;
+    world.colonies[1].id = 2;
+
+    proto_world_alloc_grid(&world, world.width, world.height);
+    ASSERT_NOT_NULL(world.grid);
+
+    uint16_t expected_grid[] = {
+        0u, 1u, 1u, 0u,
+        2u, 2u, 0u, 0u,
+        0u, 1u, 2u, 0u,
+    };
+    memcpy(world.grid, expected_grid, sizeof(expected_grid));
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_state(&world, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(buffer);
+
+    ProtoWorld decoded;
+    proto_world_init(&decoded);
+    result = protocol_deserialize_world_state(buffer, len, &decoded);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(decoded.has_grid, true);
+    ASSERT_EQ(decoded.grid_size, world.grid_size);
+    ASSERT_NOT_NULL(decoded.grid);
+    ASSERT_BYTES_EQ(decoded.grid, expected_grid, sizeof(expected_grid), "world grid should survive roundtrip");
+
+    free(buffer);
+    proto_world_free(&decoded);
+    proto_world_free(&world);
+}
+
+TEST(world_state_with_noisy_grid_roundtrip_preserves_cells) {
+    ProtoWorld world;
+    proto_world_init(&world);
+    world.width = 128;
+    world.height = 64;
+    world.tick = 88;
+    world.colony_count = 8;
+    world.paused = false;
+    world.speed_multiplier = 1.0f;
+
+    for (uint32_t i = 0; i < world.colony_count; i++) {
+        world.colonies[i].id = i + 1u;
+    }
+
+    proto_world_alloc_grid(&world, world.width, world.height);
+    ASSERT_NOT_NULL(world.grid);
+
+    for (uint32_t i = 0; i < world.grid_size; i++) {
+        world.grid[i] = (uint16_t)(((i * 131u) & 0x00FFu) + 1u);
+    }
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_state(&world, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(buffer);
+
+    ProtoWorld decoded;
+    proto_world_init(&decoded);
+    result = protocol_deserialize_world_state(buffer, len, &decoded);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(decoded.has_grid, true);
+    ASSERT_EQ(decoded.grid_size, world.grid_size);
+    ASSERT_NOT_NULL(decoded.grid);
+    ASSERT_BYTES_EQ(decoded.grid, world.grid, world.grid_size * sizeof(uint16_t), "noisy world grid should survive roundtrip");
+
+    free(buffer);
+    proto_world_free(&decoded);
+    proto_world_free(&world);
 }
 
 // ============================================================================
@@ -835,6 +985,8 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(world_state_without_grid_uses_fixed_prefix);
     RUN_TEST(grid_rle_raw_mode_roundtrip);
     RUN_TEST(grid_rle_rejects_unknown_mode);
+    RUN_TEST(world_state_with_grid_roundtrip_preserves_cells);
+    RUN_TEST(world_state_with_noisy_grid_roundtrip_preserves_cells);
     
     printf("\nColony Name Tests:\n");
     RUN_TEST(maximum_length_colony_name);
@@ -847,6 +999,9 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(select_colony_command);
     RUN_TEST(spawn_colony_command);
     RUN_TEST(command_wire_examples_match_spec);
+    RUN_TEST(command_status_roundtrip);
+    RUN_TEST(command_status_select_clears_roundtrip);
+    RUN_TEST(command_status_reset_roundtrip);
     
     printf("\nNull Input Tests:\n");
     RUN_TEST(null_inputs_handled);

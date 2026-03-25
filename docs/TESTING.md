@@ -5,13 +5,15 @@ run correctness and performance diagnostics.
 
 ## Test Matrix
 
-Ferox currently defines **25 CTest targets** (see `ctest -N`):
+Ferox currently defines **28 CTest targets** (see `ctest -N`):
 
 - Phase suites: `Phase1Tests` .. `Phase6Tests`
 - Advanced correctness/stability: `GeneticsAdvancedTests`, `WorldAdvancedTests`,
-  `SimulationLogicTests`, `VisualStabilityTests`, `CombatSystemTests`, `GuiTests`
+  `SimulationLogicTests`, `VisualStabilityTests`, `CombatSystemTests`, `GuiTests`,
+  `ClientLogicSurfaceTests`
 - Stress and edge coverage: `SimulationStressTests`, `ThreadpoolStressTests`,
-  `ProtocolEdgeTests`, `NamesExhaustiveTests`, `ColorsExhaustiveTests`
+  `ProtocolEdgeTests`, `NamesExhaustiveTests`, `ColorsExhaustiveTests`,
+  `WorldBranchCoverageTests`, `ServerBranchCoverageTests`
 - Runtime detection coverage: `HardwareProfileTests`
 - Performance diagnostics:
   - `PerformanceProfilingTests`
@@ -35,6 +37,9 @@ ctest --test-dir build --output-on-failure
 
 # Run quick correctness slice
 ctest --test-dir build --output-on-failure -R "Phase|SimulationLogicTests|ProtocolEdgeTests"
+
+# Run client-facing correctness slice
+ctest --test-dir build --output-on-failure -R "ClientLogicSurfaceTests|Phase5Tests|Phase6Tests"
 
 # Run perf-focused + hardware slice
 ctest --test-dir build --output-on-failure -R "HardwareProfileTests|ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerformanceComponentTests"
@@ -121,3 +126,20 @@ For deeper inspection, build a debug tree and run under `gdb`, `valgrind`, or
 - Add/update perf diagnostics for hot-path changes.
 - Evaluate perf claims using medians across repeated runs.
 - Keep test names and CTest labels consistent with existing conventions.
+
+Recent protocol/client correctness coverage now also includes structured command
+feedback checks for manual spawn acceptance/rejection in:
+
+- `ProtocolEdgeTests`
+- `ServerBranchCoverageTests`
+- `Phase6Tests`
+
+That same coverage now also checks `CMD_SELECT_COLONY` accept/reject/clear
+feedback so selection failures no longer remain silent in the command surface.
+
+That command-status coverage now also checks `CMD_RESET` acceptance so reset
+rebuilds no longer rely on optimistic client state or later snapshots alone in:
+
+- `ProtocolEdgeTests`
+- `ServerBranchCoverageTests`
+- `Phase6Tests`

@@ -37,6 +37,21 @@ Current canonical metric groups by scenario:
 - `frontier_genetic_drift`: `frontier_core_genome_distance`, `lineage_retention_half_life_ticks`
 - `coexistence_dynamics`: `effective_diversity_shannon`, `survivor_count_at_end`
 
+## Literature-Grounded Next Benchmarks
+
+The current catalog is a good start, but the literature suggests Ferox should
+also grow toward benchmark lanes for:
+
+- morphology class transitions (`compact`, `rough`, `branched`) under nutrient,
+  diffusion, and motility sweeps
+- active-shell thickness and quiescent-core fraction in mature colonies
+- frontier sector width distributions and heterozygosity decay during expansion
+- boundary displacement speed and coexistence duration in competitive fronts
+- EPS-on/off transport attenuation and quorum-hysteresis sensitivity
+
+These are the next best candidates for follow-up science issues because they map
+directly onto published colony and biofilm validation practice.
+
 ## Automation Entrypoints
 
 ### Validate scenario configuration

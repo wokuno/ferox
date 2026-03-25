@@ -248,6 +248,8 @@ ferox/
 - [Protocol](PROTOCOL.md) - Network protocol specification
 - [Genetics](GENETICS.md) - Genome structure and evolution
 - [Simulation](SIMULATION.md) - World update mechanics
+- [Science Bibliography](SCIENCE_BIBLIOGRAPHY.md) - Peer-reviewed references mapped to Ferox subsystems
+- [Literature Review](LITERATURE_REVIEW.md) - Modeling lessons, benchmark targets, and open-source systems survey
 - [API Reference](API.md) - Function documentation
 - [Testing](TESTING.md) - Test organization and coverage
 - [Performance Runbook](PERF_RUNBOOK.md) - Benchmark commands, profiles, and jitter control

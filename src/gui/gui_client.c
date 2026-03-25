@@ -15,6 +15,15 @@
 #define FRAME_DELAY_US 16666  // ~60 FPS
 #define PAN_SPEED 5.0f
 
+static void gui_client_clear_command_status(GuiClient* client) {
+    if (!client) {
+        return;
+    }
+
+    memset(&client->last_command_status, 0, sizeof(client->last_command_status));
+    client->has_command_status = false;
+}
+
 GuiClient* gui_client_create(void) {
     GuiClient* client = (GuiClient*)calloc(1, sizeof(GuiClient));
     if (!client) return NULL;
@@ -34,6 +43,7 @@ GuiClient* gui_client_create(void) {
     client->last_tick_sample = 0;
     client->last_tick_sample_time = 0;
     client->last_world_update_ms = 0;
+    gui_client_clear_command_status(client);
     
     // Initialize local world
     proto_world_init(&client->local_world);
@@ -130,7 +140,42 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
             }
             break;
         case MSG_ACK:
+            if (payload && len >= COMMAND_STATUS_SERIALIZED_SIZE) {
+                ProtoCommandStatus status;
+                if (protocol_deserialize_command_status(payload, &status) >= 0) {
+                    client->last_command_status = status;
+                    client->has_command_status = true;
+                    if (status.command == (uint32_t)CMD_SELECT_COLONY) {
+                        if (status.entity_id == 0) {
+                            client->selected_colony = 0;
+                            client->renderer->selected_colony = 0;
+                            client->has_selected_detail = false;
+                        } else {
+                            client->selected_colony = status.entity_id;
+                            client->renderer->selected_colony = status.entity_id;
+                        }
+                    } else if (status.command == (uint32_t)CMD_RESET) {
+                        client->selected_colony = 0;
+                        client->renderer->selected_colony = 0;
+                        client->has_selected_detail = false;
+                    }
+                }
+            }
+            break;
         case MSG_ERROR:
+            if (payload && len >= COMMAND_STATUS_SERIALIZED_SIZE) {
+                ProtoCommandStatus status;
+                if (protocol_deserialize_command_status(payload, &status) >= 0) {
+                    client->last_command_status = status;
+                    client->has_command_status = true;
+                    if (status.command == (uint32_t)CMD_SELECT_COLONY) {
+                        client->selected_colony = 0;
+                        client->renderer->selected_colony = 0;
+                        client->has_selected_detail = false;
+                    }
+                }
+            }
+            break;
         default:
             break;
     }
@@ -148,6 +193,9 @@ void gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len)
     client->pending_grid_next_index = 0;
     if (client->has_selected_detail && client->selected_detail.base.id != client->selected_colony) {
         client->has_selected_detail = false;
+    }
+    if (client->has_command_status && client->last_command_status.command == (uint32_t)CMD_SPAWN_COLONY) {
+        gui_client_clear_command_status(client);
     }
     
     if (protocol_deserialize_world_state(data, len, &client->local_world) < 0) {
@@ -228,6 +276,7 @@ void gui_client_select_next_colony(GuiClient* client) {
         client->selected_colony = 0;
         client->selected_index = 0;
         client->has_selected_detail = false;
+        gui_client_clear_command_status(client);
         return;
     }
     
@@ -257,6 +306,7 @@ void gui_client_select_next_colony(GuiClient* client) {
     
     client->selected_colony = 0;
     client->has_selected_detail = false;
+    gui_client_clear_command_status(client);
 }
 
 void gui_client_select_prev_colony(GuiClient* client) {
@@ -264,6 +314,7 @@ void gui_client_select_prev_colony(GuiClient* client) {
         client->selected_colony = 0;
         client->selected_index = 0;
         client->has_selected_detail = false;
+        gui_client_clear_command_status(client);
         return;
     }
     
@@ -289,12 +340,14 @@ void gui_client_select_prev_colony(GuiClient* client) {
     
     client->selected_colony = 0;
     client->has_selected_detail = false;
+    gui_client_clear_command_status(client);
 }
 
 void gui_client_deselect_colony(GuiClient* client) {
     if (!client) return;
     client->selected_colony = 0;
     client->has_selected_detail = false;
+    gui_client_clear_command_status(client);
     client->renderer->selected_colony = 0;
 }
 
@@ -357,7 +410,7 @@ static void gui_client_process_input(GuiClient* client, GuiInputState* input) {
             
         case GUI_INPUT_SPEED_UP:
             gui_client_send_command(client, CMD_SPEED_UP, NULL);
-            client->local_world.speed_multiplier *= 1.5f;
+            client->local_world.speed_multiplier *= 2.0f;
             if (client->local_world.speed_multiplier > 10.0f) {
                 client->local_world.speed_multiplier = 10.0f;
             }
@@ -365,7 +418,7 @@ static void gui_client_process_input(GuiClient* client, GuiInputState* input) {
             
         case GUI_INPUT_SLOW_DOWN:
             gui_client_send_command(client, CMD_SLOW_DOWN, NULL);
-            client->local_world.speed_multiplier /= 1.5f;
+            client->local_world.speed_multiplier /= 2.0f;
             if (client->local_world.speed_multiplier < 0.1f) {
                 client->local_world.speed_multiplier = 0.1f;
             }
@@ -520,7 +573,8 @@ static void gui_client_render(GuiClient* client) {
                                   client->fps,
                                   client->tps,
                                   client->last_world_update_ms == 0 ? 0 : (SDL_GetTicks() - client->last_world_update_ms),
-                                  client->renderer->zoom);
+                                  client->renderer->zoom,
+                                  client->has_command_status ? &client->last_command_status : NULL);
     
     // Draw controls help hint
     gui_renderer_draw_controls_help(client->renderer);

@@ -6,6 +6,7 @@
 #include "server.h"
 #include "simulation.h"
 #include "parallel.h"
+#include "genetics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,7 @@
 // So we include protocol.h here and use the types directly knowing they come from types.h (via world.h)
 // The protocol functions work with the protocol-defined structures, so we'll build them inline
 #include "../shared/protocol.h"
+#include "../shared/names.h"
 
 // Forward declarations for thread functions
 static void* accept_thread_func(void* arg);
@@ -39,6 +41,232 @@ static void copy_colony_name(char dst[MAX_COLONY_NAME], const char* src) {
     }
     memcpy(dst, src, len);
     dst[len] = '\0';
+}
+
+static void copy_spawn_colony_name(char* dst, size_t dst_size,
+                                   const char src[MAX_COLONY_NAME]) {
+    if (!dst || dst_size == 0) {
+        return;
+    }
+
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+
+    size_t len = 0;
+    while (len < MAX_COLONY_NAME && src[len] != '\0') {
+        len++;
+    }
+    if (len >= dst_size) {
+        len = dst_size - 1;
+    }
+
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
+static void server_fill_command_status(ProtoCommandStatus* status,
+                                       CommandType cmd,
+                                       ProtoCommandStatusCode code,
+                                       uint32_t entity_id,
+                                       const char* message) {
+    if (!status) {
+        return;
+    }
+
+    memset(status, 0, sizeof(*status));
+    status->command = (uint32_t)cmd;
+    status->status_code = (uint32_t)code;
+    status->entity_id = entity_id;
+    if (message) {
+        copy_spawn_colony_name(status->message, sizeof(status->message), message);
+    }
+}
+
+static void server_send_command_status(Server* server,
+                                       ClientSession* client,
+                                       MessageType type,
+                                       const ProtoCommandStatus* status) {
+    (void)server;
+    if (!client || !client->socket || client->socket->fd < 0 || !status) {
+        return;
+    }
+
+    uint8_t buffer[COMMAND_STATUS_SERIALIZED_SIZE];
+    int len = protocol_serialize_command_status(status, buffer);
+    if (len > 0) {
+        protocol_send_message(client->socket->fd, type, buffer, (size_t)len);
+    }
+}
+
+static MessageType server_spawn_colony(Server* server,
+                                       const CommandSpawnColony* spawn,
+                                       ProtoCommandStatus* status) {
+    server_fill_command_status(status, CMD_SPAWN_COLONY,
+                               PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+                               0,
+                               "Spawn failed");
+    if (!server || !server->world || !spawn || !status) {
+        return MSG_ERROR;
+    }
+
+    int x = (int)lroundf(spawn->x);
+    int y = (int)lroundf(spawn->y);
+    Cell* cell = world_get_cell(server->world, x, y);
+    if (!cell) {
+        server_fill_command_status(status, CMD_SPAWN_COLONY,
+                                   PROTO_COMMAND_STATUS_OUT_OF_BOUNDS,
+                                   0,
+                                   "Spawn rejected: out of bounds");
+        return MSG_ERROR;
+    }
+    if (cell->colony_id != 0) {
+        server_fill_command_status(status, CMD_SPAWN_COLONY,
+                                   PROTO_COMMAND_STATUS_CONFLICT,
+                                   cell->colony_id,
+                                   "Spawn rejected: occupied target");
+        return MSG_ERROR;
+    }
+
+    Colony colony;
+    memset(&colony, 0, sizeof(colony));
+    if (spawn->name[0] != '\0') {
+        copy_spawn_colony_name(colony.name, sizeof(colony.name), spawn->name);
+    } else {
+        generate_scientific_name(colony.name, sizeof(colony.name));
+    }
+    colony.genome = genome_create_random();
+    colony.color = colony.genome.body_color;
+    colony.cell_count = 1;
+    colony.max_cell_count = 1;
+    colony.active = true;
+    colony.age = 0;
+    colony.parent_id = 0;
+    colony.shape_seed = (uint32_t)rand() ^ ((uint32_t)rand() << 16);
+    colony.wobble_phase = (float)(rand() % 628) / 100.0f;
+
+    uint32_t colony_id = world_add_colony(server->world, colony);
+    if (colony_id == 0) {
+        server_fill_command_status(status, CMD_SPAWN_COLONY,
+                                   PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+                                   0,
+                                   "Spawn failed: colony allocation");
+        return MSG_ERROR;
+    }
+
+    uint32_t cell_idx = (uint32_t)(y * server->world->width + x);
+    cell->colony_id = colony_id;
+    cell->age = 0;
+    cell->is_border = false;
+    world_colony_add_cell(server->world, colony_id, cell_idx);
+
+    if (server->atomic_world) {
+        atomic_world_sync_from_world(server->atomic_world);
+    }
+
+    server_fill_command_status(status, CMD_SPAWN_COLONY,
+                               PROTO_COMMAND_STATUS_ACCEPTED,
+                               colony_id,
+                               "Spawn accepted");
+    return MSG_ACK;
+}
+
+static MessageType server_select_colony(Server* server,
+                                         ClientSession* client,
+                                         const CommandSelectColony* select,
+                                         ProtoCommandStatus* status) {
+    server_fill_command_status(status, CMD_SELECT_COLONY,
+                               PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+                               0,
+                               "Selection failed");
+    if (!server || !client || !select || !status) {
+        return MSG_ERROR;
+    }
+
+    if (select->colony_id == 0) {
+        client->selected_colony = 0;
+        server_fill_command_status(status, CMD_SELECT_COLONY,
+                                   PROTO_COMMAND_STATUS_ACCEPTED,
+                                   0,
+                                   "Selection cleared");
+        return MSG_ACK;
+    }
+
+    Colony* colony = world_get_colony(server->world, select->colony_id);
+    if (!colony) {
+        client->selected_colony = 0;
+        server_fill_command_status(status, CMD_SELECT_COLONY,
+                                   PROTO_COMMAND_STATUS_REJECTED,
+                                   select->colony_id,
+                                   "Selection rejected: colony not found");
+        return MSG_ERROR;
+    }
+
+    client->selected_colony = select->colony_id;
+    server_fill_command_status(status, CMD_SELECT_COLONY,
+                               PROTO_COMMAND_STATUS_ACCEPTED,
+                               select->colony_id,
+                               "Selection accepted");
+    return MSG_ACK;
+}
+
+static void server_clear_selected_colonies(Server* server) {
+    if (!server) {
+        return;
+    }
+
+    for (ClientSession* client = server->clients; client; client = client->next) {
+        client->selected_colony = 0;
+    }
+}
+
+static MessageType server_reset_world(Server* server,
+                                      ClientSession* client,
+                                      ProtoCommandStatus* status) {
+    server_fill_command_status(status, CMD_RESET,
+                               PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+                               0,
+                               "Reset failed");
+    if (!server || !status) {
+        return MSG_ERROR;
+    }
+
+    World* new_world = world_create(server->world_width, server->world_height);
+    AtomicWorld* new_atomic_world = NULL;
+    if (new_world) {
+        world_init_random_colonies(new_world, server->default_colonies);
+        new_atomic_world = atomic_world_create(new_world, server->pool, server->pool->thread_count);
+    }
+
+    if (!new_world || !new_atomic_world) {
+        atomic_world_destroy(new_atomic_world);
+        world_destroy(new_world);
+        server_fill_command_status(status, CMD_RESET,
+                                   PROTO_COMMAND_STATUS_INTERNAL_ERROR,
+                                   0,
+                                   "Reset failed: world rebuild");
+        if (client) {
+            printf("World reset failed for client %u\n", client->id);
+        }
+        return MSG_ERROR;
+    }
+
+    atomic_world_destroy(server->atomic_world);
+    world_destroy(server->world);
+    server->world = new_world;
+    server->atomic_world = new_atomic_world;
+    if (server->parallel_ctx) {
+        server->parallel_ctx->world = server->world;
+        parallel_init_regions(server->parallel_ctx, server->world_width, server->world_height);
+    }
+
+    server_clear_selected_colonies(server);
+    server_fill_command_status(status, CMD_RESET,
+                               PROTO_COMMAND_STATUS_ACCEPTED,
+                               0,
+                               "Reset accepted");
+    return MSG_ACK;
 }
 
 static float clamp_unit(float value) {
@@ -482,19 +710,30 @@ int server_build_protocol_world_snapshot(const World* world,
     proto_world->speed_multiplier = speed_multiplier;
 
     uint32_t count = 0;
-    uint32_t* proto_index_by_world_index = NULL;
+    uint16_t proto_index_by_colony_id_stack[512];
+    uint16_t* proto_index_by_colony_id = NULL;
+    size_t proto_index_by_colony_id_capacity = 0;
     float sum_x[MAX_COLONIES] = {0};
     float sum_y[MAX_COLONIES] = {0};
     uint32_t sample_count[MAX_COLONIES] = {0};
 
-    if (world->colony_count > 0) {
-        proto_index_by_world_index = (uint32_t*)malloc(world->colony_count * sizeof(uint32_t));
-        if (!proto_index_by_world_index) {
+    if (world->colony_index_capacity > 0) {
+        proto_index_by_colony_id_capacity = world->colony_index_capacity;
+        if (proto_index_by_colony_id_capacity <=
+            (sizeof(proto_index_by_colony_id_stack) / sizeof(proto_index_by_colony_id_stack[0]))) {
+            proto_index_by_colony_id = proto_index_by_colony_id_stack;
+        } else {
+            proto_index_by_colony_id = (uint16_t*)malloc(proto_index_by_colony_id_capacity *
+                                                         sizeof(uint16_t));
+        }
+
+        if (!proto_index_by_colony_id) {
             return -1;
         }
-        for (size_t i = 0; i < world->colony_count; i++) {
-            proto_index_by_world_index[i] = UINT32_MAX;
-        }
+
+        memset(proto_index_by_colony_id,
+               0xFF,
+               proto_index_by_colony_id_capacity * sizeof(uint16_t));
     }
 
     for (size_t i = 0; i < world->colony_count && count < MAX_COLONIES; i++) {
@@ -520,8 +759,8 @@ int server_build_protocol_world_snapshot(const World* world,
         proto_colony->y = 0.0f;
         proto_colony->radius = 0.0f;
 
-        if (proto_index_by_world_index) {
-            proto_index_by_world_index[i] = count;
+        if (proto_index_by_colony_id && (size_t)colony->id < proto_index_by_colony_id_capacity) {
+            proto_index_by_colony_id[colony->id] = (uint16_t)count;
         }
         count++;
     }
@@ -531,12 +770,16 @@ int server_build_protocol_world_snapshot(const World* world,
     uint32_t grid_size = proto_world->width * proto_world->height;
     bool inline_grid = (grid_size > 0 && grid_size <= MAX_INLINE_GRID_SIZE);
     if (inline_grid) {
-        proto_world_alloc_grid(proto_world, proto_world->width, proto_world->height);
+        proto_world->grid = (uint16_t*)malloc((size_t)grid_size * sizeof(uint16_t));
         if (!proto_world->grid) {
-            free(proto_index_by_world_index);
+            if (proto_index_by_colony_id != proto_index_by_colony_id_stack) {
+                free(proto_index_by_colony_id);
+            }
             proto_world_free(proto_world);
             return -1;
         }
+        proto_world->grid_size = grid_size;
+        proto_world->has_grid = true;
     }
 
     for (int y = 0; y < world->height; y++) {
@@ -549,17 +792,13 @@ int server_build_protocol_world_snapshot(const World* world,
                 proto_world->grid[idx] = (uint16_t)colony_id;
             }
 
-            if (colony_id == 0 || !proto_index_by_world_index || (size_t)colony_id >= world->colony_index_capacity) {
+            if (colony_id == 0 || !proto_index_by_colony_id ||
+                (size_t)colony_id >= proto_index_by_colony_id_capacity) {
                 continue;
             }
 
-            uint32_t world_index = world->colony_index_map[colony_id];
-            if (world_index == UINT32_MAX || world_index >= world->colony_count) {
-                continue;
-            }
-
-            uint32_t proto_index = proto_index_by_world_index[world_index];
-            if (proto_index == UINT32_MAX || proto_index >= count) {
+            uint16_t proto_index = proto_index_by_colony_id[colony_id];
+            if (proto_index == UINT16_MAX || proto_index >= count) {
                 continue;
             }
 
@@ -579,7 +818,9 @@ int server_build_protocol_world_snapshot(const World* world,
     }
 
     proto_world->colony_count = count;
-    free(proto_index_by_world_index);
+    if (proto_index_by_colony_id != proto_index_by_colony_id_stack) {
+        free(proto_index_by_colony_id);
+    }
     return 0;
 }
 
@@ -822,50 +1063,49 @@ void server_handle_command(Server* server, ClientSession* client, CommandType cm
             break;
             
         case CMD_RESET:
-            // Reset world while keeping the previous world alive until the new
-            // one and its atomic wrapper are ready.
             {
-                World* new_world = world_create(server->world_width, server->world_height);
-                AtomicWorld* new_atomic_world = NULL;
-                if (new_world) {
-                    world_init_random_colonies(new_world, server->default_colonies);
-                    new_atomic_world = atomic_world_create(new_world, server->pool, server->pool->thread_count);
-                }
-
-                if (!new_world || !new_atomic_world) {
-                    atomic_world_destroy(new_atomic_world);
-                    world_destroy(new_world);
-                    printf("World reset failed for client %u\n", client->id);
-                    break;
-                }
-
-                atomic_world_destroy(server->atomic_world);
-                world_destroy(server->world);
-                server->world = new_world;
-                server->atomic_world = new_atomic_world;
-                if (server->parallel_ctx) {
-                    server->parallel_ctx->world = server->world;
-                    parallel_init_regions(server->parallel_ctx, server->world_width, server->world_height);
+                ProtoCommandStatus status;
+                MessageType reply_type = server_reset_world(server, client, &status);
+                server_send_command_status(server, client, reply_type, &status);
+                if (reply_type == MSG_ACK) {
+                    printf("World reset by client %u\n", client->id);
+                } else {
+                    printf("Rejected world reset for client %u: %s\n", client->id, status.message);
                 }
             }
-            printf("World reset by client %u\n", client->id);
             break;
             
         case CMD_SELECT_COLONY:
             if (data) {
                 CommandSelectColony* sel = (CommandSelectColony*)data;
-                client->selected_colony = sel->colony_id;
-                server_send_colony_info(server, client, sel->colony_id);
+                ProtoCommandStatus status;
+                MessageType reply_type = server_select_colony(server, client, sel, &status);
+                server_send_command_status(server, client, reply_type, &status);
+                if (reply_type == MSG_ACK && client->selected_colony != 0) {
+                    server_send_colony_info(server, client, client->selected_colony);
+                    printf("Selected colony %u for client %u\n", client->selected_colony, client->id);
+                } else if (reply_type == MSG_ACK) {
+                    printf("Cleared colony selection for client %u\n", client->id);
+                } else {
+                    printf("Rejected colony selection %u for client %u: %s\n",
+                           sel->colony_id, client->id, status.message);
+                }
             }
             break;
             
         case CMD_SPAWN_COLONY:
             if (data) {
                 CommandSpawnColony* spawn = (CommandSpawnColony*)data;
-                // Create a simple colony at the specified position
-                // This would need proper implementation using world_add_colony
-                printf("Spawn colony request at (%.1f, %.1f) by client %u\n", 
-                       spawn->x, spawn->y, client->id);
+                ProtoCommandStatus status;
+                MessageType reply_type = server_spawn_colony(server, spawn, &status);
+                server_send_command_status(server, client, reply_type, &status);
+                if (reply_type == MSG_ACK) {
+                    printf("Spawned colony %u at (%.1f, %.1f) for client %u\n",
+                           status.entity_id, spawn->x, spawn->y, client->id);
+                } else {
+                    printf("Rejected spawn colony request at (%.1f, %.1f) for client %u: %s\n",
+                           spawn->x, spawn->y, client->id, status.message);
+                }
             }
             break;
     }

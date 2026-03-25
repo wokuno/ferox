@@ -56,7 +56,8 @@ void renderer_draw_world(Renderer* renderer, const ProtoWorld* world);
 void renderer_draw_cell(Renderer* renderer, int x, int y, uint8_t r, uint8_t g, uint8_t b, bool is_border);
 void renderer_draw_border(Renderer* renderer, int world_width, int world_height);
 void renderer_draw_colony_info(Renderer* renderer, const ProtoColony* colony, const ProtoColonyDetail* detail);
-void renderer_draw_status(Renderer* renderer, uint32_t tick, int colony_count, bool paused, float speed);
+void renderer_draw_status(Renderer* renderer, uint32_t tick, int colony_count, bool paused, float speed,
+                          const ProtoCommandStatus* command_status);
 void renderer_present(Renderer* renderer);  // Output to terminal
 
 // Viewport control

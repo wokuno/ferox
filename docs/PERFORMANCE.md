@@ -98,6 +98,72 @@ Low-risk cacheline guardrails now live in shared headers for the most contended 
 
 This change is intentionally structural only: it does not alter scheduling policy, memory-order semantics, or feature defaults.
 
+## 2026-03-24 Snapshot Colony-Id Lookup Follow-up
+
+Kept:
+
+- `server_build_protocol_world_snapshot()` now builds its temporary lookup table directly by `colony_id` instead of mapping `colony_id -> world_index -> proto_index` during the grid pass.
+- The temporary lookup uses a small stack-backed `uint16_t` table for the common case and falls back to heap allocation only when the world's sparse id capacity exceeds that stack size.
+- `tests/test_phase2.c` now covers sparse high colony ids so snapshot building stays correct when only a few active colonies remain after many historical id allocations.
+
+Measured effect on this host (`FEROX_PERF_SCALE=5`, `test_perf_components`, `3` runs):
+
+- baseline `server snapshot build`: `18.75 ms`, `18.90 ms`, `18.76 ms` (median `18.76 ms`)
+- candidate `server snapshot build`: `15.38 ms`, `15.85 ms`, `15.61 ms` (median `15.61 ms`)
+- median improvement: about `16.8%`
+
+Interpretation:
+
+- This is a clean keep because all three candidate runs beat all three baseline runs.
+- The win is modest in code size but meaningful in the focused transport-build hotspot because it removes one extra dependent lookup from every occupied-cell accumulation in the snapshot grid pass.
+- The next transport-side check should confirm whether the same change also improves the broader `broadcast build snapshot` lane in repeated `test_performance_eval` runs.
+
+## 2026-03-24 Broadcast Inline-Grid Allocation Follow-up
+
+Kept:
+
+- `server_build_protocol_world_snapshot()` now allocates the inline snapshot grid directly instead of calling `proto_world_alloc_grid()` first.
+- The snapshot build path already overwrites every inline-grid cell in the following world scan, so the old eager `memset` was redundant work in the hot broadcast path.
+- `tests/test_protocol_edge.c` now round-trips a populated world-state grid so inline-grid serialization/deserialization coverage stays explicit.
+
+Measured effect on this host (`FEROX_PERF_SCALE=5`, `test_performance_eval`, `3` runs):
+
+- baseline `broadcast build snapshot`: `9.56 ms`, `9.29 ms`, `9.41 ms` (median `9.41 ms`)
+- candidate `broadcast build snapshot`: `7.01 ms`, `6.98 ms`, `7.26 ms` (median `7.01 ms`)
+- baseline `broadcast build+serialize`: `20.62 ms`, `20.47 ms`, `21.27 ms` (median `20.62 ms`)
+- candidate `broadcast build+serialize`: `17.01 ms`, `17.05 ms`, `18.02 ms` (median `17.05 ms`)
+- baseline `broadcast end-to-end (0 clients)`: `20.38 ms`, `20.22 ms`, `21.41 ms` (median `20.38 ms`)
+- candidate `broadcast end-to-end (0 clients)`: `17.22 ms`, `17.17 ms`, `17.59 ms` (median `17.22 ms`)
+
+Interpretation:
+
+- This is another clean keep because every candidate run beat every baseline run in all three broadcast metrics.
+- The focused snapshot lookup win does carry into the broader broadcast path, and removing the redundant inline-grid zero-fill contributes another measurable transport-side reduction.
+- After this keep, `build snapshot` is a smaller share of `build+serialize`, so the next narrow transport experiment should target serialization overhead rather than snapshot construction again.
+
+## 2026-03-24 One-Pass World-State Serialization Follow-up
+
+Kept:
+
+- `protocol_serialize_world_state()` now writes encoded grid payloads directly into the final world-state output buffer instead of allocating a temporary grid buffer and copying it afterward.
+- The shared raw/RLE decision logic now supports both direct-to-output world-state serialization and the standalone grid codec entry point.
+- `tests/test_protocol_edge.c` now includes a larger noisy-grid world-state roundtrip so the raw-mode-heavy path stays covered.
+
+Measured effect on this host (`FEROX_PERF_SCALE=5`, `test_performance_eval`, `3` runs):
+
+- baseline `protocol serialize only`: `13.27 ms`, `13.75 ms`, `13.85 ms` (median `13.75 ms`)
+- candidate `protocol serialize only`: `14.12 ms`, `12.91 ms`, `13.25 ms` (median `13.25 ms`)
+- baseline `broadcast build+serialize`: `16.99 ms`, `17.66 ms`, `18.05 ms` (median `17.66 ms`)
+- candidate `broadcast build+serialize`: `16.59 ms`, `16.48 ms`, `17.32 ms` (median `16.59 ms`)
+- baseline `broadcast end-to-end (0 clients)`: `17.16 ms`, `17.90 ms`, `18.04 ms` (median `17.90 ms`)
+- candidate `broadcast end-to-end (0 clients)`: `16.50 ms`, `16.51 ms`, `17.20 ms` (median `16.51 ms`)
+
+Interpretation:
+
+- This is a keep, but a modest one: medians improved and the broad transport lanes moved together, though the serialization-only lane still shows some run-to-run noise.
+- The main benefit is removing one whole temporary allocation/copy stage from the hot inline-grid world-state path while preserving wire behavior.
+- The next transport-side slice should target per-cell raw-grid encode/decode overhead rather than more buffer-lifetime churn.
+
 ## 2026-03-19 Atomic Order Audit Scope
 
 Issue `#115` is scoped as a docs-first audit of the existing C11 atomic sites,

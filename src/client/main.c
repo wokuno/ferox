@@ -231,7 +231,8 @@ static void run_demo_mode(void) {
                             g_client->local_world.tick,
                             alive,
                             g_client->local_world.paused,
-                            g_client->local_world.speed_multiplier);
+                            g_client->local_world.speed_multiplier,
+                            g_client->has_command_status ? &g_client->last_command_status : NULL);
         
         renderer_present(g_client->renderer);
         

@@ -234,11 +234,11 @@ Risk:
 
 In order:
 
-1. Dirty-tile or frontier-list telemetry that pushes beyond the current one-pass rewrite.
-2. Tiled stencil benchmark for `simulation_update_nutrients()` and the remaining transport-heavy paths.
-3. Multirate telemetry and scent update experiments.
-4. Combat broadphase extension from contested cells to tile-level mixed-frontier metadata if the combat hotspot grows again.
-5. Quantized-field perf branch if the memory-bound hypothesis still dominates.
+1. Narrow raw-grid encode per-cell overhead now that decode-helper cleanup was tried and rejected on `test_perf_unit_protocol`.
+2. Dirty-tile or frontier-list telemetry that pushes beyond the current one-pass rewrite.
+3. Tiled stencil benchmark for `simulation_update_nutrients()` and the remaining transport-heavy paths.
+4. Multirate telemetry and scent update experiments.
+5. Combat broadphase extension from contested cells to tile-level mixed-frontier metadata if the combat hotspot grows again.
 
 Implemented from this list already:
 
@@ -247,12 +247,19 @@ Implemented from this list already:
 - Combat broadphase now skips non-contested border cells and has a focused sparse-border perf test.
 - Frontier telemetry now also uses direct-index lineage histograms instead of linear bucket scans.
 - Snapshot building now uses a direct `colony_id -> proto_idx` lookup table during the grid pass instead of repeated protocol-list searches.
+- Snapshot building now also maps `colony_id -> proto_index` directly during centroid accumulation, removing the extra `world_index` indirection from the grid pass.
+- Snapshot building now also skips the redundant zero-fill in inline-grid allocation because the subsequent snapshot scan writes every grid cell unconditionally.
+- `protocol_serialize_world_state()` now writes encoded inline-grid payloads directly into the final output buffer instead of staging them in a temporary `grid_buffer` first.
 - Transport now has a no-biofilm fast path so the common zero-EPS case does not pay attenuation work in nutrient, toxin, and scent updates.
 
 Rejected from this list so far:
 
 - EPS caching inside `simulation_update_scents()` was not a win and was reverted.
 - A per-colony scalar cache for nutrient/scent update math was not a robust cross-machine win and was reverted.
+- A helper-based raw-grid decode cleanup in `protocol_deserialize_grid_rle()` regressed `test_perf_unit_protocol` noisy-grid medians and was reverted.
+- Structured spawn-feedback wiring (`MSG_ACK`/`MSG_ERROR`) is now no longer a recommended next experiment because the protocol/client correctness slice has been implemented.
+- Selection-feedback wiring is also no longer a recommended next experiment because `CMD_SELECT_COLONY` now uses the same immediate command-status surface.
+- Reset-feedback wiring is also no longer a recommended next experiment because `CMD_RESET` now uses the same immediate command-status surface and clears stale client selection state on acceptance.
 
 ## What Not To Chase First
 
