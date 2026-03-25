@@ -5,11 +5,12 @@ run correctness and performance diagnostics.
 
 ## Test Matrix
 
-Ferox currently defines **27 CTest targets** (see `ctest -N`):
+Ferox currently defines **28 CTest targets** (see `ctest -N`):
 
 - Phase suites: `Phase1Tests` .. `Phase6Tests`
 - Advanced correctness/stability: `GeneticsAdvancedTests`, `WorldAdvancedTests`,
-  `SimulationLogicTests`, `VisualStabilityTests`, `CombatSystemTests`, `GuiTests`
+  `SimulationLogicTests`, `VisualStabilityTests`, `CombatSystemTests`, `GuiTests`,
+  `ClientLogicSurfaceTests`
 - Stress and edge coverage: `SimulationStressTests`, `ThreadpoolStressTests`,
   `ProtocolEdgeTests`, `NamesExhaustiveTests`, `ColorsExhaustiveTests`,
   `WorldBranchCoverageTests`, `ServerBranchCoverageTests`
@@ -36,6 +37,9 @@ ctest --test-dir build --output-on-failure
 
 # Run quick correctness slice
 ctest --test-dir build --output-on-failure -R "Phase|SimulationLogicTests|ProtocolEdgeTests"
+
+# Run client-facing correctness slice
+ctest --test-dir build --output-on-failure -R "ClientLogicSurfaceTests|Phase5Tests|Phase6Tests"
 
 # Run perf-focused + hardware slice
 ctest --test-dir build --output-on-failure -R "HardwareProfileTests|ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerformanceComponentTests"

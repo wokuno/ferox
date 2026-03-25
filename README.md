@@ -142,6 +142,19 @@ See [SECURITY.md](SECURITY.md) for security policy and vulnerability reporting.
 - Performance profiling: `./build/tests/test_performance_profile`
 - Architecture-specific atomic-cost lane: use `FEROX_PERF_SCALE=2..10 ./build/tests/test_performance_profile` for stabler x86/ARM microbench comparisons
 
+### Autonomous Research Loop
+
+- Run one autonomous `opencode` experiment cycle with `./scripts/opencode_research_loop.sh --once`
+- Run repeated cycles with `./scripts/opencode_research_loop.sh`
+- Watch live session progress with `./scripts/opencode_research_loop.sh --show-session`
+- Each run re-researches across multiple areas, including simulation, science, UX, tooling, and site/dashboard improvements, builds its own idea list, reasons briefly in the notebook, and then chooses one experiment; prior handoff notes are advisory only
+- Local dashboard runner: `go run ./cmd/feroxclub`
+- Dashboard backend defaults to GitHub Copilot CLI SDK; use `go run ./cmd/feroxclub -backend opencode` for OpenCode support
+- Committed autonomous improvements can publish a PR and wait for CI when `PUBLIC_GH_TOKEN` and `PUBLIC_GH_USER` are set
+- Dashboard docs: `docs/FEROX_CLUB.md`
+- Prompt file: `prompts/autonomous_research_loop.md`
+- Workflow details: `docs/AUTONOMOUS_RESEARCH_LOOP.md`
+
 ### Debug Build
 
 ```bash

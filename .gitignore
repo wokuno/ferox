@@ -1,5 +1,6 @@
 # Build directories
 build/
+build-preview/
 cmake-build-*/
 out/
 
@@ -49,3 +50,8 @@ test_simulation_stress
 ferox_gui
 ferox_server
 ferox_client
+feroxclub
+
+# Autonomous opencode loop state
+artifacts/opencode-research-loop/
+artifacts/ferox-club/

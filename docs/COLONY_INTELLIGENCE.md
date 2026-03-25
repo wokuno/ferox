@@ -87,6 +87,28 @@ The graph should output:
 - directional intent that biases the existing 8-direction spread model
 - a compact human-readable summary for CLI/GUI display
 
+## Literature-Grounded Colony Objectives
+
+The ecology literature suggests that Ferox colonies should be modeled as
+balancing several competing goals rather than maximizing one growth score.
+
+- `frontier_gain`: secure new edge territory where nutrients are fresh and
+  mutations/HGT can reshape the front
+- `resource_security`: keep access to substrate while avoiding toxin-heavy or
+  resource-poor pockets
+- `kin_locality`: invest in signal/public-good behavior when benefits are likely
+  to stay local enough to reward related neighbors
+- `threat_suppression`: use toxins, alarm, and defensive states when contestable
+  borders justify the metabolic cost
+- `insurance`: maintain some slow-growing, dormant, or persister-like fraction
+  so shocks do not erase the lineage
+- `opportunistic_innovation`: exploit plasmids/HGT when local conditions make
+  transferred traits worth their carriage burden
+
+This framing is consistent with the references in
+`docs/SCIENCE_BIBLIOGRAPHY.md` and the broader survey in
+`docs/LITERATURE_REVIEW.md`.
+
 ## Genetic Model
 
 The graph should be genetically encoded and evolvable.

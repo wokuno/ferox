@@ -10,6 +10,25 @@ This document explains how the simulation works, including the world grid, tick 
 - **Scent/quorum/biofilm/dormancy/persister switching**: quorum uses an explicit production-diffusion-degradation field; colony `signal_strength` is derived from local field concentration plus density drive, then thresholded by `quorum_threshold`; biofilm grows/decays each tick and EPS-rich biofilm reduces effective diffusivity for nutrient/toxin/signal transport; stress also drives active<->persister switching (`persister_entry_stress`, `persister_exit_stress`, entry/exit rates), while dormancy remains the deeper high-protection mode.
 - **HGT kinetics**: adjacent enemy colonies exchange plasmid-like material using donor/recipient/transconjugant rates, with optional plasmid cost and segregation loss controlled by `world->hgt_kinetics`; aggregate metrics are tracked in `world->hgt_metrics`.
 
+## Literature-Grounded Modeling Priorities
+
+- Ferox should increasingly behave like a frontier-limited colony model with an
+  active shell and a more quiescent interior, rather than treating all occupied
+  cells as equally expansion-capable.
+- Nutrient, toxin, and signal fields should remain explicit and benchmarked;
+  the literature consistently treats transport limitations and EPS-modified
+  diffusivity as core morphology drivers.
+- Contact outcomes should preserve enough stochasticity and local context to
+  avoid artificial lattice/checkerboard artifacts that overwhelm sectoring and
+  frontier drift.
+- Mechanical crowding, shoving, and substrate-coupled behavior are now important
+  missing ingredients compared with recent colony mechanics work.
+- Validation should compare morphology, active-shell thickness, sector widths,
+  coexistence duration, and transport attenuation, not only throughput.
+
+See `docs/LITERATURE_REVIEW.md` and `docs/SCIENCE_BIBLIOGRAPHY.md` for the
+papers, reviews, and open-source simulators behind these priorities.
+
 ## Expensive-Trait Cost Accounting
 
 To prevent all lineages converging on universal max values, expensive social traits now add an explicit energetic burden that feeds both growth and survival.

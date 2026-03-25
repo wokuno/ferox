@@ -25,6 +25,10 @@ add_executable(test_phase5 test_phase5.c)
 target_link_libraries(test_phase5 PRIVATE ferox_client_lib ferox_server_lib)
 add_test(NAME Phase5Tests COMMAND test_phase5)
 
+# Client logic surface tests
+add_executable(test_client_logic_surface test_client_logic_surface.c)
+add_test(NAME ClientLogicSurfaceTests COMMAND test_client_logic_surface)
+
 # Phase 6 - Full system tests
 add_executable(test_phase6 test_phase6.c)
 target_link_libraries(test_phase6 PRIVATE ferox_client_lib ferox_server_lib)
@@ -107,6 +111,12 @@ add_executable(test_world_branch_coverage test_world_branch_coverage.c)
 target_link_libraries(test_world_branch_coverage PRIVATE ferox_server_lib)
 target_compile_definitions(test_world_branch_coverage PRIVATE STANDALONE_TEST)
 add_test(NAME WorldBranchCoverageTests COMMAND test_world_branch_coverage)
+
+# Server branch coverage tests
+add_executable(test_server_branch_coverage test_server_branch_coverage.c)
+target_link_libraries(test_server_branch_coverage PRIVATE ferox_server_lib)
+target_compile_definitions(test_server_branch_coverage PRIVATE STANDALONE_TEST)
+add_test(NAME ServerBranchCoverageTests COMMAND test_server_branch_coverage)
 
 # Broad performance evaluation tests
 add_executable(test_performance_eval test_performance_eval.c)
