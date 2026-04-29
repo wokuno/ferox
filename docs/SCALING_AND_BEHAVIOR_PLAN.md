@@ -12,6 +12,9 @@ worlds, richer colony behavior, and the follow-on work now tracked in GitHub.
   colony lifecycle state, signaling, biofilm, drift, and learning dynamics
 - signal, alarm, and horizontal gene-transfer systems are now exercised in the
   simulation instead of remaining mostly dormant data-model features
+- neighborhood topology is explicit: 8-neighbor growth/motility is separate
+  from 4-neighbor structural contact, and border flags are refreshed before
+  combat/telemetry-style consumers use them
 - world broadcast prep no longer rescans the full grid once per colony; grid
   export and colony centroid accumulation now happen in a single pass
 - large worlds above the inline snapshot threshold now stream grid chunks over

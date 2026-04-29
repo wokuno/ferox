@@ -476,7 +476,7 @@ Controls **directional preference** for colony growth.
 - High NE (1) + SW (5): Diagonal growth pattern
 - All equal (~0.5): Radial expansion
 
-**Note:** Current implementation uses 4-connectivity spreading (N, E, S, W only), but spread_weights are defined for 8 directions for future expansion.
+**Note:** Growth and motility use the 8-neighbor Moore neighborhood in the active runtime. Structural contact systems such as division, combat, pressure, and gene transfer still use 4-neighbor edge contact.
 
 ---
 

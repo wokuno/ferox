@@ -91,6 +91,25 @@ static void fill_colony_rect(World* world, uint32_t colony_id, int start_x, int 
     }
 }
 
+static void configure_always_spread_colony(Colony* colony) {
+    colony->genome.spread_rate = 1.0f;
+    colony->genome.metabolism = 1.0f;
+    colony->genome.nutrient_sensitivity = 0.0f;
+    colony->genome.toxin_sensitivity = 0.0f;
+    colony->genome.quorum_threshold = 1.0f;
+    colony->genome.density_tolerance = 1.0f;
+    colony->genome.social_factor = 0.0f;
+    colony->genome.motility = 0.0f;
+    colony->genome.specialization = 0.0f;
+    colony->genome.biofilm_investment = 0.0f;
+    colony->behavior_actions[COLONY_ACTION_EXPAND] = 1.0f;
+    colony->behavior_actions[COLONY_ACTION_DORMANCY] = 0.0f;
+    for (int d = 0; d < DIR_COUNT; d++) {
+        colony->genome.spread_weights[d] = 4.0f;
+        colony->success_history[d] = 1.0f;
+    }
+}
+
 // ============================================================================
 // Division Logic Tests
 // ============================================================================
@@ -298,6 +317,49 @@ TEST(division_preserves_total_cell_count) {
     }
     ASSERT_EQ((int)total_cell_count, final_cells);
     
+    world_destroy(world);
+}
+
+TEST(division_splits_diagonal_only_bridge_under_structural_topology) {
+    World* world = world_create(12, 12);
+    ASSERT_NOT_NULL(world);
+
+    Colony colony = create_test_colony();
+    uint32_t id = world_add_colony(world, colony);
+
+    fill_colony_rect(world, id, 1, 2, 3, 2);
+    fill_colony_rect(world, id, 4, 4, 3, 2);
+
+    int num_components = 0;
+    int* sizes = find_connected_components(world, id, &num_components);
+    ASSERT_NOT_NULL(sizes);
+    ASSERT_EQ(num_components, 2);
+    ASSERT_EQ(sizes[0], 6);
+    ASSERT_EQ(sizes[1], 6);
+
+    free(sizes);
+    world_destroy(world);
+}
+
+TEST(division_preserves_cardinal_thin_connector) {
+    World* world = world_create(12, 12);
+    ASSERT_NOT_NULL(world);
+
+    Colony colony = create_test_colony();
+    uint32_t id = world_add_colony(world, colony);
+
+    fill_colony_rect(world, id, 1, 2, 2, 2);
+    fill_colony_rect(world, id, 5, 2, 2, 2);
+    world_get_cell(world, 3, 2)->colony_id = id;
+    world_get_cell(world, 4, 2)->colony_id = id;
+
+    int num_components = 0;
+    int* sizes = find_connected_components(world, id, &num_components);
+    ASSERT_NOT_NULL(sizes);
+    ASSERT_EQ(num_components, 1);
+    ASSERT_EQ(sizes[0], 10);
+
+    free(sizes);
     world_destroy(world);
 }
 
@@ -831,6 +893,38 @@ TEST(atomic_tick_preserves_cell_count) {
     col = world_get_colony(world, id);
     ASSERT_EQ((int)col->cell_count, 10);
     
+    atomic_world_destroy(aworld);
+    threadpool_destroy(pool);
+    world_destroy(world);
+}
+
+TEST(atomic_spread_step_refreshes_frontier_after_claims) {
+    World* world = world_create(10, 10);
+    ASSERT_NOT_NULL(world);
+
+    Colony colony = create_test_colony();
+    configure_always_spread_colony(&colony);
+    uint32_t id = world_add_colony(world, colony);
+
+    Cell* seed = world_get_cell(world, 5, 5);
+    seed->colony_id = id;
+    seed->age = 1;
+    Colony* col = world_get_colony(world, id);
+    col->cell_count = 1;
+
+    ThreadPool* pool = threadpool_create(1);
+    ASSERT_NOT_NULL(pool);
+
+    AtomicWorld* aworld = atomic_world_create(world, pool, 1);
+    ASSERT_NOT_NULL(aworld);
+    atomic_set_spread_frontier_enabled(aworld, true);
+    ASSERT_EQ(atomic_get_spread_frontier_count(aworld), 1);
+
+    atomic_spread_step(aworld);
+
+    ASSERT_GT(atomic_get_population(aworld, id), 1);
+    ASSERT_GT(atomic_get_spread_frontier_count(aworld), 1);
+
     atomic_world_destroy(aworld);
     threadpool_destroy(pool);
     world_destroy(world);
@@ -1659,6 +1753,62 @@ TEST(shape_function_smooth_with_phase) {
     ASSERT_EQ(large_jump_count, 0);
 }
 
+TEST(border_refresh_uses_cardinal_contact_not_diagonal_contact) {
+    World* world = world_create(8, 8);
+    ASSERT_NOT_NULL(world);
+
+    Colony colony = create_test_colony();
+    uint32_t id = world_add_colony(world, colony);
+    Colony enemy = create_test_colony();
+    uint32_t enemy_id = world_add_colony(world, enemy);
+
+    world_get_cell(world, 4, 4)->colony_id = id;
+    world_get_cell(world, 4, 3)->colony_id = id;
+    world_get_cell(world, 5, 4)->colony_id = id;
+    world_get_cell(world, 4, 5)->colony_id = id;
+    world_get_cell(world, 3, 4)->colony_id = id;
+    world_get_cell(world, 5, 5)->colony_id = enemy_id;
+
+    world_get_cell(world, 4, 4)->is_border = true;
+    simulation_refresh_border_flags(world);
+
+    ASSERT_FALSE(world_get_cell(world, 4, 4)->is_border);
+    ASSERT_TRUE(world_get_cell(world, 5, 4)->is_border);
+
+    world_destroy(world);
+}
+
+TEST(combat_refreshes_stale_border_flags_before_resolution) {
+    World* world = world_create(8, 8);
+    ASSERT_NOT_NULL(world);
+
+    Colony colony_a = create_test_colony();
+    colony_a.genome.aggression = 0.0f;
+    colony_a.genome.toxin_production = 0.0f;
+    uint32_t id_a = world_add_colony(world, colony_a);
+
+    Colony colony_b = create_test_colony();
+    colony_b.genome.aggression = 0.0f;
+    colony_b.genome.toxin_production = 0.0f;
+    uint32_t id_b = world_add_colony(world, colony_b);
+
+    Cell* a = world_get_cell(world, 3, 3);
+    Cell* b = world_get_cell(world, 4, 3);
+    a->colony_id = id_a;
+    a->is_border = false;
+    b->colony_id = id_b;
+    b->is_border = false;
+    world_get_colony(world, id_a)->cell_count = 1;
+    world_get_colony(world, id_b)->cell_count = 1;
+
+    simulation_resolve_combat(world);
+
+    ASSERT_TRUE(world_get_cell(world, 3, 3)->is_border);
+    ASSERT_TRUE(world_get_cell(world, 4, 3)->is_border);
+
+    world_destroy(world);
+}
+
 TEST(behavior_layers_emit_signals_and_alarms) {
     World* world = world_create(12, 12);
     ASSERT_NOT_NULL(world);
@@ -1965,6 +2115,8 @@ int run_simulation_logic_tests(void) {
     RUN_TEST(division_triggers_at_exactly_5_cells);
     RUN_TEST(division_reassigns_cells_to_new_colonies);
     RUN_TEST(division_preserves_total_cell_count);
+    RUN_TEST(division_splits_diagonal_only_bridge_under_structural_topology);
+    RUN_TEST(division_preserves_cardinal_thin_connector);
     
     printf("\nRecombination Logic Tests:\n");
     RUN_TEST(recombination_requires_compatible_genomes);
@@ -1983,6 +2135,7 @@ int run_simulation_logic_tests(void) {
     RUN_TEST(atomic_sync_to_world_writes_back);
     RUN_TEST(atomic_sync_roundtrip_preserves_state);
     RUN_TEST(atomic_tick_preserves_cell_count);
+    RUN_TEST(atomic_spread_step_refreshes_frontier_after_claims);
     
     printf("\nCell Count Stability Tests:\n");
     RUN_TEST(cell_count_stable_without_spreading);
@@ -2023,6 +2176,8 @@ int run_simulation_logic_tests(void) {
     RUN_TEST(centroid_stability);
     RUN_TEST(shape_function_deterministic);
     RUN_TEST(shape_function_smooth_with_phase);
+    RUN_TEST(border_refresh_uses_cardinal_contact_not_diagonal_contact);
+    RUN_TEST(combat_refreshes_stale_border_flags_before_resolution);
     
     printf("\n--- Simulation Logic Results ---\n");
     printf("Passed: %d\n", tests_passed);

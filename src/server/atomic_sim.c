@@ -1315,6 +1315,9 @@ void atomic_spread_step(AtomicWorld* aworld) {
     atomic_spread(aworld);
     atomic_barrier(aworld);
     atomic_spread_apply_deltas(aworld);
+    if (aworld->spread_frontier_enabled) {
+        atomic_rebuild_spread_frontier(aworld);
+    }
 }
 
 int64_t atomic_spread_apply_deltas(AtomicWorld* aworld) {

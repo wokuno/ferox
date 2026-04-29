@@ -11,6 +11,10 @@
 static const int DX[] = {0, 1, 0, -1};
 static const int DY[] = {-1, 0, 1, 0};
 
+// Direction offsets for 8-connectivity growth/motility (N, NE, E, SE, S, SW, W, NW)
+static const int DX8[] = {0, 1, 1, 1, 0, -1, -1, -1};
+static const int DY8[] = {-1, -1, 0, 1, 1, 1, 0, -1};
+
 // Environmental constants
 #define NUTRIENT_DEPLETION_RATE 0.05f   // Nutrients consumed per cell per tick
 #define NUTRIENT_REGEN_RATE 0.002f      // Natural nutrient regeneration
@@ -239,6 +243,23 @@ static bool cell_is_border(World* world, int x, int y, uint32_t colony_id) {
     }
 
     return false;
+}
+
+void simulation_refresh_border_flags(World* world) {
+    if (!world || !world->cells) return;
+
+    for (int y = 0; y < world->height; y++) {
+        for (int x = 0; x < world->width; x++) {
+            Cell* cell = world_get_cell(world, x, y);
+            if (!cell || cell->colony_id == 0) {
+                if (cell) {
+                    cell->is_border = false;
+                }
+                continue;
+            }
+            cell->is_border = cell_is_border(world, x, y, cell->colony_id);
+        }
+    }
 }
 
 static void emit_layer_signal(
@@ -538,15 +559,19 @@ static int count_enemy_neighbors(World* world, int x, int y, uint32_t colony_id)
     return count;
 }
 
-// Get directional weight for spread_weights (maps 4-direction to 8-direction weights)
+// Get directional weight for spread_weights (N, NE, E, SE, S, SW, W, NW)
 static float get_direction_weight(Genome* g, int dx, int dy) {
     // Map dx,dy to direction index
     // N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
     int dir = -1;
     if (dy == -1 && dx == 0) dir = 0;      // N
+    else if (dy == -1 && dx == 1) dir = 1; // NE
     else if (dy == 0 && dx == 1) dir = 2;  // E
+    else if (dy == 1 && dx == 1) dir = 3;  // SE
     else if (dy == 1 && dx == 0) dir = 4;  // S
+    else if (dy == 1 && dx == -1) dir = 5; // SW
     else if (dy == 0 && dx == -1) dir = 6; // W
+    else if (dy == -1 && dx == -1) dir = 7;// NW
     return dir >= 0 ? g->spread_weights[dir] : 0.5f;
 }
 
@@ -569,10 +594,10 @@ void simulation_spread(World* world) {
             Colony* colony = world_get_colony(world, cell->colony_id);
             if (!colony) continue;
             
-            // Try to spread to neighbors based on spread_rate with environmental modifiers
-            for (int d = 0; d < 4; d++) {
-                int nx = x + DX[d];
-                int ny = y + DY[d];
+            // Try to spread to growth neighbors based on spread_rate with environmental modifiers
+            for (int d = 0; d < 8; d++) {
+                int nx = x + DX8[d];
+                int ny = y + DY8[d];
                 
                 Cell* neighbor = world_get_cell(world, nx, ny);
                 if (!neighbor) continue;
@@ -582,7 +607,7 @@ void simulation_spread(World* world) {
                     float env_modifier = calculate_env_spread_modifier(world, colony, nx, ny, x, y);
                     
                     // Directional preference from genome
-                    float dir_weight = get_direction_weight(&colony->genome, DX[d], DY[d]);
+                    float dir_weight = get_direction_weight(&colony->genome, DX8[d], DY8[d]);
                     
                     // Strategic spread: push harder towards open space, less where enemies are
                     int enemy_count = count_enemy_neighbors(world, nx, ny, cell->colony_id);
@@ -900,10 +925,10 @@ void simulation_spread_region(World* world, int start_x, int start_y,
             Colony* colony = world_get_colony(world, cell->colony_id);
             if (!colony) continue;
             
-            // Try to spread to neighbors based on spread_rate
-            for (int d = 0; d < 4; d++) {
-                int nx = x + DX[d];
-                int ny = y + DY[d];
+            // Try to spread to growth neighbors based on spread_rate
+            for (int d = 0; d < 8; d++) {
+                int nx = x + DX8[d];
+                int ny = y + DY8[d];
                 
                 Cell* neighbor = world_get_cell(world, nx, ny);
                 if (!neighbor) continue;
@@ -914,7 +939,7 @@ void simulation_spread_region(World* world, int start_x, int start_y,
                     if (rand_float() < spread_chance) {
                         pending_buffer_add(pending, nx, ny, cell->colony_id);
                     }
-                } else if (neighbor->colony_id != cell->colony_id) {
+                } else if ((d % 2) == 0 && neighbor->colony_id != cell->colony_id) {
                     // Enemy cell - might overtake based on aggression vs resilience
                     Colony* enemy = world_get_colony(world, neighbor->colony_id);
                     if (enemy && enemy->active) {
@@ -1711,6 +1736,8 @@ void simulation_consume_resources(World* world) {
 // Combat resolution when colonies meet at borders
 void simulation_resolve_combat(World* world) {
     if (!world) return;
+
+    simulation_refresh_border_flags(world);
     
     // Decay existing toxins
     if (world->toxins) {

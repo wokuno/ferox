@@ -18,6 +18,9 @@ void simulation_check_divisions(World* world);
 // Detect and handle colony recombinations
 void simulation_check_recombinations(World* world);
 
+// Refresh derived structural border flags using 4-neighbor contact semantics.
+void simulation_refresh_border_flags(World* world);
+
 // Helper: flood-fill to find connected components of a colony
 // Returns array of component sizes, sets cell markers
 // Caller must free the returned array

@@ -39,6 +39,11 @@ Priority values:
 
 ## Simulation Core
 
+Current topology baseline: growth/motility use the 8-neighbor Moore
+neighborhood, while structural connectivity and contact-sensitive systems use
+4-neighbor von Neumann semantics. Border flags are derived structural metadata
+and must be refreshed before combat or telemetry consumes them.
+
 - [ ] `PERF-019` `P0` `open` Add sparse chunk/tile simulation mode for low occupancy maps.
 - [ ] `PERF-020` `P0` `open` Add dirty-tile tracking to avoid full-grid sync/scan every tick.
 - [ ] `PERF-021` `P0` `open` Add active frontier mode for spread/division candidate processing.

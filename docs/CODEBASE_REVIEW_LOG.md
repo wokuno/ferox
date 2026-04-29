@@ -1100,6 +1100,70 @@ Next ACK/baseline batch:
         - `./scripts/test.sh all`: passed `29/29`
   - then evaluate `#104` / `#161` neighborhood topology and checkerboard
     artifact behavior, documenting topology policy before code changes
+  - `#104` / `#161` starting notes:
+    - issue `#104` asks for an explicit neighborhood topology policy because
+      growth can use 8-neighbor semantics while division, border detection,
+      pressure, combat, and telemetry often still use 4-neighbor semantics
+    - issue `#161` reports late-phase checkerboard-like colony interfaces after
+      first contact; current hypotheses include mixed 4/8-neighbor semantics,
+      stale atomic border flags before serial maintenance/combat, deterministic
+      local conflict ordering, and frontier switching cadence
+    - documentation-first constraint for this slice: record the selected
+      topology and validation in `docs/SIMULATION.md` plus planning/backlog
+      docs before moving to code implementation
+    - parallel audit lanes launched:
+      - topology audit: map 4-neighbor vs 8-neighbor semantics across spread,
+        division, combat, border detection, pressure, and frontier telemetry
+      - checkerboard audit: rank atomic/serial root-cause candidates and
+        identify the smallest safe implementation/test slice
+    - external simulation research note:
+      - cellular automata literature distinguishes von Neumann 4-neighbor and
+        Moore 8-neighbor local neighborhoods; a hybrid tumor-growth study found
+        neighborhood choice can materially change morphology, with Moore
+        movement reducing square-lattice anisotropy in chemotactic/haptotactic
+        movement scenarios (Tzedakis et al. 2015,
+        `https://doi.org/10.4137/CIN.S19343`)
+      - implication for Ferox: avoid accidental mixing by naming growth
+        topology separately from physical-contact topology and by testing
+        diagonal bridge/contact cases explicitly
+    - audit findings:
+      - active `atomic_tick()` spread and spread-frontier detection use
+        8-neighbor Moore semantics
+      - serial spread paths were still cardinal-only, while division flood-fill,
+        border flags, pressure, combat, horizontal gene transfer, and frontier
+        telemetry are structurally 4-neighbor
+      - the highest-confidence checkerboard cause is stale `is_border` metadata:
+        atomic spread changes ownership but does not recompute border flags, and
+        sync copied stale flags into `World` before serial combat
+      - spread frontier lists were rebuilt only on atomic sync-from-world, so
+        default `serial_interval=5` could leave frontier scheduling stale for
+        several ticks
+    - selected policy for this slice:
+      - growth/motility uses 8-neighbor Moore semantics
+      - structural connectivity/contact systems use 4-neighbor von Neumann
+        semantics
+      - `Cell.is_border` is a derived structural cache and must be refreshed
+        before combat/telemetry-style consumers rely on it
+    - implementation notes:
+      - added `simulation_refresh_border_flags()` and call it at combat entry so
+        stale atomic sync metadata cannot suppress border combat/toxin logic
+      - active frontier tracking now rebuilds after each atomic spread step when
+        frontier mode is enabled, decoupling frontier freshness from serial
+        maintenance cadence
+      - serial growth paths now see 8-neighbor empty targets, while legacy
+        region enemy takeover remains cardinal-only to preserve the contact
+        policy
+      - added tests for diagonal-only structural splits, cardinal thin
+        connectors, border refresh semantics, stale combat border refresh, and
+        atomic frontier refresh after claims
+    - validation so far:
+      - `cmake --build build --target test_simulation_logic test_performance_eval test_phase3 ferox_server`: passed
+      - `ctest --test-dir build --output-on-failure -R "SimulationLogicTests|Phase3Tests|PerformanceEvalTests"`: passed `3/3`
+      - pre-commit review subagent found no blocking issues and confirmed
+        `scripts/run.sh` is unrelated and should remain unstaged
+      - `git diff --check`: passed
+      - `./scripts/test.sh quick`: passed `25/25`
+      - `./scripts/test.sh all`: passed `29/29`
 - Wait-backend refactor:
   - moved platform-specific worker park/unpark logic out of `atomic_sim.c` and into a dedicated `phase_wait` backend layer
   - `atomic_sim.c` now depends only on atomic sequencing plus a narrow `phase_wait_eq` / `phase_wake_all` / `phase_wait_backoff` interface

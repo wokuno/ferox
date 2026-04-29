@@ -293,6 +293,24 @@ static const int DX8[] = {0, 1, 1, 1, 0, -1, -1, -1};
 static const int DY8[] = {-1, -1, 0, 1, 1, 1, 0, -1};
 ```
 
+### Neighborhood Topology Policy
+
+Ferox intentionally uses two local topologies:
+
+- Growth and motility use the 8-neighbor Moore neighborhood. This lets expanding
+  colonies fill diagonals and reduces the diamond-shaped lattice bias that pure
+  4-neighbor movement can introduce on a square grid.
+- Structural contact uses the 4-neighbor von Neumann neighborhood. Division
+  flood-fill, border flags, enemy pressure, combat, horizontal gene transfer,
+  and frontier telemetry treat only edge-sharing cells as connected or in
+  contact. A diagonal bridge alone is not structural connectivity.
+
+`Cell.is_border` is a derived cache for the structural topology. It can become
+stale immediately after spread, atomic sync, combat, or death changes grid
+ownership, so combat and behavior/telemetry updates refresh border flags before
+using them. Tests cover diagonal-only bridges and stale border refresh so future
+changes do not silently mix these two topologies.
+
 ### Atomic Compare-and-Swap (CAS)
 
 The key insight is using CAS for cell ownership instead of locks or pending buffers:
