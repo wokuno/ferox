@@ -5,21 +5,20 @@ run correctness and performance diagnostics.
 
 ## Test Matrix
 
-Ferox currently defines **25 CTest targets** (see `ctest -N`):
+Ferox currently defines **27 CTest targets** (see `ctest -N`):
 
 - Phase suites: `Phase1Tests` .. `Phase6Tests`
 - Advanced correctness/stability: `GeneticsAdvancedTests`, `WorldAdvancedTests`,
-  `SimulationLogicTests`, `VisualStabilityTests`, `CombatSystemTests`, `GuiTests`
+  `SimulationLogicTests`, `VisualStabilityTests`, `RdControlsTests`,
+  `CombatSystemTests`, `GuiTests`
 - Stress and edge coverage: `SimulationStressTests`, `ThreadpoolStressTests`,
   `ProtocolEdgeTests`, `NamesExhaustiveTests`, `ColorsExhaustiveTests`
+- Science/regression checks: `ScienceBenchmarkConfigTests`,
+  `SimulationStatRegressionTests`
 - Runtime detection coverage: `HardwareProfileTests`
-- Performance diagnostics:
-  - `PerformanceProfilingTests`
-  - `ThreadpoolMicrobenchTests`
-  - `ThreadpoolProfileScanTests`
-  - `PerfUnitWorldTests`
-  - `PerfUnitProtocolTests`
-  - `PerfComponentAtomicTests`
+- Performance diagnostics: `SimdEvalTests`, `PerformanceEvalTests`,
+  `PerformanceComponentTests`, `PerformanceProfilingTests`,
+  `PerfUnitProtocolTests`
 - Aggregated runner: `AllTests`
 
 Sources are in `tests/` and wired in `tests/CMakeLists.txt`.
@@ -37,7 +36,7 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build --output-on-failure -R "Phase|SimulationLogicTests|ProtocolEdgeTests"
 
 # Run perf-focused + hardware slice
-ctest --test-dir build --output-on-failure -R "HardwareProfileTests|ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerfComponentAtomicTests"
+ctest --test-dir build --output-on-failure -R "HardwareProfileTests|SimdEvalTests|PerformanceEvalTests|PerformanceComponentTests|PerformanceProfilingTests|PerfUnitProtocolTests"
 ```
 
 You can also use helper categories in `scripts/test.sh`, for example:
@@ -46,31 +45,38 @@ You can also use helper categories in `scripts/test.sh`, for example:
 ./scripts/test.sh all
 ./scripts/test.sh quick
 ./scripts/test.sh phase3
+./scripts/test.sh science
 ./scripts/test.sh coverage
 ```
+
+Filtered helper categories fail if their CTest regex matches zero targets. This
+keeps category drift visible when test names or CMake registrations change.
 
 ## Performance Test Ladder
 
 Performance work is validated at three levels:
 
 - `unit`
-  - `test_perf_unit_world`
   - `test_perf_unit_protocol`
 - `component`
-  - `test_perf_component_atomic`
-  - `test_threadpool_profile_scan`
+  - `test_simd_eval`
+  - `test_perf_components`
 - `system`
-  - `test_threadpool_microbench`
+  - `test_performance_eval`
   - `test_performance_profile`
+
+Some historical performance diagnostics are registered only when their source
+files exist in `tests/`. Use `ctest -N` as the source of truth for the active
+matrix in a checkout.
 
 For jitter-resistant analysis, run multi-iteration medians:
 
 ```bash
-./scripts/perf_multi_iter.py -n 7 --profile balanced
+python3 scripts/perf_scenarios.py --build-types Release --scales 1 --repeats 3
 ```
 
-See `docs/PERF_RUNBOOK.md` and `docs/PERF_TARGETS.md` for required commands and
-acceptance thresholds.
+See `docs/PERF_RUNBOOK.md` and `docs/PERFORMANCE_BACKLOG.md` for required
+commands and current target-setting notes.
 
 ## Environment Knobs Used in Tests
 

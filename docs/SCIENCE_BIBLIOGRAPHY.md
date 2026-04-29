@@ -4,6 +4,10 @@ This bibliography links peer-reviewed colony-modeling literature to Ferox mechan
 
 DOI resolution was validated on 2026-02-23 using Crossref and/or DOI resolver endpoints.
 
+For the broader April 2026 research pass on biology mechanisms, ABM/IBM
+validation, benchmark design, and sensitivity analysis, see
+[Biology And Simulation Research Notes](BIOLOGY_SIMULATION_RESEARCH.md).
+
 ## Source-to-Subsystem Mapping
 
 | Ferox subsystem/mechanic | Why it is modeled this way | Sources |

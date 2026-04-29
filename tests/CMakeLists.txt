@@ -1,5 +1,7 @@
 # Test executables for each phase
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
 # Phase 1 - Basic shared library tests
 add_executable(test_phase1 test_phase1.c)
 target_link_libraries(test_phase1 PRIVATE ferox_shared)
@@ -81,6 +83,25 @@ add_executable(test_simulation_logic test_simulation_logic.c)
 target_link_libraries(test_simulation_logic PRIVATE ferox_server_lib)
 target_compile_definitions(test_simulation_logic PRIVATE STANDALONE_TEST)
 add_test(NAME SimulationLogicTests COMMAND test_simulation_logic)
+
+# Simulation statistical regression tests
+add_executable(test_simulation_stat_regression test_simulation_stat_regression.c)
+target_link_libraries(test_simulation_stat_regression PRIVATE ferox_server_lib)
+target_compile_definitions(test_simulation_stat_regression PRIVATE STANDALONE_TEST)
+add_test(NAME SimulationStatRegressionTests COMMAND test_simulation_stat_regression)
+set_tests_properties(SimulationStatRegressionTests PROPERTIES
+    TIMEOUT 180
+    LABELS "science;regression")
+
+# Science benchmark scenario configuration checks
+add_test(
+    NAME ScienceBenchmarkConfigTests
+    COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/scripts/science_benchmarks.py
+            validate --strict)
+set_tests_properties(ScienceBenchmarkConfigTests PROPERTIES
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    LABELS "science")
 
 # Visual stability stress tests
 add_executable(test_visual_stability test_visual_stability.c)

@@ -48,6 +48,9 @@ jobs:
           cd build
           ctest --output-on-failure -V --timeout 600 -C "${{ matrix.build_type }}" | tee ctest.log
           test_exit_code=${PIPESTATUS[0]}
+          if grep -q "No tests were found" ctest.log || grep -q "Total Tests: 0" ctest.log; then
+            test_exit_code=1
+          fi
           python3 - <<'PY'
           import os
           import re
@@ -101,6 +104,9 @@ jobs:
           cd build
           ctest --output-on-failure --timeout 600 -C "${{ matrix.build_type }}" -R "SimulationStatRegressionTests" -V | tee stat-regression.log
           stat_exit_code=${PIPESTATUS[0]}
+          if grep -q "No tests were found" stat-regression.log || grep -q "Total Tests: 0" stat-regression.log; then
+            stat_exit_code=1
+          fi
           python3 - <<'PY'
           import os
           import re
@@ -203,6 +209,9 @@ jobs:
           cd build
           ctest --output-on-failure -V --timeout 600 -C "${{ matrix.build_type }}" | tee ctest.log
           test_exit_code=${PIPESTATUS[0]}
+          if grep -q "No tests were found" ctest.log || grep -q "Total Tests: 0" ctest.log; then
+            test_exit_code=1
+          fi
           python3 - <<'PY'
           import os
           import re
@@ -256,6 +265,9 @@ jobs:
           cd build
           ctest --output-on-failure --timeout 600 -C "${{ matrix.build_type }}" -R "SimulationStatRegressionTests" -V | tee stat-regression.log
           stat_exit_code=${PIPESTATUS[0]}
+          if grep -q "No tests were found" stat-regression.log || grep -q "Total Tests: 0" stat-regression.log; then
+            stat_exit_code=1
+          fi
           python3 - <<'PY'
           import os
           import re
@@ -352,9 +364,16 @@ jobs:
           cmake --build build-coverage -j$(nproc)
 
       - name: Run tests for coverage
+        shell: bash
         run: |
+          set +e
           cd build-coverage
-          ctest --output-on-failure --timeout 600 -C Debug -E "(PerformanceEvalTests|AllTests)"
+          ctest --output-on-failure --timeout 600 -C Debug -E "(PerformanceEvalTests|AllTests)" | tee coverage-ctest.log
+          coverage_exit_code=${PIPESTATUS[0]}
+          if grep -q "No tests were found" coverage-ctest.log || grep -q "Total Tests: 0" coverage-ctest.log; then
+            coverage_exit_code=1
+          fi
+          exit "$coverage_exit_code"
 
       - name: Generate coverage summary
         run: |
@@ -396,9 +415,16 @@ jobs:
           cmake --build build-coverage -j$(sysctl -n hw.ncpu)
 
       - name: Run tests for coverage
+        shell: bash
         run: |
+          set +e
           cd build-coverage
-          ctest --output-on-failure --timeout 600 -C Debug -E "(PerformanceEvalTests|AllTests)"
+          ctest --output-on-failure --timeout 600 -C Debug -E "(PerformanceEvalTests|AllTests)" | tee coverage-ctest.log
+          coverage_exit_code=${PIPESTATUS[0]}
+          if grep -q "No tests were found" coverage-ctest.log || grep -q "Total Tests: 0" coverage-ctest.log; then
+            coverage_exit_code=1
+          fi
+          exit "$coverage_exit_code"
 
       - name: Generate coverage summary
         run: |

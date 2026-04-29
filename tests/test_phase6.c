@@ -154,6 +154,47 @@ static int test_renderer_write_adds_text_to_buffer(void) {
     return 1;
 }
 
+static int test_renderer_writef_handles_output_larger_than_stack_scratch(void) {
+    Renderer* r = renderer_create();
+    if (!r) return 0;
+
+    r->buffer_used = 0;
+
+    char long_text[700];
+    memset(long_text, 'A', sizeof(long_text) - 1);
+    long_text[sizeof(long_text) - 1] = '\0';
+
+    renderer_writef(r, "%s", long_text);
+    size_t expected_len = strlen(long_text);
+
+    int ok = r->buffer_used == expected_len &&
+             memcmp(r->frame_buffer, long_text, expected_len) == 0 &&
+             r->frame_buffer[expected_len] == '\0';
+
+    renderer_destroy(r);
+    return ok;
+}
+
+static int test_renderer_write_rejects_buffer_size_overflow(void) {
+    Renderer r;
+    memset(&r, 0, sizeof(r));
+
+    char buffer[8];
+    memset(buffer, 'Z', sizeof(buffer));
+    r.frame_buffer = buffer;
+    r.buffer_size = sizeof(buffer);
+    r.buffer_used = SIZE_MAX - 1;
+
+    renderer_write(&r, "abc");
+
+    if (r.buffer_used != SIZE_MAX - 1) return 0;
+    for (size_t i = 0; i < sizeof(buffer); i++) {
+        if (buffer[i] != 'Z') return 0;
+    }
+
+    return 1;
+}
+
 // Test client creation
 static int test_client_creates_with_default_state(void) {
     Client* c = client_create();
@@ -453,6 +494,8 @@ int main(void) {
     TEST(renderer_scroll_moves_view_position);
     TEST(renderer_center_on_sets_view_position);
     TEST(renderer_write_adds_text_to_buffer);
+    TEST(renderer_writef_handles_output_larger_than_stack_scratch);
+    TEST(renderer_write_rejects_buffer_size_overflow);
     
     printf("\nColor Tests:\n");
     TEST(ansi_format_produces_valid_escape_codes);

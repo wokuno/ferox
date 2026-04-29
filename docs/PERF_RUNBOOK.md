@@ -11,36 +11,36 @@ without chasing noisy one-off results.
 
 ## Standard Benchmark Commands
 
-- Threadpool microbench:
-  - `./build/tests/test_threadpool_microbench`
-- Threadpool profile scan:
-  - `./build/tests/test_threadpool_profile_scan`
+- SIMD diagnostics:
+  - `./build/tests/test_simd_eval`
+- Performance evaluation suite:
+  - `./build/tests/test_performance_eval`
+- Component performance diagnostics:
+  - `./build/tests/test_perf_components`
 - Performance profile suite:
   - `./build/tests/test_performance_profile`
-- Unit-level world diagnostics:
-  - `./build/tests/test_perf_unit_world`
 - Unit-level protocol diagnostics:
   - `./build/tests/test_perf_unit_protocol`
-- Component-level atomic diagnostics:
-  - `./build/tests/test_perf_component_atomic`
 - Hardware profile inspection:
   - `./build/src/server/ferox_server --print-hardware`
 - Focused ctest suite:
-  - `ctest --test-dir build --output-on-failure -R "ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerfComponentAtomicTests|ThreadpoolStressTests|SimulationLogicTests"`
+  - `ctest --test-dir build --output-on-failure -R "HardwareProfileTests|SimdEvalTests|PerformanceEvalTests|PerformanceComponentTests|PerformanceProfilingTests|PerfUnitProtocolTests|ThreadpoolStressTests|SimulationLogicTests"`
 - Jitter-reduced summary (multi-iteration):
-  - `./scripts/perf_multi_iter.py -n 7 --profile balanced`
+  - `python3 scripts/perf_scenarios.py --build-types Release --scales 1 --repeats 3`
 
 ## Granularity Ladder
 
 - `unit`:
-  - `test_perf_unit_world` (lookup and world churn micro-cost)
   - `test_perf_unit_protocol` (RLE grid codec + chunked grid transport throughput/ratio)
 - `component`:
-  - `test_perf_component_atomic` (atomic tick pipeline modes)
-  - `test_threadpool_profile_scan` (scheduler profile behavior)
+  - `test_simd_eval` (SIMD-oriented simulation loop diagnostics)
+  - `test_perf_components` (component hotspots such as nutrients, scents, combat, frontier telemetry, and snapshot build cost)
 - `system`:
-  - `test_threadpool_microbench` (cross-scenario scheduler matrix)
-  - `test_performance_profile` (end-to-end hotspots, including snapshot build cost)
+  - `test_performance_eval` (end-to-end timing diagnostics)
+  - `test_performance_profile` (hotspot profile report)
+
+Some historical benchmark binaries are source-gated in `tests/CMakeLists.txt`.
+Use `ctest -N` as the source of truth for the active target set in a checkout.
 
 ## Environment Guidance
 
@@ -123,11 +123,15 @@ Profile presets are tuned as follows:
 
 ## Profiling Workflow
 
-- Use `scripts/profile.sh` for a capture wrapper around Linux `perf`.
-- Use `scripts/profile_c2c.sh` to inspect false-sharing/cacheline contention hot spots.
-- Start with CPU flamegraph-style capture, then inspect lock and cache contention.
+- Start with `test_performance_profile` and the component tests to identify the
+  hot path before taking platform profiler captures.
+- On Linux hosts, use `perf` or equivalent host tools directly against the
+  focused test binary that owns the hot path.
+- For scheduler or atomic-runtime work, run one long stress/perf binary at a
+  time on the same host to avoid measuring local contention from another test.
 
 ## Artifact Export
 
-- Use `scripts/benchmark_export.sh` to collect benchmark + ctest outputs into a timestamped artifact directory.
+- `scripts/perf_scenarios.py` writes timestamped reports under `artifacts/perf/`
+  by default, including raw logs, JSON summaries, CSV metrics, and `report.md`.
 - This output is suitable for nightly baseline diffs and historical tracking.

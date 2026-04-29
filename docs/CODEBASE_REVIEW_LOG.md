@@ -518,6 +518,196 @@ Progress:
     - `atomic_tick (4 threads)`: about `171.31 ms`
     - atomic/serial ratio: about `0.87x`
     - `atomic_tick (1/2/4 threads)`: about `110.90 / 77.78 / 79.15 ms`
+
+## Mega Evaluation Refresh
+
+Date: 2026-04-29
+
+Status: In progress
+
+Scope:
+- Re-review the whole library across simulation, atomic runtime, network/protocol, client/GUI, build/test tooling, documentation, and open GitHub issue state.
+- Preserve existing local changes; the starting worktree already had an unrelated modification in `scripts/run.sh`.
+- Use parallel focused review lanes for repeated code-reading work, while keeping this file as the running audit note before moving between phases.
+- Convert only confirmed, non-duplicative findings into GitHub issues.
+- Project-management constraint from the owner: this project is fully managed on GitHub; do not inspect or update Linear or Notion for this audit.
+
+Initial repository snapshot:
+- Current branch: `main`
+- Remote: `git@github.com:wokuno/ferox.git`
+- Current open GitHub issues found via `gh issue list --state open --limit 200`: `61`
+- Open issue set is already heavily roadmap-oriented, with meta trackers for runtime/perf (`#144`), scheduler/atomics (`#145`), network/protocol (`#146`), determinism/science (`#147`), and ecology/model behavior (`#148`).
+- Current docs are extensive but internally inconsistent in places: the top-level README still uses older build/test examples, while `docs/README.md` and `docs/PROGRESS.md` describe newer scripts and performance workflows.
+
+Next:
+- Run focused parallel code reviews for server/simulation, networking/protocol, UI/client, and docs/tests.
+- Run local baseline build/test and text scans.
+- Research current best-fit references for simulation validation, reproducibility, C network protocol hardening, and C concurrency/performance practice.
+
+Build baseline:
+- `./scripts/build.sh release` completed successfully on macOS with AppleClang 17.
+- The build is not warning-clean under the default `-Wall -Wextra -Wpedantic` policy:
+  - `src/server/hardware_profile.c` emits unused-function warnings for helper functions that are not used on the active platform path.
+  - `src/client/main.c` and `tests/test_phase6.c` emit missing-field-initializer warnings for positional `ProtoColony` literals after the protocol struct grew a `shape_evolution` field.
+- Follow-up classification: this is a real build-hygiene issue, but it may be covered by open issue `#163` unless its scope is limited to docs/test references.
+
+Next:
+- Run the current CTest matrix and separate sandbox/environment failures from functional failures.
+
+Test baseline:
+- `ctest --test-dir build --output-on-failure -j 4` passed locally.
+- Result: `25/25` tests passed.
+- Wall time: `18.40s`.
+- This current matrix is larger than the March baseline (`25` tests now vs `21` then), and includes component/perf diagnostics plus `AllTests`.
+
+Current interpretation:
+- Functional regression signal is green on the local Release build.
+- The immediate confirmed problems are therefore not failing tests, but warning hygiene, documentation drift, and risk areas that need deeper code inspection or targeted tests.
+
+Next:
+- Inspect high-risk code paths locally while the parallel review lanes finish.
+
+Local high-risk inspection:
+- Network receive path: confirmed the current server and terminal client switch sockets from nonblocking to blocking after `net_has_data()` before reading a complete framed message (`src/server/server.c:943`, `src/client/client.c:349`). A fragmented peer can therefore stall the simulation or terminal client after only part of a header/payload is readable. The GUI keeps the socket nonblocking but calls the same exact-read helper (`src/gui/gui_client.c:456`), so a fragmented but valid frame can be treated as a receive error instead of buffered partial progress.
+- Existing coverage: open issue `#162` already cites the relevant paths and calls for fragmented-read, `EAGAIN`, and slow-client tests; issue `#99` covers lock-held server send work. Do not open a duplicate unless a narrower implementation issue is needed later.
+- Protocol shape: `protocol_deserialize_command()` has no payload length parameter, so malformed short command payloads cannot be bounded locally (`src/shared/protocol.c:625`). This should be solved as part of `#162` / `#146` protocol hardening.
+- Docs drift: `docs/PROGRESS.md`, `docs/TESTING.md`, `docs/PERF_RUNBOOK.md`, and `docs/README.md` reference missing files/scripts including `docs/PERF_TARGETS.md`, `scripts/perf_multi_iter.py`, `scripts/profile.sh`, `scripts/profile_c2c.sh`, and `scripts/benchmark_export.sh`.
+- Existing coverage: issue `#163` already covers broken docs/scripts/test target references, so this audit should not duplicate it.
+
+Next:
+- Continue issue triage and wait for focused review agents.
+
+GitHub issue triage snapshot:
+- Current open issue count from `gh issue list --state open --limit 200`: `59`.
+- Priority `p0` issues are concentrated in network/protocol reliability and core perf/runtime:
+  - `#146`, `#144`, `#140`, `#139`, `#134`, `#128`, `#127`, `#123`, `#122`, `#117`, `#99`, `#97`.
+- Priority `p1` covers most active roadmap/science/model/build work, including warning/docs cleanup (`#163`) and network hardening (`#162`).
+- Priority `p2` is mostly exploratory/backlog (`#138`, `#137`, `#133`, `#126`, `#121`, `#114`).
+
+Next:
+- Run a sanitizer build/test baseline to look beyond the green Release CTest matrix.
+
+Sanitizer baseline:
+- `./scripts/build.sh sanitize` completed successfully with the same warning classes as the Release build.
+- `ctest --test-dir build --output-on-failure -j 4` passed under sanitizer instrumentation.
+- Result: `25/25` tests passed.
+- Wall time: `255.49s`; the sanitizer `VisualStabilityTests` run dominated at about `254.87s`.
+
+Parallel review synthesis:
+- All review lanes reported that the current green CTest matrix does not cover several files that exist in `tests/`, including `test_simulation_stat_regression.c`, `test_frontier_metrics.c`, `test_parallel_edge.c`, `test_simulation_common.c`, `test_client_input_surface.c`, and `test_renderer_logic_surface.c`.
+- Network/protocol lane and server/runtime lane converged on the same high-risk bug class: partial inbound frames and short command payloads can block or read outside valid payload bounds because current receive and command decode APIs are exact-read / lengthless.
+- UI lane found one likely new memory-safety issue in the terminal renderer buffer formatting path: `ensure_buffer_space()` does not signal allocation failure, and `renderer_writef()` can copy `vsnprintf()`'s would-have-written byte count from a fixed 512-byte stack buffer.
+- Build/docs lane found that CI and scripts reference test targets or filters that can match zero tests, especially `SimulationStatRegressionTests` and lowercase category filters in `scripts/test.sh`.
+- Simulation/runtime lane found that `src/server/simulation_common.c` appears stale or experimental: it is not wired into the server build and reportedly does not compile if compiled directly because it references persister genome fields that are absent from `Genome`.
+
+Issue handling plan:
+- Do not duplicate broad existing issues:
+  - `#162` already covers fragmented frames, slow clients, and chunked-update recovery.
+  - `#99` already covers lock-held broadcast I/O and slow-client isolation.
+  - `#163` already covers warning-sensitive code and broken docs/test references.
+  - `#147` / `#100` cover exact replay and RNG determinism.
+  - `#146` is the network/protocol umbrella.
+- Open new, narrower GitHub issues only for confirmed gaps that are not already explicit:
+  - terminal renderer buffer memory safety
+  - length-bounded command decode / short-payload hardening if not already present as an exact issue
+  - CI/script test discovery no-op behavior if not already captured explicitly by `#163`
+  - stale `simulation_common.c` build/docs status if not already captured explicitly
+
+Next:
+- Verify exact duplicate status on GitHub, then create targeted issues for the non-duplicative findings.
+
+Duplicate/verification checks:
+- Exact open-issue searches returned no matches for:
+  - `renderer buffer memory safety`
+  - `command payload length`
+  - `SimulationStatRegressionTests`
+  - `simulation_common`
+- Local `ctest -N -R SimulationStatRegressionTests` confirmed `Total Tests: 0`.
+- Local `ctest -N -R genetics` confirmed `Total Tests: 0`, while `ctest -N -R Genetics` finds `GeneticsAdvancedTests`.
+- Local `ctest -N -E stress` still listed `SimulationStressTests` and `ThreadpoolStressTests`, confirming lowercase exclusion filters do not exclude CamelCase stress targets.
+- Direct scratch compile of `src/server/simulation_common.c` failed because `Genome` has no `persister_entry_stress`, `persister_exit_stress`, `persister_entry_rate`, or `persister_exit_rate` fields.
+
+Next:
+- Create targeted GitHub issues for the newly confirmed non-duplicate work.
+
+New GitHub issues opened:
+- `#171` `ui: harden terminal renderer buffer writes and formatted output`
+- `#172` `protocol: make command deserialization length-bounded for short payloads`
+- `#173` `ci/test: wire stat regression and fix CTest filters that match zero tests`
+- `#174` `model: resolve stale simulation_common persister refactor code and docs`
+
+Next:
+- Do the external research pass and map references back to the existing/opened workstreams.
+
+Research pass:
+- POSIX/Open Group `recv()` and `send()` semantics back the network findings:
+  - Stream sockets ignore message boundaries and return data as it becomes available, so Ferox must own frame assembly instead of assuming a whole protocol frame is ready after `select()`.
+  - Nonblocking `recv()` / `send()` may fail with `EAGAIN` or `EWOULDBLOCK`; treating those as fatal without preserving partial frame state is a protocol bug, not just a UX issue.
+  - Source: https://pubs.opengroup.org/onlinepubs/9799919799/functions/recv.html and https://pubs.opengroup.org/onlinepubs/000095399/functions/send.html
+- C string/buffer guidance backs issue `#171`:
+  - SEI CERT C STR31-C frames insufficient destination storage as a high-priority string/buffer risk.
+  - `vsnprintf()` returns the size that would have been written when output is truncated, so using that return value to copy from a fixed stack buffer is incorrect unless the code first verifies it fits.
+  - Sources: https://wiki.sei.cmu.edu/confluence/spaces/c/pages/87152048/STR31-C.%2BGuarantee%2Bthat%2Bstorage%2Bfor%2Bstrings%2Bhas%2Bsufficient%2Bspace%2Bfor%2Bcharacter%2Bdata%2Band%2Bthe%2Bnull%2Bterminator and https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/vsnprintf-vsnprintf-vsnprintf-l-vsnwprintf-vsnwprintf-l
+- CTest research backs issue `#173`:
+  - `-R` and `-E` are regular-expression filters over test names.
+  - Label filters (`-L` / `-LE`) are the right primitive for categories once tests have labels.
+  - Modern CTest supports `--no-tests=error`, which is a direct mitigation for CI selections that accidentally match zero tests.
+  - Sources: https://cmake.org/cmake/help/v3.29/manual/ctest.1.html and https://cmake.org/cmake/help/latest/command/ctest_test.html
+- Sanitizer research:
+  - Current Ferox ASan/UBSan build is useful and green, but it does not cover unregistered tests or concurrency race classes.
+  - Clang ThreadSanitizer is specifically intended to detect data races and should be considered for legacy `parallel_*`, server client/session state, and any future replay/determinism work.
+  - Sources: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html and https://clang.llvm.org/docs/ThreadSanitizer.html
+- Simulation/science documentation research:
+  - The ODD protocol is the established documentation structure for agent/individual-based models and has explicit goals around clarity, replication, structural realism, design rationale, and evaluation.
+  - Ferox docs should use ODD-style separation for entities/state variables, process scheduling, initialization, inputs, submodels, stochasticity, and observation metrics instead of mixing live behavior, planned behavior, and stale code.
+  - Sources: https://www.usgs.gov/publications/odd-protocol-describing-agent-based-and-other-simulation-models-a-second-update and https://www.usgs.gov/publications/odd-protocol-a-review-and-first-update
+
+Research-backed prioritization:
+- Highest near-term correctness/security work:
+  1. `#172` length-bound command decoding and pair it with partial-frame state-machine work under `#162`.
+  2. `#173` make CI/test discovery truthful before relying on pass/fail status.
+  3. `#171` renderer buffer safety, because it is local and bounded.
+- Highest near-term reliability work already tracked:
+  1. `#99` queued/coalesced sends and no socket I/O under `clients_mutex`.
+  2. `#162` fragmented frames, slow clients, chunk loss/recovery, and receive-side cleanup.
+- Highest near-term model/docs work:
+  1. `#174` decide the fate of stale `simulation_common.c`.
+  2. `#147` / `#100` define exact replay vs statistical reproducibility honestly.
+  3. Use ODD-style docs to reconcile active model code with planned ecology work.
+
+Biology and simulation research expansion:
+- Added `docs/BIOLOGY_SIMULATION_RESEARCH.md` as the April 2026 consolidated
+  research note for biology mechanisms, ABM/IBM validation, numerical guardrails,
+  benchmark design, and uncertainty/sensitivity analysis.
+- Biology lanes mapped Ferox to published mechanisms:
+  - frontier drift and sectoring: active frontier metrics should separate
+    physical exclusion from mutation/genome divergence.
+  - mechanical pressure and shoving: Ferox should model pressure as local growth
+    inhibition plus bounded push/relax priority, not as a full continuous cell
+    mechanics solver.
+  - EPS/biofilm behavior: keep EPS as cost plus local transport/stress modifier,
+    and reconcile docs that describe transport APIs not visible in current code.
+  - chemotaxis/quorum: split nutrient taxis, self-attractant taxis, and
+    density/signal-threshold quorum state.
+  - competition/social traits: add non-transitive producer/resistant/sensitive
+    archetypes, public-good benefit radius, and cheater/assortment metrics.
+  - persistence/HGT: treat persistence as subpopulation bet-hedging and HGT as
+    plasmid-like transfer with cost, loss, competence, and biofilm/density
+    coupling.
+- Simulation-method lanes mapped Ferox to ODD, MIASE, pattern-oriented
+  modeling, SBML stochastic-test thinking, and ABM sensitivity-analysis practice.
+  The most important documentation upgrades are ODD model docs, benchmark
+  provenance, exact-vs-statistical reproducibility policy, and replicate tiers.
+- Existing issues cover most model lanes: `#100`, `#101`, `#102`, `#105`,
+  `#109`, `#147`, `#164`, `#165`, `#166`, `#167`, `#168`, `#169`, `#173`,
+  and `#174`.
+- Opened `#175` for uncertainty/sensitivity analysis plus calibrated pass-band
+  provenance.
+
+Final local state:
+- Reconfigured and rebuilt `build/` back to Release after the sanitizer pass.
+- The same warning classes remain in Release: platform-specific unused helper functions in `hardware_profile.c`, positional `ProtoColony` initializer warnings in `src/client/main.c`, and similar warnings in `tests/test_phase6.c`.
+- Worktree changes from this audit are documentation-only. The pre-existing `scripts/run.sh` modification remains untouched.
     - `test_performance_eval`: `13/13` passed
     - `FEROX_PERF_SCALE=5 test_perf_components`: passed
   - comparison against the earlier pure-polling persistent runner on `paco`:
@@ -527,6 +717,113 @@ Progress:
   - interpretation:
     - parking idle workers during the serial core helps the Xeon path
     - the remaining performance bottleneck is still the serial core itself, not atomic dispatch
+
+## Open Issue Work Batch
+
+Date: 2026-04-29
+
+Status: In progress
+
+Scope:
+- Start implementation work on the highest-confidence open issues from the
+  audit instead of broad tracker churn.
+- Keep existing user/local changes intact; the unrelated `scripts/run.sh`
+  modification remains out of scope.
+- Use parallel workers for disjoint repeated issue work and keep this log
+  updated before moving between tasks.
+
+Selected first batch:
+- `#173`: make CI/test discovery truthful by registering documented science/stat
+  regression targets and hardening zero-test selections.
+- `#171`: harden terminal renderer buffer writes and formatted output.
+- `#172`: make command deserialization length-bounded for short payloads.
+
+Next:
+- Inspect the build/test registration, renderer, and protocol call sites.
+- Assign disjoint code areas to parallel workers where possible.
+
+`#173` progress:
+- Registered `SimulationStatRegressionTests` in `tests/CMakeLists.txt`.
+- Registered `ScienceBenchmarkConfigTests` as a Python-backed CTest target for
+  `scripts/science_benchmarks.py validate --strict`.
+- Hardened `scripts/test.sh` filtered categories so a regex that matches zero
+  CTest targets exits with a clear error instead of silently succeeding.
+- Corrected lowercase category filters to match current CamelCase CTest target
+  names (`Genetics`, `World`, `Protocol`, `Stress`, etc.).
+- Added CI guard logic so a statistical-regression report step fails if CTest
+  reports `Total Tests: 0`.
+- Wiring the stat regression target exposed stale baselines, so the fixed
+  24-seed thresholds were refreshed to the current local Release behavior and
+  documented in `docs/STATISTICAL_REGRESSION.md`.
+
+`#173` verification:
+- `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`: passed.
+- `cmake --build build --target test_simulation_stat_regression`: passed.
+- `ctest --test-dir build --output-on-failure -R "ScienceBenchmarkConfigTests|SimulationStatRegressionTests"`: passed `2/2`.
+- `./scripts/test.sh science`: passed.
+- `./scripts/test.sh genetics`: passed.
+
+`#171` progress:
+- Hardened `src/client/renderer.c` so buffer growth reports failure, preserves
+  the old allocation on `realloc` failure, checks size overflow, and prevents
+  writes after failed growth.
+- Reworked `renderer_writef()` to size with `vsnprintf(NULL, 0, ...)` and write
+  directly into the renderer buffer, avoiding copies from a fixed stack scratch
+  buffer when formatted output is larger than the scratch space.
+- Added Phase 6 coverage for long formatted renderer output and overflow
+  rejection.
+
+`#171` verification:
+- `cmake --build build --target test_phase6`: passed.
+- `ctest --test-dir build --output-on-failure -R Phase6Tests`: passed `1/1`.
+
+`#172` progress:
+- Changed `protocol_deserialize_command()` to accept payload length and reject
+  short/truncated command payloads before reading command-specific fields.
+- Added serialized command size constants for command type, select-colony, and
+  spawn-colony payloads.
+- Updated server `MSG_COMMAND` handling to pass `header.payload_len`.
+- Updated protocol tests for short command words, short select payloads, and
+  truncated spawn payloads.
+- Tightened command serialization so data-bearing commands reject missing data.
+
+`#172` verification:
+- `cmake --build build --target test_protocol_edge test_phase4`: passed.
+- `ctest --test-dir build --output-on-failure -R "ProtocolEdgeTests|Phase4Tests"`: passed `2/2`.
+- `ctest --test-dir build -N`: now lists `27` CTest targets.
+
+Subagent review follow-up before any commit:
+- Review confirmed the renderer and protocol changes were directionally sound,
+  then flagged remaining zero-test gaps in CI/local runners and stale protocol
+  and testing docs.
+- CI now treats both CTest zero-test forms as failures: `Total Tests: 0` and
+  `No tests were found`.
+- `scripts/test.sh all` and `scripts/test.sh coverage` now preflight the active
+  CTest registry before running raw `ctest`, matching the filtered category
+  protections.
+- Protocol docs now show the length-bounded
+  `protocol_deserialize_command(const uint8_t* buffer, size_t len, ...)`
+  signature.
+- Testing and performance docs were reconciled with the current 27-target CTest
+  matrix, while noting that some historical diagnostics are source-gated.
+- Performance workflow docs now point at the existing
+  `scripts/perf_scenarios.py` artifact workflow instead of missing historical
+  wrappers such as `scripts/perf_multi_iter.py`, `scripts/profile.sh`, and
+  `scripts/benchmark_export.sh`.
+
+Post-review verification:
+- `bash -n scripts/test.sh`: passed.
+- `git diff --check`: passed.
+- `ctest --test-dir build -N`: lists `27` tests.
+- `ctest --test-dir build --output-on-failure -R DoesNotExist`: exits `0` and
+  emits `No tests were found!!!`, confirming why the CI guard must inspect the
+  log text.
+- `./scripts/test.sh science`: passed.
+- Sandboxed `./scripts/test.sh quick` reproduced the known local-socket
+  environment failure in `Phase4Tests`/`Phase5Tests`; rerunning the same command
+  outside the sandbox passed `24/24`.
+- Unsandboxed `./scripts/test.sh all`: passed `27/27`.
+- `./scripts/test.sh perf`: passed `2/2`.
 - Wait-backend refactor:
   - moved platform-specific worker park/unpark logic out of `atomic_sim.c` and into a dedicated `phase_wait` backend layer
   - `atomic_sim.c` now depends only on atomic sequencing plus a narrow `phase_wait_eq` / `phase_wake_all` / `phase_wait_backoff` interface

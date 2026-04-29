@@ -694,8 +694,12 @@ int protocol_deserialize_world_state(const uint8_t* buffer,
 int protocol_serialize_command(CommandType cmd, const void* data, 
                                uint8_t* buffer);
 int protocol_deserialize_command(const uint8_t* buffer, 
+                                 size_t len,
                                  CommandType* cmd, void* data);
 ```
+
+Command deserialization requires the payload length so truncated command
+payloads are rejected before command-specific fields are read.
 
 ### Message I/O
 

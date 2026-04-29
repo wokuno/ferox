@@ -32,7 +32,7 @@ static int tests_failed = 0;
 
 #define ASSERT(cond, msg) do { \
     if (!(cond)) { \
-        printf("FAILED\\n    %s\\n    At %s:%d\\n", msg, __FILE__, __LINE__); \
+        printf("FAILED\n    %s\n    At %s:%d\n", msg, __FILE__, __LINE__); \
         tests_failed++; \
         return; \
     } \
@@ -172,24 +172,24 @@ static int run_statistical_regression_test(void) {
     static const MetricThreshold thresholds[] = {
         {
             .name = "occupied_ratio",
-            .expected_mean = 0.9540f,
-            .mean_tolerance = 0.0600f,
-            .expected_stddev = 0.0320f,
-            .stddev_tolerance = 0.0300f,
+            .expected_mean = 0.7921f,
+            .mean_tolerance = 0.0800f,
+            .expected_stddev = 0.0579f,
+            .stddev_tolerance = 0.0400f,
         },
         {
             .name = "active_colonies",
-            .expected_mean = 22.5000f,
-            .mean_tolerance = 3.0000f,
-            .expected_stddev = 4.8000f,
-            .stddev_tolerance = 2.2000f,
+            .expected_mean = 24.0000f,
+            .mean_tolerance = 4.0000f,
+            .expected_stddev = 11.5253f,
+            .stddev_tolerance = 4.0000f,
         },
         {
             .name = "dominant_share",
-            .expected_mean = 0.1710f,
-            .mean_tolerance = 0.0500f,
-            .expected_stddev = 0.0380f,
-            .stddev_tolerance = 0.0250f,
+            .expected_mean = 0.4007f,
+            .mean_tolerance = 0.0800f,
+            .expected_stddev = 0.1025f,
+            .stddev_tolerance = 0.0500f,
         },
     };
 

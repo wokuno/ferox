@@ -53,39 +53,63 @@ void renderer_destroy(Renderer* renderer) {
     free(renderer);
 }
 
-static void ensure_buffer_space(Renderer* r, size_t needed) {
-    if (r->buffer_used + needed >= r->buffer_size) {
-        size_t new_size = r->buffer_size * 2;
-        while (new_size < r->buffer_used + needed) {
-            new_size *= 2;
+static bool ensure_buffer_space(Renderer* r, size_t needed) {
+    if (!r || !r->frame_buffer) return false;
+    if (needed > SIZE_MAX - r->buffer_used) return false;
+
+    size_t required = r->buffer_used + needed;
+    if (required <= r->buffer_size) return true;
+
+    size_t new_size = r->buffer_size > 0 ? r->buffer_size : INITIAL_BUFFER_SIZE;
+    while (new_size < required) {
+        if (new_size > SIZE_MAX / 2) {
+            new_size = required;
+            break;
         }
-        char* new_buf = (char*)realloc(r->frame_buffer, new_size);
-        if (new_buf) {
-            r->frame_buffer = new_buf;
-            r->buffer_size = new_size;
-        }
+        new_size *= 2;
     }
+
+    char* new_buf = (char*)realloc(r->frame_buffer, new_size);
+    if (!new_buf) return false;
+
+    r->frame_buffer = new_buf;
+    r->buffer_size = new_size;
+    return true;
 }
 
 void renderer_write(Renderer* renderer, const char* str) {
+    if (!renderer || !str) return;
+
     size_t len = strlen(str);
-    ensure_buffer_space(renderer, len + 1);
+    if (len == SIZE_MAX || !ensure_buffer_space(renderer, len + 1)) return;
+
     memcpy(renderer->frame_buffer + renderer->buffer_used, str, len);
     renderer->buffer_used += len;
 }
 
 void renderer_writef(Renderer* renderer, const char* fmt, ...) {
-    char temp[512];
+    if (!renderer || !fmt) return;
+
     va_list args;
     va_start(args, fmt);
-    int len = vsnprintf(temp, sizeof(temp), fmt, args);
-    va_end(args);
-    
-    if (len > 0) {
-        ensure_buffer_space(renderer, (size_t)len + 1);
-        memcpy(renderer->frame_buffer + renderer->buffer_used, temp, (size_t)len);
-        renderer->buffer_used += (size_t)len;
+
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int len = vsnprintf(NULL, 0, fmt, args_copy);
+    va_end(args_copy);
+
+    if (len > 0 && ensure_buffer_space(renderer, (size_t)len + 1)) {
+        size_t available = renderer->buffer_size - renderer->buffer_used;
+        int written = vsnprintf(renderer->frame_buffer + renderer->buffer_used,
+                                available,
+                                fmt,
+                                args);
+        if (written == len) {
+            renderer->buffer_used += (size_t)written;
+        }
     }
+
+    va_end(args);
 }
 
 int format_ansi_rgb_fg(char* buf, size_t size, uint8_t r, uint8_t g, uint8_t b) {

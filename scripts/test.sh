@@ -28,6 +28,17 @@ fi
 
 cd "$BUILD_DIR"
 
+ctest_list_has_tests() {
+    local list_output="$1"
+    local scope="$2"
+
+    if [[ "$list_output" == *"Total Tests: 0"* ]] || [[ "$list_output" == *"No tests were found"* ]]; then
+        echo "❌ No CTest targets $scope"
+        echo "$list_output"
+        return 1
+    fi
+}
+
 # Run tests based on category
 run_ctest() {
     local filter="$1"
@@ -35,11 +46,33 @@ run_ctest() {
     
     echo "🧪 Running $name..."
     echo ""
+
+    local list_output
+    list_output="$(ctest -N -R "$filter")"
+    ctest_list_has_tests "$list_output" "matched filter: $filter"
     
     if [[ "$VERBOSE" == "verbose" ]] || [[ "$VERBOSE" == "-v" ]]; then
         ctest --output-on-failure -R "$filter" -V
     else
         ctest --output-on-failure -R "$filter"
+    fi
+}
+
+run_ctest_excluding() {
+    local filter="$1"
+    local name="$2"
+
+    echo "🧪 Running $name..."
+    echo ""
+
+    local list_output
+    list_output="$(ctest -N -E "$filter")"
+    ctest_list_has_tests "$list_output" "remained after excluding filter: $filter"
+
+    if [[ "$VERBOSE" == "verbose" ]] || [[ "$VERBOSE" == "-v" ]]; then
+        ctest --output-on-failure -E "$filter" -V
+    else
+        ctest --output-on-failure -E "$filter"
     fi
 }
 
@@ -60,6 +93,8 @@ case "$CATEGORY" in
     all)
         echo "🧪 Running all tests..."
         echo ""
+        list_output="$(ctest -N)"
+        ctest_list_has_tests "$list_output" "registered in the active build"
         if [[ "$VERBOSE" == "verbose" ]] || [[ "$VERBOSE" == "-v" ]]; then
             ctest --output-on-failure -V
         else
@@ -72,22 +107,18 @@ case "$CATEGORY" in
         ;;
     
     stress)
-        run_ctest "stress" "stress tests"
+        run_ctest "Stress|VisualStability" "stress tests"
         ;;
 
     perf|performance)
         echo "⚡ Running performance evaluation tests..."
         echo "   Tip: set FEROX_PERF_SCALE=2 (or higher) for heavier timing loops"
         echo ""
-        echo "🧪 Running SIMD + performance eval tests (verbose timing output)..."
-        echo ""
-        ctest --output-on-failure -R "SimdEvalTests|PerformanceEvalTests" -V
+        VERBOSE=verbose run_ctest "SimdEvalTests|PerformanceEvalTests" "SIMD + performance eval tests"
         ;;
 
     science|bench|benchmarks)
-        echo "🔬 Running science benchmark scenario config checks..."
-        echo ""
-        ctest --output-on-failure -R "ScienceBenchmarkConfigTests" -V
+        run_ctest "ScienceBenchmarkConfigTests" "science benchmark scenario config checks"
         ;;
     
     phase1)
@@ -115,27 +146,27 @@ case "$CATEGORY" in
         ;;
     
     genetics)
-        run_ctest "genetics" "genetics tests"
+        run_ctest "Genetics" "genetics tests"
         ;;
     
     world)
-        run_ctest "world" "world tests"
+        run_ctest "World" "world tests"
         ;;
     
     protocol)
-        run_ctest "protocol" "protocol tests"
+        run_ctest "Protocol" "protocol tests"
         ;;
     
     names)
-        run_ctest "names" "name generation tests"
+        run_ctest "Names" "name generation tests"
         ;;
     
     colors)
-        run_ctest "colors" "color tests"
+        run_ctest "Colors" "color tests"
         ;;
     
     threadpool)
-        run_ctest "threadpool" "thread pool tests"
+        run_ctest "Threadpool" "thread pool tests"
         ;;
     
     list)
@@ -156,6 +187,8 @@ case "$CATEGORY" in
         cmake --build . --parallel
         
         # Run tests
+        list_output="$(ctest -N)"
+        ctest_list_has_tests "$list_output" "registered in the coverage build"
         ctest --output-on-failure
         
         # Generate coverage report
@@ -176,7 +209,7 @@ case "$CATEGORY" in
     
     quick)
         echo "⚡ Running quick tests (no stress tests)..."
-        ctest --output-on-failure -E "stress"
+        run_ctest_excluding "Stress|VisualStability" "quick tests"
         ;;
     
     *)

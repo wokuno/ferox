@@ -217,6 +217,10 @@ typedef struct CommandSpawnColony {
     char name[MAX_COLONY_NAME];
 } CommandSpawnColony;
 
+#define COMMAND_TYPE_SERIALIZED_SIZE 4
+#define COMMAND_SELECT_COLONY_SERIALIZED_SIZE (COMMAND_TYPE_SERIALIZED_SIZE + 4)
+#define COMMAND_SPAWN_COLONY_SERIALIZED_SIZE (COMMAND_TYPE_SERIALIZED_SIZE + 4 + 4 + MAX_COLONY_NAME)
+
 // Serialization functions
 int protocol_serialize_header(const MessageHeader* header, uint8_t* buffer);
 int protocol_deserialize_header(const uint8_t* buffer, MessageHeader* header);
@@ -232,7 +236,7 @@ int protocol_serialize_colony_detail(const ProtoColonyDetail* detail, uint8_t* b
 int protocol_deserialize_colony_detail(const uint8_t* buffer, ProtoColonyDetail* detail);
 
 int protocol_serialize_command(CommandType cmd, const void* data, uint8_t* buffer);
-int protocol_deserialize_command(const uint8_t* buffer, CommandType* cmd, void* data);
+int protocol_deserialize_command(const uint8_t* buffer, size_t len, CommandType* cmd, void* data);
 
 // Grid serialization with RLE compression
 int protocol_serialize_grid_rle(const uint16_t* grid, uint32_t size, uint8_t** buffer, size_t* len);

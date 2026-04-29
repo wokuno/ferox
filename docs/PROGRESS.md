@@ -32,12 +32,8 @@ hardware-aware runtime tuning.
 - Client-side large-world rendering improvements for the GUI grid path
 - Comprehensive CMake/CTest matrix with correctness, stress, and perf tests
 - Performance tooling and operational docs:
-  - `scripts/perf_multi_iter.py`
-  - `scripts/profile.sh`
-  - `scripts/profile_c2c.sh`
-  - `scripts/benchmark_export.sh`
+  - `scripts/perf_scenarios.py`
   - `docs/PERF_RUNBOOK.md`
-  - `docs/PERF_TARGETS.md`
   - `docs/PERFORMANCE_BACKLOG.md`
 
 ## Active Workstreams
@@ -53,7 +49,7 @@ hardware-aware runtime tuning.
 Run command:
 
 ```bash
-./scripts/perf_multi_iter.py -n 7 --profile balanced
+python3 scripts/perf_scenarios.py --build-types Release --scales 1 --repeats 3
 ```
 
 Observed medians:
@@ -67,8 +63,8 @@ Observed medians:
   - `serial3`: `~34.83 ms / 18 ticks`
   - `serial3_no_frontier`: `~71.91 ms / 18 ticks`
 
-Current thresholds and next target values are maintained in
-`docs/PERF_TARGETS.md`.
+Current performance backlog and target-setting notes are maintained in
+`docs/PERFORMANCE_BACKLOG.md`.
 
 ## Known Constraints
 

@@ -2,6 +2,11 @@
 
 This document defines the simulation statistical regression check added to CI for issue #57.
 
+Audit note, 2026-04-29: issue `#173` tracks a CTest wiring problem where
+documented test filters can match zero tests. Re-check
+`ctest -N -R SimulationStatRegressionTests` whenever this target or CI wiring
+changes.
+
 ## Goal
 
 Detect behavior drift in simulation outcomes without brittle one-seed exact snapshots.
@@ -9,7 +14,7 @@ Detect behavior drift in simulation outcomes without brittle one-seed exact snap
 ## Test Design
 
 - Test executable: `tests/test_simulation_stat_regression.c`
-- CTest target: `SimulationStatRegressionTests`
+- Intended CTest target: `SimulationStatRegressionTests`
 - Batch configuration:
   - 24 fixed seeds
   - 96x64 world
@@ -26,11 +31,21 @@ The test computes distribution summaries for each metric (mean, stddev, min, max
 
 Thresholds are anchored to current `origin/main` behavior and tuned to catch meaningful shifts while allowing normal stochastic spread:
 
-- `occupied_ratio`: baseline mean `0.954`, tolerance `+/- 0.060`; baseline stddev `0.032`, tolerance `+/- 0.030`
-- `active_colonies`: baseline mean `21.0`, tolerance `+/- 3.0`; baseline stddev `3.4`, tolerance `+/- 1.8`
-- `dominant_share`: baseline mean `0.171`, tolerance `+/- 0.050`; baseline stddev `0.038`, tolerance `+/- 0.025`
+- `occupied_ratio`: baseline mean `0.7921`, tolerance `+/- 0.0800`; baseline stddev `0.0579`, tolerance `+/- 0.0400`
+- `active_colonies`: baseline mean `24.0000`, tolerance `+/- 4.0000`; baseline stddev `11.5253`, tolerance `+/- 4.0000`
+- `dominant_share`: baseline mean `0.4007`, tolerance `+/- 0.0800`; baseline stddev `0.1025`, tolerance `+/- 0.0500`
 
 These tolerances are intentionally wider than one-run noise because the simulation is stochastic and occasionally exhibits long-tail seed outcomes.
+
+Current provenance: refreshed on 2026-04-29 when the test was wired into CTest
+under issue `#173`, using the fixed 24-seed set in `test_simulation_stat_regression.c`
+on the local macOS Release build.
+
+Future rebaselines should record provenance beside the thresholds: seed set,
+seed count, baseline commit, platform, compiler, build type, mean, standard
+deviation, min/max, quantiles, confidence interval, and the accepted effect
+size. This keeps pass bands as calibrated statistical contracts instead of
+hand-tuned ranges.
 
 ## Anti-Flake Strategy
 
@@ -43,10 +58,23 @@ The anti-flake approach is built into the measurement method:
 
 ## CI Integration
 
-`ci.yml` runs `SimulationStatRegressionTests` in both macOS and self-hosted Linux build jobs, then emits summary metrics in the GitHub Actions job summary.
+`ci.yml` should run `SimulationStatRegressionTests` in both macOS and
+self-hosted Linux build jobs, then emit summary metrics in the GitHub Actions
+job summary. Issue `#173` tracks verification that the target is actually
+registered and selected.
 
 The test logs machine-parseable lines in this format:
 
 `STAT_REGRESSION metric=<name> mean=<v> stddev=<v> min=<v> max=<v> expected_mean=<v> mean_tol=<v> expected_stddev=<v> stddev_tol=<v>`
 
 This gives pass/fail and observability without relying on fragile golden output files.
+
+## Relationship To Science Benchmarks
+
+Statistical regression is a project baseline check. It answers whether Ferox
+behavior drifted from the current accepted implementation.
+
+Science validation is broader. It should compare benchmark distributions to
+literature-backed qualitative or quantitative patterns and should use the
+scenario/provenance guidance in [Science Benchmark Scenarios](SCIENCE_BENCHMARKS.md)
+and [Biology And Simulation Research Notes](BIOLOGY_SIMULATION_RESEARCH.md).

@@ -101,14 +101,14 @@
 ctest --test-dir build --output-on-failure
 
 # Run focused performance diagnostics
-ctest --test-dir build --output-on-failure -R "ThreadpoolMicrobenchTests|ThreadpoolProfileScanTests|PerformanceProfilingTests|PerfUnitWorldTests|PerfUnitProtocolTests|PerfComponentAtomicTests"
+ctest --test-dir build --output-on-failure -R "HardwareProfileTests|SimdEvalTests|PerformanceEvalTests|PerformanceComponentTests|PerformanceProfilingTests|PerfUnitProtocolTests"
 ```
 
 ### Performance Workflow
 
 ```bash
 # Multi-iteration median summary (recommended)
-./scripts/perf_multi_iter.py -n 7 --profile balanced
+python3 scripts/perf_scenarios.py --build-types Release --scales 1 --repeats 3
 ```
 
 ### Keyboard Controls
@@ -248,12 +248,12 @@ ferox/
 - [Protocol](PROTOCOL.md) - Network protocol specification
 - [Genetics](GENETICS.md) - Genome structure and evolution
 - [Simulation](SIMULATION.md) - World update mechanics
+- [Biology and Simulation Research](BIOLOGY_SIMULATION_RESEARCH.md) - Literature-backed model directions and validation notes
 - [API Reference](API.md) - Function documentation
 - [Testing](TESTING.md) - Test organization and coverage
 - [Performance Runbook](PERF_RUNBOOK.md) - Benchmark commands, profiles, and jitter control
 - [Hardware and Accelerators](HARDWARE_ACCELERATION.md) - Host detection, target selection, and tuning defaults
 - [Colony Intelligence](COLONY_INTELLIGENCE.md) - Current behavior model, gaps, and future graph vision
-- [Performance Targets](PERF_TARGETS.md) - Current median baselines and target thresholds
 - [Performance Backlog](PERFORMANCE_BACKLOG.md) - Prioritized optimization roadmap
 - [Performance History](PERFORMANCE_HISTORY.md) - Detailed record of changes, experiments, and outcomes
 - [Scaling and Behavior Plan](SCALING_AND_BEHAVIOR_PLAN.md) - Current rollout plan and linked GitHub issues

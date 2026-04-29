@@ -138,13 +138,12 @@ linear scan per visible cell. Protocol performance is tracked by
 
 Performance validation is built into the repo (not a one-off script):
 
-- unit: `test_perf_unit_world`, `test_perf_unit_protocol`
-- component: `test_perf_component_atomic`, `test_threadpool_profile_scan`
-- system: `test_threadpool_microbench`, `test_performance_profile`
-- multi-run aggregation: `scripts/perf_multi_iter.py`
+- unit: `test_perf_unit_protocol`
+- component: `test_simd_eval`, `test_perf_components`
+- system: `test_performance_eval`, `test_performance_profile`
+- multi-run aggregation: `scripts/perf_scenarios.py`
 
 Reference docs:
 
 - `docs/PERF_RUNBOOK.md`
-- `docs/PERF_TARGETS.md`
 - `docs/PERFORMANCE_BACKLOG.md`

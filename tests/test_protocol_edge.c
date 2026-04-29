@@ -417,7 +417,7 @@ TEST(all_command_types) {
         ASSERT(size > 0, "Command serialization should succeed");
         
         CommandType deserialized;
-        size = protocol_deserialize_command(buffer, &deserialized, NULL);
+        size = protocol_deserialize_command(buffer, (size_t)size, &deserialized, NULL);
         ASSERT(size > 0, "Command deserialization should succeed");
         ASSERT_EQ(deserialized, commands[i]);
     }
@@ -432,7 +432,7 @@ TEST(select_colony_command) {
     
     CommandType cmd;
     CommandSelectColony deserialized;
-    size = protocol_deserialize_command(buffer, &cmd, &deserialized);
+    size = protocol_deserialize_command(buffer, (size_t)size, &cmd, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     ASSERT_EQ(cmd, CMD_SELECT_COLONY);
     ASSERT_EQ(deserialized.colony_id, 12345);
@@ -452,13 +452,78 @@ TEST(spawn_colony_command) {
     
     CommandType cmd;
     CommandSpawnColony deserialized;
-    size = protocol_deserialize_command(buffer, &cmd, &deserialized);
+    size = protocol_deserialize_command(buffer, (size_t)size, &cmd, &deserialized);
     ASSERT(size > 0, "Deserialization should succeed");
     ASSERT_EQ(cmd, CMD_SPAWN_COLONY);
     
     // Float comparison with tolerance
     ASSERT(fabsf(deserialized.x - 123.456f) < 0.001f, "X should match");
     ASSERT(fabsf(deserialized.y - 789.012f) < 0.001f, "Y should match");
+}
+
+TEST(command_rejects_short_command_word_payloads) {
+    uint8_t buffer[COMMAND_SPAWN_COLONY_SERIALIZED_SIZE];
+    memset(buffer, 0xAA, sizeof(buffer));
+
+    size_t lengths[] = {0, 1, 3};
+    for (size_t i = 0; i < sizeof(lengths) / sizeof(lengths[0]); i++) {
+        CommandType cmd = CMD_RESET;
+        CommandSelectColony data = { .colony_id = 0x12345678u };
+
+        int size = protocol_deserialize_command(buffer, lengths[i], &cmd, &data);
+        ASSERT_EQ(size, -1);
+        ASSERT_EQ(cmd, CMD_RESET);
+        ASSERT_EQ(data.colony_id, 0x12345678u);
+    }
+}
+
+TEST(command_rejects_short_select_colony_payloads) {
+    CommandSelectColony data = { .colony_id = 12345u };
+    uint8_t buffer[COMMAND_SELECT_COLONY_SERIALIZED_SIZE];
+    int full_size = protocol_serialize_command(CMD_SELECT_COLONY, &data, buffer);
+    ASSERT_EQ(full_size, COMMAND_SELECT_COLONY_SERIALIZED_SIZE);
+
+    size_t lengths[] = {4, 5, 7};
+    for (size_t i = 0; i < sizeof(lengths) / sizeof(lengths[0]); i++) {
+        CommandType cmd = CMD_RESET;
+        CommandSelectColony decoded = { .colony_id = 0x87654321u };
+
+        int size = protocol_deserialize_command(buffer, lengths[i], &cmd, &decoded);
+        ASSERT_EQ(size, -1);
+        ASSERT_EQ(cmd, CMD_RESET);
+        ASSERT_EQ(decoded.colony_id, 0x87654321u);
+    }
+}
+
+TEST(command_rejects_truncated_spawn_colony_payloads) {
+    CommandSpawnColony data = {
+        .x = 12.5f,
+        .y = 34.5f
+    };
+    strncpy(data.name, "TruncatedSpawn", MAX_COLONY_NAME);
+
+    uint8_t buffer[COMMAND_SPAWN_COLONY_SERIALIZED_SIZE];
+    int full_size = protocol_serialize_command(CMD_SPAWN_COLONY, &data, buffer);
+    ASSERT_EQ(full_size, COMMAND_SPAWN_COLONY_SERIALIZED_SIZE);
+
+    size_t lengths[] = {
+        4,
+        5,
+        7,
+        COMMAND_TYPE_SERIALIZED_SIZE + 4,
+        COMMAND_TYPE_SERIALIZED_SIZE + 8,
+        COMMAND_SPAWN_COLONY_SERIALIZED_SIZE - 1
+    };
+    for (size_t i = 0; i < sizeof(lengths) / sizeof(lengths[0]); i++) {
+        CommandType cmd = CMD_RESET;
+        CommandSpawnColony decoded;
+        memset(&decoded, 0xCD, sizeof(decoded));
+
+        int size = protocol_deserialize_command(buffer, lengths[i], &cmd, &decoded);
+        ASSERT_EQ(size, -1);
+        ASSERT_EQ(cmd, CMD_RESET);
+        ASSERT_EQ(decoded.name[0], (char)0xCD);
+    }
 }
 
 // ============================================================================
@@ -678,6 +743,9 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(all_command_types);
     RUN_TEST(select_colony_command);
     RUN_TEST(spawn_colony_command);
+    RUN_TEST(command_rejects_short_command_word_payloads);
+    RUN_TEST(command_rejects_short_select_colony_payloads);
+    RUN_TEST(command_rejects_truncated_spawn_colony_payloads);
     
     printf("\nNull Input Tests:\n");
     RUN_TEST(null_inputs_handled);
