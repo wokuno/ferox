@@ -237,6 +237,18 @@ int protocol_deserialize_header(const uint8_t* buffer, MessageHeader* header);
 int protocol_serialize_world_state(const ProtoWorld* world, uint8_t** buffer, size_t* len);
 int protocol_deserialize_world_state(const uint8_t* buffer, size_t len, ProtoWorld* world);
 int protocol_serialize_world_delta_grid_chunk(const ProtoWorldDeltaGridChunk* chunk, uint8_t** buffer, size_t* len);
+int protocol_serialize_world_delta_grid_chunk_from_u32_field(uint32_t tick,
+                                                             uint32_t width,
+                                                             uint32_t height,
+                                                             uint32_t total_cells,
+                                                             uint32_t start_index,
+                                                             uint32_t cell_count,
+                                                             bool final_chunk,
+                                                             const void* records,
+                                                             size_t record_stride,
+                                                             size_t field_offset,
+                                                             uint8_t** buffer,
+                                                             size_t* len);
 int protocol_deserialize_world_delta_grid_chunk(const uint8_t* buffer, size_t len, ProtoWorldDeltaGridChunk* chunk);
 
 int protocol_serialize_colony(const ProtoColony* colony, uint8_t* buffer);

@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <time.h>
 #include <math.h>
+#include <stddef.h>
 
 // Protocol types - we need to include protocol.h but types.h already defined World/Colony
 // So we include protocol.h here and use the types directly knowing they come from types.h (via world.h)
@@ -904,17 +905,14 @@ void server_broadcast_world_state(Server* server) {
     size_t chunk_count = 0;
     uint8_t** chunk_buffers = NULL;
     size_t* chunk_lengths = NULL;
-    uint16_t* chunk_cells = NULL;
 
     if (!proto_world.has_grid && grid_size > 0 && grid_size <= MAX_GRID_SIZE) {
         chunk_count = (grid_size + MAX_GRID_CHUNK_CELLS - 1u) / MAX_GRID_CHUNK_CELLS;
         chunk_buffers = (uint8_t**)calloc(chunk_count, sizeof(uint8_t*));
         chunk_lengths = (size_t*)calloc(chunk_count, sizeof(size_t));
-        chunk_cells = (uint16_t*)malloc((size_t)MAX_GRID_CHUNK_CELLS * sizeof(uint16_t));
-        if (!chunk_buffers || !chunk_lengths || !chunk_cells) {
+        if (!chunk_buffers || !chunk_lengths) {
             free(chunk_buffers);
             free(chunk_lengths);
-            free(chunk_cells);
             free(buffer);
             proto_world_free(&proto_world);
             return;
@@ -927,35 +925,29 @@ void server_broadcast_world_state(Server* server) {
                 cell_count = MAX_GRID_CHUNK_CELLS;
             }
 
-            for (uint32_t i = 0; i < cell_count; i++) {
-                chunk_cells[i] = (uint16_t)server->world->cells[start_index + i].colony_id;
-            }
-
-            ProtoWorldDeltaGridChunk chunk = {
-                .tick = proto_world.tick,
-                .width = proto_world.width,
-                .height = proto_world.height,
-                .total_cells = grid_size,
-                .start_index = start_index,
-                .cell_count = cell_count,
-                .final_chunk = (chunk_idx + 1u == chunk_count),
-                .cells = chunk_cells,
-            };
-
-            if (protocol_serialize_world_delta_grid_chunk(&chunk, &chunk_buffers[chunk_idx], &chunk_lengths[chunk_idx]) < 0) {
+            if (protocol_serialize_world_delta_grid_chunk_from_u32_field(proto_world.tick,
+                                                                         proto_world.width,
+                                                                         proto_world.height,
+                                                                         grid_size,
+                                                                         start_index,
+                                                                         cell_count,
+                                                                         (chunk_idx + 1u == chunk_count),
+                                                                         server->world->cells,
+                                                                         sizeof(Cell),
+                                                                         offsetof(Cell, colony_id),
+                                                                         &chunk_buffers[chunk_idx],
+                                                                         &chunk_lengths[chunk_idx]) < 0) {
                 for (size_t free_idx = 0; free_idx < chunk_count; free_idx++) {
                     free(chunk_buffers[free_idx]);
                 }
                 free(chunk_buffers);
                 free(chunk_lengths);
-                free(chunk_cells);
                 free(buffer);
                 proto_world_free(&proto_world);
                 return;
             }
         }
     }
-    free(chunk_cells);
     
     // Queue ordered world-update batches for each client, then flush sockets
     // outside the client list lock.

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <math.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -544,6 +545,75 @@ TEST(world_delta_grid_chunk_roundtrip) {
     proto_world_delta_grid_chunk_free(&chunk);
 }
 
+typedef struct TestGridRecord {
+    uint8_t marker;
+    uint32_t colony_id;
+    uint8_t age;
+} TestGridRecord;
+
+TEST(world_delta_grid_chunk_u32_field_matches_array_serializer) {
+    uint16_t grid[64];
+    TestGridRecord records[64];
+    for (uint32_t i = 0; i < 64; i++) {
+        grid[i] = (uint16_t)((i * 31u) & 0xFFFFu);
+        records[i].marker = 0xA5u;
+        records[i].colony_id = (uint32_t)grid[i];
+        records[i].age = (uint8_t)i;
+    }
+    grid[12] = 7u;
+    records[12].colony_id = 0x10007u;
+
+    ProtoWorldDeltaGridChunk chunk;
+    proto_world_delta_grid_chunk_init(&chunk);
+    chunk.tick = 91;
+    chunk.width = 8;
+    chunk.height = 8;
+    chunk.total_cells = 64;
+    chunk.start_index = 9;
+    chunk.cell_count = 27;
+    chunk.final_chunk = false;
+    chunk.cells = &grid[chunk.start_index];
+
+    uint8_t* array_buffer = NULL;
+    size_t array_len = 0;
+    int result = protocol_serialize_world_delta_grid_chunk(&chunk, &array_buffer, &array_len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(array_buffer);
+
+    uint8_t* field_buffer = NULL;
+    size_t field_len = 0;
+    result = protocol_serialize_world_delta_grid_chunk_from_u32_field(chunk.tick,
+                                                                      chunk.width,
+                                                                      chunk.height,
+                                                                      chunk.total_cells,
+                                                                      chunk.start_index,
+                                                                      chunk.cell_count,
+                                                                      chunk.final_chunk,
+                                                                      records,
+                                                                      sizeof(records[0]),
+                                                                      offsetof(TestGridRecord, colony_id),
+                                                                      &field_buffer,
+                                                                      &field_len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(field_buffer);
+    ASSERT_EQ(field_len, array_len);
+    ASSERT_EQ(memcmp(field_buffer, array_buffer, array_len), 0);
+
+    ProtoWorldDeltaGridChunk decoded;
+    proto_world_delta_grid_chunk_init(&decoded);
+    result = protocol_deserialize_world_delta_grid_chunk(field_buffer, field_len, &decoded);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(decoded.start_index, chunk.start_index);
+    ASSERT_EQ(decoded.cell_count, chunk.cell_count);
+    for (uint32_t i = 0; i < decoded.cell_count; i++) {
+        ASSERT_EQ(decoded.cells[i], grid[chunk.start_index + i]);
+    }
+
+    free(array_buffer);
+    free(field_buffer);
+    proto_world_delta_grid_chunk_free(&decoded);
+}
+
 TEST(world_delta_grid_chunk_rejects_invalid_bounds) {
     ProtoWorldDeltaGridChunk chunk;
     proto_world_delta_grid_chunk_init(&chunk);
@@ -980,6 +1050,7 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(nonblocking_send_frame_writes_complete_frame);
     RUN_TEST(nonblocking_send_frame_handles_backpressure_and_resume);
     RUN_TEST(world_delta_grid_chunk_roundtrip);
+    RUN_TEST(world_delta_grid_chunk_u32_field_matches_array_serializer);
     RUN_TEST(world_delta_grid_chunk_rejects_invalid_bounds);
     
     printf("\nColony Name Tests:\n");

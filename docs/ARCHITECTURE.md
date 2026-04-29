@@ -144,10 +144,12 @@ maps. On the server side, snapshot preparation now builds the outgoing grid and
 colony centroid metadata in a single pass over the world grid instead of doing
 one full-grid rescan per active colony. Worlds larger than the inline snapshot
 threshold ship colony metadata in `MSG_WORLD_STATE` and stream the grid through
-ordered `MSG_WORLD_DELTA` chunks. The GUI renderer now resolves colony ids from
-grid cells with binary search over the sorted colony metadata instead of a full
-linear scan per visible cell. Protocol performance is tracked by
-`test_perf_unit_protocol` and `test_performance_profile`.
+ordered `MSG_WORLD_DELTA` chunks. Large-world chunk serialization reads colony
+ids directly from the `World.cells[].colony_id` strided field, avoiding the
+previous per-chunk temporary `uint16_t` copy. The GUI renderer now resolves
+colony ids from grid cells with binary search over the sorted colony metadata
+instead of a full linear scan per visible cell. Protocol performance is tracked
+by `test_perf_unit_protocol` and `test_performance_profile`.
 
 ## Performance Instrumentation Architecture
 

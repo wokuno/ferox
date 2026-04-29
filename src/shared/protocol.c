@@ -488,21 +488,30 @@ int protocol_deserialize_world_state(const uint8_t* buffer, size_t len, ProtoWor
     return 0;
 }
 
-int protocol_serialize_world_delta_grid_chunk(const ProtoWorldDeltaGridChunk* chunk, uint8_t** buffer, size_t* len) {
-    if (!chunk || !buffer || !len || !chunk->cells || chunk->cell_count == 0) {
+static int protocol_begin_world_delta_grid_chunk(uint32_t tick,
+                                                 uint32_t width,
+                                                 uint32_t height,
+                                                 uint32_t total_cells,
+                                                 uint32_t start_index,
+                                                 uint32_t cell_count,
+                                                 bool final_chunk,
+                                                 uint8_t** buffer,
+                                                 size_t* len,
+                                                 int* offset) {
+    if (!buffer || !len || !offset || cell_count == 0) {
         return -1;
     }
-    if (chunk->cell_count > MAX_GRID_CHUNK_CELLS) {
+    if (cell_count > MAX_GRID_CHUNK_CELLS) {
         return -1;
     }
-    if (chunk->total_cells == 0 || chunk->total_cells > MAX_GRID_SIZE) {
+    if (total_cells == 0 || total_cells > MAX_GRID_SIZE) {
         return -1;
     }
-    if (chunk->start_index >= chunk->total_cells || chunk->start_index + chunk->cell_count > chunk->total_cells) {
+    if (start_index >= total_cells || start_index + cell_count > total_cells) {
         return -1;
     }
 
-    size_t total_size = 1 + (6 * 4) + 1 + ((size_t)chunk->cell_count * sizeof(uint16_t));
+    size_t total_size = 1 + (6 * 4) + 1 + ((size_t)cell_count * sizeof(uint16_t));
     if (total_size > MAX_PAYLOAD_SIZE) {
         return -1;
     }
@@ -512,21 +521,89 @@ int protocol_serialize_world_delta_grid_chunk(const ProtoWorldDeltaGridChunk* ch
         return -1;
     }
 
+    *offset = 0;
+    (*buffer)[(*offset)++] = (uint8_t)PROTO_WORLD_DELTA_GRID_CHUNK;
+    write_u32(*buffer + *offset, tick);
+    *offset += 4;
+    write_u32(*buffer + *offset, width);
+    *offset += 4;
+    write_u32(*buffer + *offset, height);
+    *offset += 4;
+    write_u32(*buffer + *offset, total_cells);
+    *offset += 4;
+    write_u32(*buffer + *offset, start_index);
+    *offset += 4;
+    write_u32(*buffer + *offset, cell_count);
+    *offset += 4;
+    (*buffer)[(*offset)++] = final_chunk ? 1 : 0;
+
+    *len = total_size;
+    return 0;
+}
+
+int protocol_serialize_world_delta_grid_chunk_from_u32_field(uint32_t tick,
+                                                             uint32_t width,
+                                                             uint32_t height,
+                                                             uint32_t total_cells,
+                                                             uint32_t start_index,
+                                                             uint32_t cell_count,
+                                                             bool final_chunk,
+                                                             const void* records,
+                                                             size_t record_stride,
+                                                             size_t field_offset,
+                                                             uint8_t** buffer,
+                                                             size_t* len) {
+    if (!records || record_stride < sizeof(uint32_t) || field_offset > record_stride - sizeof(uint32_t)) {
+        return -1;
+    }
+    if (record_stride != 0 && total_cells > SIZE_MAX / record_stride) {
+        return -1;
+    }
+
     int offset = 0;
-    (*buffer)[offset++] = (uint8_t)PROTO_WORLD_DELTA_GRID_CHUNK;
-    write_u32(*buffer + offset, chunk->tick);
-    offset += 4;
-    write_u32(*buffer + offset, chunk->width);
-    offset += 4;
-    write_u32(*buffer + offset, chunk->height);
-    offset += 4;
-    write_u32(*buffer + offset, chunk->total_cells);
-    offset += 4;
-    write_u32(*buffer + offset, chunk->start_index);
-    offset += 4;
-    write_u32(*buffer + offset, chunk->cell_count);
-    offset += 4;
-    (*buffer)[offset++] = chunk->final_chunk ? 1 : 0;
+    if (protocol_begin_world_delta_grid_chunk(tick,
+                                              width,
+                                              height,
+                                              total_cells,
+                                              start_index,
+                                              cell_count,
+                                              final_chunk,
+                                              buffer,
+                                              len,
+                                              &offset) < 0) {
+        return -1;
+    }
+
+    const uint8_t* base = (const uint8_t*)records;
+    for (uint32_t i = 0; i < cell_count; i++) {
+        uint32_t value = 0;
+        memcpy(&value, base + ((size_t)(start_index + i) * record_stride) + field_offset, sizeof(value));
+        write_u16(*buffer + offset, (uint16_t)value);
+        offset += 2;
+    }
+
+    *len = (size_t)offset;
+    return 0;
+}
+
+int protocol_serialize_world_delta_grid_chunk(const ProtoWorldDeltaGridChunk* chunk, uint8_t** buffer, size_t* len) {
+    if (!chunk || !chunk->cells || !buffer || !len) {
+        return -1;
+    }
+
+    int offset = 0;
+    if (protocol_begin_world_delta_grid_chunk(chunk->tick,
+                                              chunk->width,
+                                              chunk->height,
+                                              chunk->total_cells,
+                                              chunk->start_index,
+                                              chunk->cell_count,
+                                              chunk->final_chunk,
+                                              buffer,
+                                              len,
+                                              &offset) < 0) {
+        return -1;
+    }
 
     for (uint32_t i = 0; i < chunk->cell_count; i++) {
         write_u16(*buffer + offset, chunk->cells[i]);

@@ -942,6 +942,45 @@ Next network reliability batch:
   - after review fixes, `./scripts/test.sh all`: passed `28/28`
 - The pre-existing local `scripts/run.sh` modification remains unstaged and out
   of scope.
+
+Next protocol/perf batch:
+- Closed completed issues `#171`, `#172`, `#173`, `#163`, and `#174` after the
+  corresponding commits were pushed and issue comments were posted.
+- Keep `#99` and `#162` open for telemetry, explicit resync/anti-entropy, and
+  slow-client soak work.
+- Start the next network/protocol set from GitHub:
+  - `#107`: remove redundant large-world chunk build/copy work
+  - `#127`: world-state delta messages
+  - `#128`: per-client baseline ring and ack-bitfield tracking
+- First implementation slice: address `#107` before changing wire semantics.
+  It is compatible with the current full-snapshot + chunked-grid protocol and
+  reduces simulation-thread prep work before the larger delta/ack design lands.
+- Parallel review lanes launched for `#107`, `#127`, and `#128`; do not close
+  the p0 delta/ack trackers until a real baseline/ack contract exists.
+- `#107` implementation notes:
+  - added a protocol chunk serializer that reads values from a strided
+    `uint32_t` record field
+  - switched large-world server chunk serialization to read directly from
+    `World.cells[].colony_id`
+  - removed the per-broadcast `chunk_cells` staging allocation and copy loop
+  - kept the existing `MSG_WORLD_STATE` + ordered `MSG_WORLD_DELTA` wire format
+  - added protocol equivalence coverage and a large-world chunk broadcast perf
+    diagnostic above `MAX_INLINE_GRID_SIZE`
+  - local `test_perf_unit_protocol` noisy chunk snapshot:
+    - contiguous chunk serializer: `4.103 ns/cell`
+    - strided `uint32_t` field serializer: `2.912 ns/cell`
+    - encoded bytes unchanged at `524392`
+  - local `test_performance_eval`: passed `14/14`; `large-world chunk
+    broadcast` measured `29.08 ms` for 12 broadcasts
+  - validation:
+    - `cmake --build build --target test_protocol_edge test_performance_eval test_perf_unit_protocol ferox_server`: passed
+    - `ctest --test-dir build --output-on-failure -R "ProtocolEdgeTests|PerformanceEvalTests|PerfUnitProtocolTests"`: passed `3/3`
+    - `./scripts/test.sh all`: passed `28/28`
+    - after pre-commit review, added truncation parity coverage and reran
+      `ctest --test-dir build --output-on-failure -R "ProtocolEdgeTests|PerformanceEvalTests|PerfUnitProtocolTests"`: passed `3/3`
+  - pre-commit review subagent found no blockers; residual risk was limited to
+    coverage depth for truncation and full client assembly, and truncation
+    parity is now covered
 - Wait-backend refactor:
   - moved platform-specific worker park/unpark logic out of `atomic_sim.c` and into a dedicated `phase_wait` backend layer
   - `atomic_sim.c` now depends only on atomic sequencing plus a narrow `phase_wait_eq` / `phase_wake_all` / `phase_wait_backoff` interface

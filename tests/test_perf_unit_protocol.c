@@ -1,10 +1,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <string.h>
 #include <time.h>
 
 #include "../src/shared/protocol.h"
+
+typedef struct UnitProtocolCell {
+    uint32_t colony_id;
+    uint8_t age;
+} UnitProtocolCell;
 
 static uint64_t now_ns(void) {
     struct timespec ts;
@@ -173,6 +179,107 @@ static int benchmark_chunk_case(const char* kind, uint16_t* grid, uint32_t size,
     return 0;
 }
 
+static int benchmark_chunk_u32_field_case(const char* kind, uint16_t* grid, uint32_t size, int repeats) {
+    uint64_t ser_ns = 0;
+    uint64_t de_ns = 0;
+    size_t bytes_total = 0;
+
+    UnitProtocolCell* records = (UnitProtocolCell*)calloc(size, sizeof(UnitProtocolCell));
+    uint16_t* decoded = (uint16_t*)calloc(size, sizeof(uint16_t));
+    if (!records || !decoded) {
+        free(records);
+        free(decoded);
+        return 1;
+    }
+
+    for (uint32_t i = 0; i < size; i++) {
+        records[i].colony_id = grid[i];
+        records[i].age = (uint8_t)i;
+    }
+
+    uint32_t chunk_count = (size + MAX_GRID_CHUNK_CELLS - 1u) / MAX_GRID_CHUNK_CELLS;
+    for (int r = 0; r < repeats; r++) {
+        memset(decoded, 0, size * sizeof(uint16_t));
+        for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx++) {
+            uint32_t start_index = chunk_idx * MAX_GRID_CHUNK_CELLS;
+            uint32_t cell_count = size - start_index;
+            if (cell_count > MAX_GRID_CHUNK_CELLS) {
+                cell_count = MAX_GRID_CHUNK_CELLS;
+            }
+
+            uint8_t* buf = NULL;
+            size_t len = 0;
+            uint64_t t0 = now_ns();
+            if (protocol_serialize_world_delta_grid_chunk_from_u32_field(999,
+                                                                         size,
+                                                                         1,
+                                                                         size,
+                                                                         start_index,
+                                                                         cell_count,
+                                                                         chunk_idx + 1u == chunk_count,
+                                                                         records,
+                                                                         sizeof(records[0]),
+                                                                         offsetof(UnitProtocolCell, colony_id),
+                                                                         &buf,
+                                                                         &len) != 0) {
+                free(records);
+                free(decoded);
+                return 1;
+            }
+            uint64_t t1 = now_ns();
+
+            ProtoWorldDeltaGridChunk decoded_chunk;
+            proto_world_delta_grid_chunk_init(&decoded_chunk);
+            if (protocol_deserialize_world_delta_grid_chunk(buf, len, &decoded_chunk) != 0) {
+                free(buf);
+                free(records);
+                free(decoded);
+                return 1;
+            }
+            uint64_t t2 = now_ns();
+
+            memcpy(&decoded[decoded_chunk.start_index], decoded_chunk.cells,
+                   (size_t)decoded_chunk.cell_count * sizeof(uint16_t));
+            proto_world_delta_grid_chunk_free(&decoded_chunk);
+            free(buf);
+
+            ser_ns += (t1 - t0);
+            de_ns += (t2 - t1);
+            bytes_total += len;
+        }
+    }
+
+    size_t mismatches = 0;
+    for (uint32_t i = 0; i < size; i++) {
+        if (decoded[i] != grid[i]) {
+            mismatches++;
+            break;
+        }
+    }
+    free(records);
+    free(decoded);
+
+    if (mismatches != 0) {
+        return 1;
+    }
+
+    double avg_bytes = (double)bytes_total / (double)repeats;
+    double raw_bytes = (double)size * sizeof(uint16_t);
+    double ser_ns_per_cell = (double)ser_ns / (double)(repeats * (int)size);
+    double de_ns_per_cell = (double)de_ns / (double)(repeats * (int)size);
+
+    printf("UNIT_PROTOCOL_CHUNK_U32_FIELD kind=%s size=%u chunks=%u avg_bytes=%.0f ratio=%.3f ser_ns_cell=%.3f de_ns_cell=%.3f\n",
+           kind,
+           size,
+           chunk_count,
+           avg_bytes,
+           avg_bytes / raw_bytes,
+           ser_ns_per_cell,
+           de_ns_per_cell);
+
+    return 0;
+}
+
 int main(void) {
     const uint32_t size_small = 4096;
     const uint32_t size_large = 65536;
@@ -220,6 +327,13 @@ int main(void) {
 
     fill_noisy(chunked, size_chunked);
     if (benchmark_chunk_case("noisy_chunked", chunked, size_chunked, repeats) != 0) {
+        free(small);
+        free(large);
+        free(chunked);
+        return 1;
+    }
+
+    if (benchmark_chunk_u32_field_case("noisy_chunked", chunked, size_chunked, repeats) != 0) {
         free(small);
         free(large);
         free(chunked);

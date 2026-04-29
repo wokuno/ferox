@@ -333,6 +333,24 @@ adds code complexity.
 Server sends full `MSG_WORLD_STATE` snapshots each tick. A delta/diff protocol could reduce
 network bandwidth by 10-100× for mostly-static grids.
 
+Current large-world chunk transport avoids the extra per-chunk staging copy:
+chunk payloads are serialized directly from `World.cells` while preserving the
+existing `MSG_WORLD_STATE` + ordered `MSG_WORLD_DELTA` wire format. This reduces
+simulation-thread prep work, but it does not yet reduce bytes on the wire.
+
+Local post-change transport snapshot:
+
+- `test_perf_unit_protocol` noisy 262,144-cell chunk case:
+  - contiguous `uint16_t` chunk serializer: `4.103 ns/cell` serialize,
+    `3.603 ns/cell` deserialize
+  - strided `uint32_t` field serializer: `2.912 ns/cell` serialize,
+    `3.564 ns/cell` deserialize
+  - encoded size unchanged at `524392` bytes across 4 chunks
+- `test_performance_eval`: passed `14/14`
+  - `large-world chunk broadcast`: `29.08 ms` for 12 broadcasts
+  - existing `320x180` zero-client broadcast remains below the inline-grid
+    threshold and is tracked separately as `broadcast end-to-end (0 clients)`
+
 ## Recommended Further Optimizations
 
 1. **Larger grid perf mode** — Run atomic path benchmarks on 1000×1000 grids to validate thread scaling.

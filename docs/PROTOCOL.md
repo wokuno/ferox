@@ -637,6 +637,12 @@ Chunked grid recovery remains snapshot-based: clients accept chunks only for the
 current world tick and expected next grid offset. Out-of-order or mismatched
 chunks are ignored until a newer world snapshot restarts assembly.
 
+Large-world chunk payloads keep the same wire format whether serialized from a
+temporary `uint16_t` cell array or from the protocol strided-field helper. The
+server uses the strided `uint32_t` field path so chunk bytes are written
+directly from `World.cells[].colony_id` without an intermediate per-chunk
+staging copy.
+
 ## Command/Response Flow
 
 ```

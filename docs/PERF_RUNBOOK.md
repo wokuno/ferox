@@ -31,12 +31,14 @@ without chasing noisy one-off results.
 ## Granularity Ladder
 
 - `unit`:
-  - `test_perf_unit_protocol` (RLE grid codec + chunked grid transport throughput/ratio)
+  - `test_perf_unit_protocol` (RLE grid codec + contiguous and strided-field
+    chunked grid transport throughput/ratio)
 - `component`:
   - `test_simd_eval` (SIMD-oriented simulation loop diagnostics)
   - `test_perf_components` (component hotspots such as nutrients, scents, combat, frontier telemetry, and snapshot build cost)
 - `system`:
-  - `test_performance_eval` (end-to-end timing diagnostics)
+  - `test_performance_eval` (end-to-end timing diagnostics, including a
+    large-world chunk broadcast path above the inline-grid threshold)
   - `test_performance_profile` (hotspot profile report)
 
 Some historical benchmark binaries are source-gated in `tests/CMakeLists.txt`.

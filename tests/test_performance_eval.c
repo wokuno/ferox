@@ -356,6 +356,41 @@ TEST(server_broadcast_path_breakdown_eval) {
     server_destroy(server);
 }
 
+TEST(server_large_world_chunk_broadcast_eval) {
+    const int scale = get_perf_scale();
+    const int iters = 12 * scale;
+
+    Server* server = server_create_headless(900, 400, 4);
+    ASSERT_NOT_NULL(server);
+
+    rng_seed(1707);
+    world_init_random_colonies(server->world, 80);
+    for (int i = 0; i < 2; i++) {
+        simulation_tick(server->world);
+    }
+
+    ProtoWorld snapshot;
+    ASSERT_EQ(server_build_protocol_world_snapshot(server->world,
+                                                  server->paused,
+                                                  server->speed_multiplier,
+                                                  &snapshot),
+              0);
+    ASSERT_EQ(snapshot.has_grid, false);
+    ASSERT_TRUE(snapshot.width * snapshot.height > MAX_INLINE_GRID_SIZE);
+    proto_world_free(&snapshot);
+
+    double start = now_ms();
+    for (int i = 0; i < iters; i++) {
+        server_broadcast_world_state(server);
+    }
+    double elapsed = now_ms() - start;
+
+    print_metric("large-world chunk broadcast", elapsed, (double)iters);
+    ASSERT(elapsed > 0.0, "large-world chunk broadcast timing must be positive");
+
+    server_destroy(server);
+}
+
 TEST(simulation_tick_throughput) {
     const int scale = get_perf_scale();
     const int ticks = 35 * scale;
@@ -745,6 +780,7 @@ int run_performance_eval_tests(void) {
     RUN_TEST(protocol_world_serialize_deserialize_throughput);
     RUN_TEST(protocol_world_path_breakdown_eval);
     RUN_TEST(server_broadcast_path_breakdown_eval);
+    RUN_TEST(server_large_world_chunk_broadcast_eval);
     RUN_TEST(simulation_tick_throughput);
     RUN_TEST(frontier_telemetry_seeded_run_eval);
     RUN_TEST(atomic_tick_throughput_and_speedup_eval);
