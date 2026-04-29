@@ -88,6 +88,15 @@ typedef struct MessageHeader {
 
 #define MESSAGE_HEADER_SIZE 14
 
+typedef struct ProtocolRecvState {
+    uint8_t header_buf[MESSAGE_HEADER_SIZE];
+    size_t header_received;
+    MessageHeader header;
+    uint8_t* payload;
+    size_t payload_received;
+    bool header_ready;
+} ProtocolRecvState;
+
 // Colony data structure for serialization (prefixed to avoid conflict with types.h)
 typedef struct ProtoColony {
     uint32_t id;
@@ -252,5 +261,12 @@ void proto_world_delta_grid_chunk_free(ProtoWorldDeltaGridChunk* chunk);
 // Helper to send/receive complete messages
 int protocol_send_message(int socket, MessageType type, const uint8_t* payload, size_t len);
 int protocol_recv_message(int socket, MessageHeader* header, uint8_t** payload);
+
+void protocol_recv_state_init(ProtocolRecvState* state);
+void protocol_recv_state_reset(ProtocolRecvState* state);
+void protocol_recv_state_free(ProtocolRecvState* state);
+int protocol_build_message(MessageType type, const uint8_t* payload, size_t len, uint8_t** frame, size_t* frame_len);
+int protocol_send_frame_nonblocking(int socket, const uint8_t* frame, size_t frame_len, size_t* offset);
+int protocol_recv_message_nonblocking(int socket, ProtocolRecvState* state, MessageHeader* header, uint8_t** payload);
 
 #endif // PROTOCOL_H

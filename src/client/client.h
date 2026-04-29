@@ -17,6 +17,7 @@ typedef struct Client {
     bool has_selected_detail;
     uint32_t selected_colony;
     uint32_t selected_index;  // Index in colony array for cycling
+    ProtocolRecvState recv_state;
     bool pending_grid_active;
     uint32_t pending_grid_tick;
     uint32_t pending_grid_next_index;

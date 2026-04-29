@@ -26,6 +26,21 @@ The server process uses two long-lived threads plus worker threads:
 Client list operations are protected by `clients_mutex`. Simulation state updates
 happen in the simulation pipeline, with heavy work delegated to the threadpool.
 
+## Network Transport Model
+
+Accepted sockets and client sockets run in nonblocking mode after connection
+setup. The protocol layer owns frame assembly with `ProtocolRecvState`, so a
+partial TCP header or payload is retained across simulation/render ticks instead
+of forcing the socket back to blocking mode.
+
+World broadcasts are serialized once per tick and queued to each active client as
+an ordered send batch. `clients_mutex` protects the linked client list and batch
+queue mutation only; actual socket writes are pumped after the lock is released.
+Each client has one active batch and one pending batch. New world updates may
+replace only unsent queued work, never a batch that has already written bytes to
+the socket. When an unsent world batch is replaced, any older pending batch is
+also discarded so stale detail or chunk data cannot trail a newer snapshot.
+
 ## Simulation Pipeline
 
 Two execution paths exist:

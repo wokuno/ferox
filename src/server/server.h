@@ -23,12 +23,29 @@
 #define DEFAULT_INITIAL_COLONY_COUNT 50
 #define DEFAULT_TICK_RATE_MS 100
 
+typedef struct ClientFrame {
+    uint8_t* data;
+    size_t len;
+} ClientFrame;
+
+typedef struct ClientSendBatch {
+    ClientFrame* frames;
+    size_t frame_count;
+    size_t frame_capacity;
+    size_t frame_index;
+    size_t frame_offset;
+    bool started;
+} ClientSendBatch;
+
 // Client session represents a connected client
 typedef struct ClientSession {
     NetSocket* socket;
     uint32_t id;
     bool active;
     uint32_t selected_colony;  // Colony selected for detailed view
+    ProtocolRecvState recv_state;
+    ClientSendBatch send_current;
+    ClientSendBatch send_pending;
     struct ClientSession* next;
 } ClientSession;
 

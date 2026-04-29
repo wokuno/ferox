@@ -212,6 +212,7 @@ int main(int argc, char* argv[]) {
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+    signal(SIGPIPE, SIG_IGN);
     
     // Print listening info
     printf("Server listening on port %u\n", server_get_port(server));

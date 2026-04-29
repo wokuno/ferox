@@ -5,6 +5,13 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <errno.h>
+#include <stdatomic.h>
+
+#ifdef MSG_NOSIGNAL
+#define PROTOCOL_SEND_FLAGS MSG_NOSIGNAL
+#else
+#define PROTOCOL_SEND_FLAGS 0
+#endif
 
 // Helper to write uint32_t in network byte order
 static void write_u32(uint8_t* buf, uint32_t val) {
@@ -674,7 +681,7 @@ int protocol_deserialize_command(const uint8_t* buffer, size_t len, CommandType*
 static int send_all(int socket, const uint8_t* data, size_t len) {
     size_t sent = 0;
     while (sent < len) {
-        ssize_t n = send(socket, data + sent, len - sent, 0);
+        ssize_t n = send(socket, data + sent, len - sent, PROTOCOL_SEND_FLAGS);
         if (n <= 0) {
             if (n < 0 && errno == EINTR) continue;
             return -1;
@@ -682,6 +689,151 @@ static int send_all(int socket, const uint8_t* data, size_t len) {
         sent += n;
     }
     return 0;
+}
+
+static uint32_t protocol_next_sequence(void) {
+    static atomic_uint sequence = 0;
+    return atomic_fetch_add_explicit(&sequence, 1u, memory_order_relaxed);
+}
+
+void protocol_recv_state_init(ProtocolRecvState* state) {
+    if (!state) return;
+    memset(state, 0, sizeof(*state));
+}
+
+void protocol_recv_state_free(ProtocolRecvState* state) {
+    if (!state) return;
+    free(state->payload);
+    memset(state, 0, sizeof(*state));
+}
+
+void protocol_recv_state_reset(ProtocolRecvState* state) {
+    protocol_recv_state_free(state);
+}
+
+int protocol_build_message(MessageType type, const uint8_t* payload, size_t len, uint8_t** frame, size_t* frame_len) {
+    if (!frame || !frame_len) return -1;
+    if (len > MAX_PAYLOAD_SIZE) return -1;
+    if (len > 0 && !payload) return -1;
+
+    *frame = NULL;
+    *frame_len = 0;
+
+    size_t total_len = MESSAGE_HEADER_SIZE + len;
+    uint8_t* buffer = (uint8_t*)malloc(total_len);
+    if (!buffer) return -1;
+
+    MessageHeader header = {
+        .magic = PROTOCOL_MAGIC,
+        .type = type,
+        .payload_len = (uint32_t)len,
+        .sequence = protocol_next_sequence()
+    };
+
+    if (protocol_serialize_header(&header, buffer) < 0) {
+        free(buffer);
+        return -1;
+    }
+
+    if (len > 0) {
+        memcpy(buffer + MESSAGE_HEADER_SIZE, payload, len);
+    }
+
+    *frame = buffer;
+    *frame_len = total_len;
+    return 0;
+}
+
+int protocol_send_frame_nonblocking(int socket, const uint8_t* frame, size_t frame_len, size_t* offset) {
+    if (!frame || !offset || *offset > frame_len) return -1;
+
+    while (*offset < frame_len) {
+        ssize_t n = send(socket, frame + *offset, frame_len - *offset, PROTOCOL_SEND_FLAGS);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+            return -1;
+        }
+        if (n == 0) return -1;
+        *offset += (size_t)n;
+    }
+
+    return 1;
+}
+
+static int recv_into_state(int socket, uint8_t* buffer, size_t target_len, size_t* received) {
+    while (*received < target_len) {
+        ssize_t n = recv(socket, buffer + *received, target_len - *received, 0);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+            return -1;
+        }
+        if (n == 0) return -1;
+        *received += (size_t)n;
+    }
+
+    return 1;
+}
+
+int protocol_recv_message_nonblocking(int socket, ProtocolRecvState* state, MessageHeader* header, uint8_t** payload) {
+    if (!state || !header) return -1;
+    if (payload) *payload = NULL;
+
+    if (!state->header_ready) {
+        int header_result = recv_into_state(socket,
+                                            state->header_buf,
+                                            MESSAGE_HEADER_SIZE,
+                                            &state->header_received);
+        if (header_result <= 0) {
+            if (header_result < 0) {
+                protocol_recv_state_reset(state);
+            }
+            return header_result;
+        }
+
+        if (protocol_deserialize_header(state->header_buf, &state->header) < 0 ||
+            state->header.payload_len > MAX_PAYLOAD_SIZE) {
+            protocol_recv_state_reset(state);
+            return -1;
+        }
+
+        state->header_ready = true;
+        state->payload_received = 0;
+
+        if (state->header.payload_len > 0) {
+            state->payload = (uint8_t*)malloc(state->header.payload_len);
+            if (!state->payload) {
+                protocol_recv_state_reset(state);
+                return -1;
+            }
+        }
+    }
+
+    if (state->header.payload_len > 0) {
+        int payload_result = recv_into_state(socket,
+                                             state->payload,
+                                             state->header.payload_len,
+                                             &state->payload_received);
+        if (payload_result <= 0) {
+            if (payload_result < 0) {
+                protocol_recv_state_reset(state);
+            }
+            return payload_result;
+        }
+    }
+
+    *header = state->header;
+    if (payload) {
+        *payload = state->payload;
+        state->payload = NULL;
+    } else {
+        free(state->payload);
+        state->payload = NULL;
+    }
+    protocol_recv_state_init(state);
+
+    return 1;
 }
 
 // Receive exact number of bytes
@@ -699,31 +851,15 @@ static int recv_all(int socket, uint8_t* buffer, size_t len) {
 }
 
 int protocol_send_message(int socket, MessageType type, const uint8_t* payload, size_t len) {
-    static uint32_t sequence = 0;
-    
-    MessageHeader header = {
-        .magic = PROTOCOL_MAGIC,
-        .type = type,
-        .payload_len = (uint32_t)len,
-        .sequence = sequence++
-    };
-    
-    uint8_t header_buf[MESSAGE_HEADER_SIZE];
-    if (protocol_serialize_header(&header, header_buf) < 0) {
+    uint8_t* frame = NULL;
+    size_t frame_len = 0;
+    if (protocol_build_message(type, payload, len, &frame, &frame_len) < 0) {
         return -1;
     }
-    
-    if (send_all(socket, header_buf, MESSAGE_HEADER_SIZE) < 0) {
-        return -1;
-    }
-    
-    if (len > 0 && payload) {
-        if (send_all(socket, payload, len) < 0) {
-            return -1;
-        }
-    }
-    
-    return 0;
+
+    int result = send_all(socket, frame, frame_len);
+    free(frame);
+    return result;
 }
 
 int protocol_recv_message(int socket, MessageHeader* header, uint8_t** payload) {

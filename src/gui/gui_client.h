@@ -18,6 +18,7 @@ typedef struct GuiClient {
     uint32_t selected_colony;
     uint32_t selected_index;      // Index in colony array for cycling
     float fps;                    // Current frames per second
+    ProtocolRecvState recv_state;
     bool pending_grid_active;
     uint32_t pending_grid_tick;
     uint32_t pending_grid_next_index;

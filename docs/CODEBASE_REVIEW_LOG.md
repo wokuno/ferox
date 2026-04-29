@@ -903,6 +903,45 @@ Second-batch verification:
   `docs/SIMULATION.md` to state the current behavior: biofilm affects spread,
   stress, combat, and turnover pressure, while diffusion uses configured
   reaction-diffusion controls.
+
+Next network reliability batch:
+- Start `#99` / `#162` implementation after the warning/stale-code cleanup
+  landed on `codex/open-issue-hardening`.
+- Target slice:
+  - add resumable protocol frame receive/send state for nonblocking sockets
+  - stop flipping accepted/client sockets into blocking mode for message reads
+  - add bounded per-client world-update outboxes so server broadcast work is
+    enqueued under `clients_mutex` and socket pumping happens separately
+  - document the resulting slow-client/coalescing semantics in protocol/docs
+- Constraint: coalesce only unsent world batches. Never replace a batch after
+  bytes have entered the socket stream.
+- Implementation notes:
+  - added `ProtocolRecvState` plus nonblocking framed receive/send helpers with
+    tri-state completion semantics
+  - server `ClientSession` now owns receive state plus active/pending
+    world-update send batches
+  - broadcast enqueues ordered world/chunk/detail batches under
+    `clients_mutex`, then pumps socket writes outside the lock
+  - terminal and GUI clients now drain bounded complete frames per render tick
+    without switching sockets back to blocking mode
+  - protocol and architecture docs describe slow-client coalescing and the
+    "never replace bytes already written" invariant
+  - pre-commit review findings addressed:
+    - sends now suppress `SIGPIPE` via `MSG_NOSIGNAL` where available,
+      `SO_NOSIGPIPE` where available, and server entry-point `SIGPIPE` ignore
+    - replacing an unsent world batch now clears stale pending sends too
+    - protocol edge coverage now forces a nonblocking send backpressure/resume
+      path
+- Validation:
+  - `cmake --build build --target test_protocol_edge test_phase5 test_phase6 ferox_client ferox_gui ferox_server`: passed
+  - `ctest --test-dir build --output-on-failure -R "ProtocolEdgeTests|Phase5Tests|Phase6Tests"`: passed `3/3`
+  - `./scripts/test.sh quick`: passed `24/24`
+  - `./scripts/test.sh all`: passed `28/28`
+  - after review fixes, `cmake --build build --target test_protocol_edge test_phase5 ferox_server`: passed
+  - after review fixes, `ctest --test-dir build --output-on-failure -R "ProtocolEdgeTests|Phase5Tests"`: passed `2/2`
+  - after review fixes, `./scripts/test.sh all`: passed `28/28`
+- The pre-existing local `scripts/run.sh` modification remains unstaged and out
+  of scope.
 - Wait-backend refactor:
   - moved platform-specific worker park/unpark logic out of `atomic_sim.c` and into a dedicated `phase_wait` backend layer
   - `atomic_sim.c` now depends only on atomic sequencing plus a narrow `phase_wait_eq` / `phase_wake_all` / `phase_wait_backoff` interface

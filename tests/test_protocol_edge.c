@@ -8,6 +8,10 @@
 #include <string.h>
 #include <stdint.h>
 #include <math.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/socket.h>
 
 #include "../src/shared/protocol.h"
 
@@ -38,6 +42,47 @@ static int tests_failed = 0;
 #define ASSERT_GE(a, b) ASSERT((a) >= (b), #a " >= " #b)
 #define ASSERT_LE(a, b) ASSERT((a) <= (b), #a " <= " #b)
 #define ASSERT_NOT_NULL(ptr) ASSERT((ptr) != NULL, #ptr " is not NULL")
+
+static int make_nonblocking_socket_pair(int fds[2]) {
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+        return -1;
+    }
+
+    for (int i = 0; i < 2; i++) {
+        int flags = fcntl(fds[i], F_GETFL, 0);
+        if (flags < 0 || fcntl(fds[i], F_SETFL, flags | O_NONBLOCK) != 0) {
+            close(fds[0]);
+            close(fds[1]);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static void close_socket_pair(int fds[2]) {
+    close(fds[0]);
+    close(fds[1]);
+}
+
+static int drain_available_bytes(int fd, uint8_t* buffer, size_t capacity, size_t* received) {
+    while (*received < capacity) {
+        ssize_t n = read(fd, buffer + *received, capacity - *received);
+        if (n > 0) {
+            *received += (size_t)n;
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            return 0;
+        }
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        return -1;
+    }
+
+    return 0;
+}
 
 // ============================================================================
 // Empty World Tests
@@ -256,6 +301,204 @@ TEST(partial_message_handling) {
     ASSERT_EQ(result, -1);  // Should fail
     
     free(buffer);
+}
+
+TEST(nonblocking_recv_handles_fragmented_frame) {
+    int fds[2];
+    ASSERT_EQ(make_nonblocking_socket_pair(fds), 0);
+
+    const uint8_t source_payload[] = {0x10, 0x20, 0x30, 0x40, 0x50};
+    uint8_t* frame = NULL;
+    size_t frame_len = 0;
+    int result = protocol_build_message(MSG_COMMAND, source_payload, sizeof(source_payload), &frame, &frame_len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(frame);
+
+    ProtocolRecvState state;
+    protocol_recv_state_init(&state);
+    MessageHeader header;
+    uint8_t* payload = NULL;
+
+    ASSERT_EQ(write(fds[0], frame, 3), 3);
+    result = protocol_recv_message_nonblocking(fds[1], &state, &header, &payload);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(state.header_received, 3);
+    ASSERT_EQ(payload, NULL);
+
+    size_t header_remainder = MESSAGE_HEADER_SIZE - 3;
+    ASSERT_EQ(write(fds[0], frame + 3, header_remainder), (ssize_t)header_remainder);
+    result = protocol_recv_message_nonblocking(fds[1], &state, &header, &payload);
+    ASSERT_EQ(result, 0);
+    ASSERT_TRUE(state.header_ready);
+    ASSERT_EQ(state.header.payload_len, sizeof(source_payload));
+    ASSERT_EQ(payload, NULL);
+
+    ASSERT_EQ(write(fds[0], frame + MESSAGE_HEADER_SIZE, 2), 2);
+    result = protocol_recv_message_nonblocking(fds[1], &state, &header, &payload);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(state.payload_received, 2);
+    ASSERT_EQ(payload, NULL);
+
+    size_t payload_remainder = sizeof(source_payload) - 2;
+    ASSERT_EQ(write(fds[0], frame + MESSAGE_HEADER_SIZE + 2, payload_remainder), (ssize_t)payload_remainder);
+    result = protocol_recv_message_nonblocking(fds[1], &state, &header, &payload);
+    ASSERT_EQ(result, 1);
+    ASSERT_EQ(header.type, MSG_COMMAND);
+    ASSERT_EQ(header.payload_len, sizeof(source_payload));
+    ASSERT_NOT_NULL(payload);
+    ASSERT_EQ(memcmp(payload, source_payload, sizeof(source_payload)), 0);
+
+    free(payload);
+    free(frame);
+    protocol_recv_state_free(&state);
+    close_socket_pair(fds);
+}
+
+TEST(nonblocking_recv_handles_zero_payload) {
+    int fds[2];
+    ASSERT_EQ(make_nonblocking_socket_pair(fds), 0);
+
+    uint8_t* frame = NULL;
+    size_t frame_len = 0;
+    int result = protocol_build_message(MSG_ACK, NULL, 0, &frame, &frame_len);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(write(fds[0], frame, frame_len), (ssize_t)frame_len);
+
+    ProtocolRecvState state;
+    protocol_recv_state_init(&state);
+    MessageHeader header;
+    uint8_t* payload = (uint8_t*)0x1;
+    result = protocol_recv_message_nonblocking(fds[1], &state, &header, &payload);
+    ASSERT_EQ(result, 1);
+    ASSERT_EQ(header.type, MSG_ACK);
+    ASSERT_EQ(header.payload_len, 0);
+    ASSERT_EQ(payload, NULL);
+
+    free(frame);
+    protocol_recv_state_free(&state);
+    close_socket_pair(fds);
+}
+
+TEST(nonblocking_recv_rejects_oversized_payload) {
+    int fds[2];
+    ASSERT_EQ(make_nonblocking_socket_pair(fds), 0);
+
+    MessageHeader bad_header = {
+        .magic = PROTOCOL_MAGIC,
+        .type = MSG_WORLD_STATE,
+        .payload_len = MAX_PAYLOAD_SIZE + 1u,
+        .sequence = 99u
+    };
+    uint8_t frame[MESSAGE_HEADER_SIZE];
+    ASSERT_EQ(protocol_serialize_header(&bad_header, frame), MESSAGE_HEADER_SIZE);
+    ASSERT_EQ(write(fds[0], frame, sizeof(frame)), (ssize_t)sizeof(frame));
+
+    ProtocolRecvState state;
+    protocol_recv_state_init(&state);
+    MessageHeader header;
+    uint8_t* payload = NULL;
+    int result = protocol_recv_message_nonblocking(fds[1], &state, &header, &payload);
+    ASSERT_EQ(result, -1);
+    ASSERT_EQ(state.header_received, 0);
+    ASSERT_EQ(payload, NULL);
+
+    protocol_recv_state_free(&state);
+    close_socket_pair(fds);
+}
+
+TEST(nonblocking_recv_rejects_eof_mid_frame) {
+    int fds[2];
+    ASSERT_EQ(make_nonblocking_socket_pair(fds), 0);
+
+    uint8_t* frame = NULL;
+    size_t frame_len = 0;
+    int result = protocol_build_message(MSG_ERROR, (const uint8_t*)"err", 3, &frame, &frame_len);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(write(fds[0], frame, 4), 4);
+    close(fds[0]);
+    fds[0] = -1;
+
+    ProtocolRecvState state;
+    protocol_recv_state_init(&state);
+    MessageHeader header;
+    uint8_t* payload = NULL;
+    result = protocol_recv_message_nonblocking(fds[1], &state, &header, &payload);
+    ASSERT_EQ(result, -1);
+    ASSERT_EQ(state.header_received, 0);
+    ASSERT_EQ(payload, NULL);
+
+    free(frame);
+    protocol_recv_state_free(&state);
+    close(fds[1]);
+}
+
+TEST(nonblocking_send_frame_writes_complete_frame) {
+    int fds[2];
+    ASSERT_EQ(make_nonblocking_socket_pair(fds), 0);
+
+    const uint8_t source_payload[] = {1, 2, 3, 4};
+    uint8_t* frame = NULL;
+    size_t frame_len = 0;
+    int result = protocol_build_message(MSG_COLONY_INFO, source_payload, sizeof(source_payload), &frame, &frame_len);
+    ASSERT_EQ(result, 0);
+
+    size_t offset = 0;
+    result = protocol_send_frame_nonblocking(fds[0], frame, frame_len, &offset);
+    ASSERT_EQ(result, 1);
+    ASSERT_EQ(offset, frame_len);
+
+    uint8_t received[MESSAGE_HEADER_SIZE + sizeof(source_payload)];
+    ssize_t n = read(fds[1], received, sizeof(received));
+    ASSERT_EQ(n, (ssize_t)sizeof(received));
+    ASSERT_EQ(memcmp(received, frame, frame_len), 0);
+
+    free(frame);
+    close_socket_pair(fds);
+}
+
+TEST(nonblocking_send_frame_handles_backpressure_and_resume) {
+    int fds[2];
+    ASSERT_EQ(make_nonblocking_socket_pair(fds), 0);
+
+    int send_buffer_size = 4096;
+    setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &send_buffer_size, sizeof(send_buffer_size));
+
+    uint8_t* source_payload = (uint8_t*)malloc(MAX_PAYLOAD_SIZE);
+    ASSERT_NOT_NULL(source_payload);
+    for (size_t i = 0; i < MAX_PAYLOAD_SIZE; i++) {
+        source_payload[i] = (uint8_t)(i & 0xFFu);
+    }
+
+    uint8_t* frame = NULL;
+    size_t frame_len = 0;
+    int result = protocol_build_message(MSG_WORLD_STATE, source_payload, MAX_PAYLOAD_SIZE, &frame, &frame_len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(frame);
+
+    size_t offset = 0;
+    result = protocol_send_frame_nonblocking(fds[0], frame, frame_len, &offset);
+    ASSERT_EQ(result, 0);
+    ASSERT(offset > 0 && offset < frame_len, "Backpressure should leave partial send progress");
+
+    uint8_t* received = (uint8_t*)malloc(frame_len);
+    ASSERT_NOT_NULL(received);
+    size_t received_len = 0;
+    ASSERT_EQ(drain_available_bytes(fds[1], received, frame_len, &received_len), 0);
+
+    for (int iterations = 0; offset < frame_len && iterations < 10000; iterations++) {
+        result = protocol_send_frame_nonblocking(fds[0], frame, frame_len, &offset);
+        ASSERT(result >= 0, "Send should not fail while peer is connected");
+        ASSERT_EQ(drain_available_bytes(fds[1], received, frame_len, &received_len), 0);
+    }
+
+    ASSERT_EQ(offset, frame_len);
+    ASSERT_EQ(received_len, frame_len);
+    ASSERT_EQ(memcmp(received, frame, frame_len), 0);
+
+    free(received);
+    free(frame);
+    free(source_payload);
+    close_socket_pair(fds);
 }
 
 TEST(world_delta_grid_chunk_roundtrip) {
@@ -730,6 +973,12 @@ int run_protocol_edge_tests(void) {
     printf("\nPayload Tests:\n");
     RUN_TEST(zero_length_payload);
     RUN_TEST(partial_message_handling);
+    RUN_TEST(nonblocking_recv_handles_fragmented_frame);
+    RUN_TEST(nonblocking_recv_handles_zero_payload);
+    RUN_TEST(nonblocking_recv_rejects_oversized_payload);
+    RUN_TEST(nonblocking_recv_rejects_eof_mid_frame);
+    RUN_TEST(nonblocking_send_frame_writes_complete_frame);
+    RUN_TEST(nonblocking_send_frame_handles_backpressure_and_resume);
     RUN_TEST(world_delta_grid_chunk_roundtrip);
     RUN_TEST(world_delta_grid_chunk_rejects_invalid_bounds);
     

@@ -609,17 +609,33 @@ The server broadcasts world state at a fixed interval (default 100ms, configurab
 
 1. Simulation thread completes tick
 2. World state is serialized to MSG_WORLD_STATE
-3. Message is broadcast to all connected clients
-4. Clients update their local world copy
-5. Clients render updated state
+3. World state and any grid chunks are enqueued as one ordered per-client batch
+4. Server socket writes are pumped outside `clients_mutex`
+5. Clients assemble complete frames from nonblocking reads
+6. Clients update their local world copy and render updated state
 
 ### Handling Slow Clients
 
 If a client cannot keep up with updates:
-- Messages queue in the TCP buffer
-- Eventually, the send buffer fills
-- Server may drop the client connection
-- Client should handle reconnection
+
+- The server keeps at most one active send batch and one pending send batch per
+  client.
+- A batch contains the world snapshot, all associated grid chunks, and optional
+  selected-colony detail for the same broadcast tick.
+- Once any byte from the active batch has entered the socket stream, that batch
+  is never replaced. This preserves frame and chunk ordering.
+- Fresh broadcasts may replace only an unsent batch, or the pending batch behind
+  an already-started active batch. This coalesces stale world updates without
+  corrupting partially-sent frames.
+- Socket `EAGAIN` / `EWOULDBLOCK` is treated as retryable backpressure. Closed
+  peers, malformed headers, and oversized payloads close the connection.
+- Server/client sockets suppress `SIGPIPE` where the platform exposes a socket
+  option, and Linux sends use `MSG_NOSIGNAL`, so closed peers are reported as
+  send errors instead of process termination.
+
+Chunked grid recovery remains snapshot-based: clients accept chunks only for the
+current world tick and expected next grid offset. Out-of-order or mismatched
+chunks are ignored until a newer world snapshot restarts assembly.
 
 ## Command/Response Flow
 
@@ -708,7 +724,24 @@ int protocol_send_message(int socket, MessageType type,
                           const uint8_t* payload, size_t len);
 int protocol_recv_message(int socket, MessageHeader* header, 
                           uint8_t** payload);
+
+void protocol_recv_state_init(ProtocolRecvState* state);
+void protocol_recv_state_reset(ProtocolRecvState* state);
+void protocol_recv_state_free(ProtocolRecvState* state);
+
+int protocol_build_message(MessageType type, const uint8_t* payload,
+                           size_t len, uint8_t** frame, size_t* frame_len);
+int protocol_send_frame_nonblocking(int socket, const uint8_t* frame,
+                                    size_t frame_len, size_t* offset);
+int protocol_recv_message_nonblocking(int socket, ProtocolRecvState* state,
+                                      MessageHeader* header, uint8_t** payload);
 ```
+
+The complete-message helpers are retained for blocking/simple call sites. The
+nonblocking helpers use tri-state returns: `1` complete, `0` incomplete or
+would-block, and `-1` fatal error or closed peer. Built frames own a single
+header+payload byte buffer and assign the sequence number once at enqueue time,
+so resumed sends do not mutate wire metadata.
 
 ### Grid Compression
 

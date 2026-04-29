@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <sys/time.h>
 
 #include "../src/server/server.h"
@@ -180,6 +181,48 @@ int test_server_handles_pause_resume_commands(void) {
     TEST_ASSERT_EQ(client->selected_colony, 42, "Selected colony should be updated");
     
     server_remove_client(server, client);
+    server_destroy(server);
+    return 0;
+}
+
+int test_server_process_clients_buffers_fragmented_command(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+
+    int fds[2];
+    TEST_ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0, "Socket pair should be created");
+
+    NetSocket* server_socket = (NetSocket*)calloc(1, sizeof(NetSocket));
+    TEST_ASSERT(server_socket != NULL, "Server socket wrapper should be allocated");
+    server_socket->fd = fds[1];
+    server_socket->connected = true;
+    net_set_nonblocking(server_socket, true);
+
+    ClientSession* client = server_add_client(server, server_socket);
+    TEST_ASSERT(client != NULL, "Client should be added");
+
+    uint8_t command_buffer[COMMAND_TYPE_SERIALIZED_SIZE];
+    int command_len = protocol_serialize_command(CMD_PAUSE, NULL, command_buffer);
+    TEST_ASSERT_EQ(command_len, COMMAND_TYPE_SERIALIZED_SIZE, "Pause command should serialize");
+
+    uint8_t* frame = NULL;
+    size_t frame_len = 0;
+    TEST_ASSERT_EQ(protocol_build_message(MSG_COMMAND, command_buffer, (size_t)command_len, &frame, &frame_len),
+                   0, "Command frame should be built");
+
+    TEST_ASSERT_EQ(write(fds[0], frame, 5), 5, "Partial command frame should write");
+    server_process_clients(server);
+    TEST_ASSERT_EQ(server->paused, false, "Partial command should not be handled yet");
+    TEST_ASSERT_EQ(client->active, true, "Client should remain active after partial frame");
+
+    size_t remaining = frame_len - 5;
+    TEST_ASSERT_EQ(write(fds[0], frame + 5, remaining), (ssize_t)remaining, "Remaining command frame should write");
+    server_process_clients(server);
+    TEST_ASSERT_EQ(server->paused, true, "Complete command should be handled");
+    TEST_ASSERT_EQ(client->active, true, "Client should remain active after complete frame");
+
+    free(frame);
+    close(fds[0]);
     server_destroy(server);
     return 0;
 }
@@ -369,6 +412,7 @@ int main(void) {
     // Command handling tests
     printf("\n--- Command Handling Tests ---\n");
     RUN_TEST(test_server_handles_pause_resume_commands);
+    RUN_TEST(test_server_process_clients_buffers_fragmented_command);
     
     // World tests
     printf("\n--- World Tests ---\n");

@@ -23,6 +23,8 @@
 static void* accept_thread_func(void* arg);
 static void* simulation_thread_func(void* arg);
 
+#define SERVER_CLIENT_RECV_BUDGET_MESSAGES 32
+
 static void copy_colony_name(char dst[MAX_COLONY_NAME], const char* src) {
     if (!dst) {
         return;
@@ -186,6 +188,224 @@ static void sleep_ms(int ms) {
     nanosleep(&ts, NULL);
 }
 
+static void client_send_batch_free(ClientSendBatch* batch) {
+    if (!batch) return;
+
+    for (size_t i = 0; i < batch->frame_count; i++) {
+        free(batch->frames[i].data);
+    }
+    free(batch->frames);
+    memset(batch, 0, sizeof(*batch));
+}
+
+static bool client_send_batch_has_frames(const ClientSendBatch* batch) {
+    return batch && batch->frame_count > 0;
+}
+
+static int client_send_batch_reserve(ClientSendBatch* batch, size_t frame_count) {
+    if (!batch) return -1;
+    if (frame_count <= batch->frame_capacity) return 0;
+
+    size_t next_capacity = batch->frame_capacity ? batch->frame_capacity : 4;
+    while (next_capacity < frame_count) {
+        next_capacity *= 2;
+    }
+
+    ClientFrame* frames = (ClientFrame*)realloc(batch->frames, next_capacity * sizeof(ClientFrame));
+    if (!frames) return -1;
+
+    memset(frames + batch->frame_capacity, 0,
+           (next_capacity - batch->frame_capacity) * sizeof(ClientFrame));
+    batch->frames = frames;
+    batch->frame_capacity = next_capacity;
+    return 0;
+}
+
+static int client_send_batch_add_message(ClientSendBatch* batch,
+                                         MessageType type,
+                                         const uint8_t* payload,
+                                         size_t len) {
+    if (!batch) return -1;
+
+    uint8_t* frame = NULL;
+    size_t frame_len = 0;
+    if (protocol_build_message(type, payload, len, &frame, &frame_len) < 0) {
+        return -1;
+    }
+
+    if (client_send_batch_reserve(batch, batch->frame_count + 1) < 0) {
+        free(frame);
+        return -1;
+    }
+
+    batch->frames[batch->frame_count].data = frame;
+    batch->frames[batch->frame_count].len = frame_len;
+    batch->frame_count++;
+    return 0;
+}
+
+static void client_send_batch_move(ClientSendBatch* dst, ClientSendBatch* src) {
+    if (!dst || !src) return;
+    *dst = *src;
+    memset(src, 0, sizeof(*src));
+}
+
+static void client_queue_send_batch(ClientSession* client, ClientSendBatch* batch, bool coalesce_unsent_current) {
+    if (!client || !client_send_batch_has_frames(batch)) return;
+
+    if (!client_send_batch_has_frames(&client->send_current)) {
+        client_send_batch_move(&client->send_current, batch);
+        return;
+    }
+
+    if (coalesce_unsent_current && !client->send_current.started) {
+        client_send_batch_free(&client->send_current);
+        client_send_batch_free(&client->send_pending);
+        client_send_batch_move(&client->send_current, batch);
+        return;
+    }
+
+    client_send_batch_free(&client->send_pending);
+    client_send_batch_move(&client->send_pending, batch);
+}
+
+static void server_free_client_session(ClientSession* client) {
+    if (!client) return;
+
+    if (client->socket) {
+        net_socket_close(client->socket);
+        client->socket = NULL;
+    }
+    protocol_recv_state_free(&client->recv_state);
+    client_send_batch_free(&client->send_current);
+    client_send_batch_free(&client->send_pending);
+    free(client);
+}
+
+static void server_cleanup_inactive_clients(Server* server) {
+    if (!server) return;
+
+    pthread_mutex_lock(&server->clients_mutex);
+    ClientSession** link = &server->clients;
+    while (*link) {
+        ClientSession* client = *link;
+        bool connected = client->socket && client->socket->connected;
+        if (!client->active || !connected) {
+            *link = client->next;
+            server->client_count--;
+            server_free_client_session(client);
+            continue;
+        }
+        link = &client->next;
+    }
+    pthread_mutex_unlock(&server->clients_mutex);
+}
+
+static int server_collect_active_clients(Server* server, ClientSession*** clients, size_t* count) {
+    if (!server || !clients || !count) return -1;
+
+    *clients = NULL;
+    *count = 0;
+
+    pthread_mutex_lock(&server->clients_mutex);
+    int capacity = server->client_count;
+    if (capacity <= 0) {
+        pthread_mutex_unlock(&server->clients_mutex);
+        return 0;
+    }
+
+    ClientSession** list = (ClientSession**)malloc((size_t)capacity * sizeof(ClientSession*));
+    if (!list) {
+        pthread_mutex_unlock(&server->clients_mutex);
+        return -1;
+    }
+
+    ClientSession* client = server->clients;
+    while (client && *count < (size_t)capacity) {
+        if (client->active && client->socket && client->socket->connected) {
+            list[*count] = client;
+            (*count)++;
+        }
+        client = client->next;
+    }
+    pthread_mutex_unlock(&server->clients_mutex);
+
+    *clients = list;
+    return 0;
+}
+
+static void server_mark_client_disconnected(ClientSession* client) {
+    if (!client) return;
+    client->active = false;
+    if (client->socket) {
+        client->socket->connected = false;
+    }
+}
+
+static void server_pump_client_outboxes(Server* server) {
+    if (!server) return;
+
+    ClientSession** clients = NULL;
+    size_t client_count = 0;
+    if (server_collect_active_clients(server, &clients, &client_count) < 0) {
+        return;
+    }
+
+    for (size_t client_idx = 0; client_idx < client_count; client_idx++) {
+        ClientSession* client = clients[client_idx];
+        if (!client || !client->active || !client->socket || !client->socket->connected) {
+            continue;
+        }
+
+        while (client_send_batch_has_frames(&client->send_current) && client->active) {
+            if (client->send_current.frame_index >= client->send_current.frame_count) {
+                client_send_batch_free(&client->send_current);
+                if (client_send_batch_has_frames(&client->send_pending)) {
+                    client_send_batch_move(&client->send_current, &client->send_pending);
+                    continue;
+                }
+                break;
+            }
+
+            ClientFrame* frame = &client->send_current.frames[client->send_current.frame_index];
+            size_t before = client->send_current.frame_offset;
+            int result = protocol_send_frame_nonblocking(client->socket->fd,
+                                                         frame->data,
+                                                         frame->len,
+                                                         &client->send_current.frame_offset);
+            if (client->send_current.frame_offset > before) {
+                client->send_current.started = true;
+            }
+
+            if (result < 0) {
+                printf("Client %u disconnected\n", client->id);
+                server_mark_client_disconnected(client);
+                break;
+            }
+            if (result == 0) {
+                break;
+            }
+
+            free(frame->data);
+            frame->data = NULL;
+            frame->len = 0;
+            client->send_current.frame_index++;
+            client->send_current.frame_offset = 0;
+        }
+
+        if (client_send_batch_has_frames(&client->send_current) &&
+            client->send_current.frame_index >= client->send_current.frame_count) {
+            client_send_batch_free(&client->send_current);
+            if (client_send_batch_has_frames(&client->send_pending)) {
+                client_send_batch_move(&client->send_current, &client->send_pending);
+            }
+        }
+    }
+
+    free(clients);
+    server_cleanup_inactive_clients(server);
+}
+
 Server* server_create(uint16_t port, int world_width, int world_height, int thread_count) {
     if (world_width <= 0 || world_height <= 0 || thread_count <= 0) {
         return NULL;
@@ -343,10 +563,7 @@ void server_destroy(Server* server) {
     ClientSession* client = server->clients;
     while (client) {
         ClientSession* next = client->next;
-        if (client->socket) {
-            net_socket_close(client->socket);
-        }
-        free(client);
+        server_free_client_session(client);
         client = next;
     }
     server->clients = NULL;
@@ -591,6 +808,81 @@ static int build_protocol_world(Server* server, ProtoWorld* proto_world) {
                                                 proto_world);
 }
 
+static int build_colony_info_payload(Server* server, uint32_t colony_id, uint8_t** out_buffer, size_t* out_len) {
+    if (!server || colony_id == 0 || !out_buffer || !out_len) return -1;
+
+    *out_buffer = NULL;
+    *out_len = 0;
+
+    ProtoColonyDetail detail;
+    memset(&detail, 0, sizeof(detail));
+    detail.base.id = colony_id;
+    detail.tick = (uint32_t)server->world->tick;
+
+    size_t colony_idx = 0;
+    bool found = false;
+    for (size_t i = 0; i < server->world->colony_count; i++) {
+        if (server->world->colonies[i].id == colony_id && server->world->colonies[i].active) {
+            colony_idx = i;
+            found = true;
+            break;
+        }
+    }
+
+    if (found) {
+        Colony* colony = &server->world->colonies[colony_idx];
+        fill_proto_colony_detail_base(server->world, colony, &detail.base);
+        detail.age = colony->age > UINT32_MAX ? UINT32_MAX : (uint32_t)colony->age;
+        detail.parent_id = colony->parent_id;
+        detail.state = (uint8_t)colony->state;
+        if (colony->is_dormant) {
+            detail.flags |= COLONY_DETAIL_FLAG_DORMANT;
+        }
+        detail.stress_level = colony->stress_level;
+        detail.biofilm_strength = colony->biofilm_strength;
+        detail.signal_strength = colony->signal_strength;
+        detail.drift_x = colony->drift_x;
+        detail.drift_y = colony->drift_y;
+        detail.behavior_mode = (uint8_t)colony->behavior_mode;
+        detail.focus_direction = colony->focus_direction;
+        detail.dominant_sensor = colony->dominant_sensor;
+        detail.dominant_drive = colony->dominant_drive;
+        detail.secondary_sensor = colony->secondary_sensor;
+        detail.secondary_drive = colony->secondary_drive;
+        detail.dominant_sensor_value = colony->dominant_sensor_value;
+        detail.dominant_drive_value = colony->dominant_drive_value;
+        detail.secondary_sensor_value = colony->secondary_sensor_value;
+        detail.secondary_drive_value = colony->secondary_drive_value;
+        detail.action_expand = colony->behavior_actions[COLONY_ACTION_EXPAND];
+        detail.action_attack = colony->behavior_actions[COLONY_ACTION_ATTACK];
+        detail.action_defend = colony->behavior_actions[COLONY_ACTION_DEFEND];
+        detail.action_signal = colony->behavior_actions[COLONY_ACTION_SIGNAL];
+        detail.action_transfer = colony->behavior_actions[COLONY_ACTION_TRANSFER];
+        detail.action_dormancy = colony->behavior_actions[COLONY_ACTION_DORMANCY];
+        detail.action_motility = colony->behavior_actions[COLONY_ACTION_MOTILITY];
+        fill_proto_colony_graph_links(colony, &detail);
+        detail.trait_expansion = summarize_trait_expansion(&colony->genome);
+        detail.trait_aggression = summarize_trait_aggression(&colony->genome);
+        detail.trait_resilience = summarize_trait_resilience(&colony->genome);
+        detail.trait_cooperation = summarize_trait_cooperation(&colony->genome);
+        detail.trait_efficiency = summarize_trait_efficiency(&colony->genome);
+        detail.trait_learning = summarize_trait_learning(&colony->genome);
+    }
+
+    uint8_t* buffer = (uint8_t*)malloc(COLONY_DETAIL_SERIALIZED_SIZE);
+    if (!buffer) return -1;
+
+    int len = protocol_serialize_colony_detail(&detail, buffer);
+    if (len <= 0) {
+        free(buffer);
+        return -1;
+    }
+
+    *out_buffer = buffer;
+    *out_len = (size_t)len;
+    return 0;
+}
+
 void server_broadcast_world_state(Server* server) {
     if (!server) return;
     
@@ -665,53 +957,48 @@ void server_broadcast_world_state(Server* server) {
     }
     free(chunk_cells);
     
-    // Broadcast to all clients
+    // Queue ordered world-update batches for each client, then flush sockets
+    // outside the client list lock.
     pthread_mutex_lock(&server->clients_mutex);
     ClientSession* client = server->clients;
-    ClientSession* prev = NULL;
-    
+
     while (client) {
-        ClientSession* next = client->next;
-        
         if (client->active && client->socket && client->socket->connected) {
-            int result = protocol_send_message(client->socket->fd, MSG_WORLD_STATE, buffer, len);
+            ClientSendBatch batch = {0};
+            int result = client_send_batch_add_message(&batch, MSG_WORLD_STATE, buffer, len);
             if (result == 0) {
                 for (size_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx++) {
-                    result = protocol_send_message(client->socket->fd, MSG_WORLD_DELTA,
-                                                   chunk_buffers[chunk_idx], chunk_lengths[chunk_idx]);
+                    result = client_send_batch_add_message(&batch,
+                                                           MSG_WORLD_DELTA,
+                                                           chunk_buffers[chunk_idx],
+                                                           chunk_lengths[chunk_idx]);
                     if (result < 0) {
                         break;
                     }
                 }
             }
             if (result == 0 && client->selected_colony != 0) {
-                server_send_colony_info(server, client, client->selected_colony);
-            }
-            if (result < 0) {
-                // Client disconnected
-                printf("Client %u disconnected\n", client->id);
-                client->active = false;
-                
-                // Remove from list
-                if (prev) {
-                    prev->next = next;
+                uint8_t* detail_buffer = NULL;
+                size_t detail_len = 0;
+                if (build_colony_info_payload(server, client->selected_colony, &detail_buffer, &detail_len) == 0) {
+                    result = client_send_batch_add_message(&batch, MSG_COLONY_INFO, detail_buffer, detail_len);
+                    free(detail_buffer);
                 } else {
-                    server->clients = next;
+                    result = -1;
                 }
-                
-                net_socket_close(client->socket);
-                free(client);
-                server->client_count--;
-                
-                client = next;
-                continue;
             }
+
+            if (result == 0) {
+                client_queue_send_batch(client, &batch, true);
+            }
+            client_send_batch_free(&batch);
         }
-        
-        prev = client;
-        client = next;
+
+        client = client->next;
     }
     pthread_mutex_unlock(&server->clients_mutex);
+
+    server_pump_client_outboxes(server);
 
     for (size_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx++) {
         free(chunk_buffers[chunk_idx]);
@@ -726,67 +1013,23 @@ void server_broadcast_world_state(Server* server) {
 void server_send_colony_info(Server* server, ClientSession* client, uint32_t colony_id) {
     if (!server || !client || !client->socket || colony_id == 0) return;
 
-    ProtoColonyDetail detail;
-    memset(&detail, 0, sizeof(detail));
-    detail.base.id = colony_id;
-    detail.tick = (uint32_t)server->world->tick;
-    
-    // Find colony index in internal world
-    size_t colony_idx = 0;
-    bool found = false;
-    for (size_t i = 0; i < server->world->colony_count; i++) {
-        if (server->world->colonies[i].id == colony_id && server->world->colonies[i].active) {
-            colony_idx = i;
-            found = true;
-            break;
-        }
-    }
-    
-    if (found) {
-        Colony* colony = &server->world->colonies[colony_idx];
-        fill_proto_colony_detail_base(server->world, colony, &detail.base);
-        detail.age = colony->age > UINT32_MAX ? UINT32_MAX : (uint32_t)colony->age;
-        detail.parent_id = colony->parent_id;
-        detail.state = (uint8_t)colony->state;
-        if (colony->is_dormant) {
-            detail.flags |= COLONY_DETAIL_FLAG_DORMANT;
-        }
-        detail.stress_level = colony->stress_level;
-        detail.biofilm_strength = colony->biofilm_strength;
-        detail.signal_strength = colony->signal_strength;
-        detail.drift_x = colony->drift_x;
-        detail.drift_y = colony->drift_y;
-        detail.behavior_mode = (uint8_t)colony->behavior_mode;
-        detail.focus_direction = colony->focus_direction;
-        detail.dominant_sensor = colony->dominant_sensor;
-        detail.dominant_drive = colony->dominant_drive;
-        detail.secondary_sensor = colony->secondary_sensor;
-        detail.secondary_drive = colony->secondary_drive;
-        detail.dominant_sensor_value = colony->dominant_sensor_value;
-        detail.dominant_drive_value = colony->dominant_drive_value;
-        detail.secondary_sensor_value = colony->secondary_sensor_value;
-        detail.secondary_drive_value = colony->secondary_drive_value;
-        detail.action_expand = colony->behavior_actions[COLONY_ACTION_EXPAND];
-        detail.action_attack = colony->behavior_actions[COLONY_ACTION_ATTACK];
-        detail.action_defend = colony->behavior_actions[COLONY_ACTION_DEFEND];
-        detail.action_signal = colony->behavior_actions[COLONY_ACTION_SIGNAL];
-        detail.action_transfer = colony->behavior_actions[COLONY_ACTION_TRANSFER];
-        detail.action_dormancy = colony->behavior_actions[COLONY_ACTION_DORMANCY];
-        detail.action_motility = colony->behavior_actions[COLONY_ACTION_MOTILITY];
-        fill_proto_colony_graph_links(colony, &detail);
-        detail.trait_expansion = summarize_trait_expansion(&colony->genome);
-        detail.trait_aggression = summarize_trait_aggression(&colony->genome);
-        detail.trait_resilience = summarize_trait_resilience(&colony->genome);
-        detail.trait_cooperation = summarize_trait_cooperation(&colony->genome);
-        detail.trait_efficiency = summarize_trait_efficiency(&colony->genome);
-        detail.trait_learning = summarize_trait_learning(&colony->genome);
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    if (build_colony_info_payload(server, colony_id, &buffer, &len) < 0) {
+        return;
     }
 
-    uint8_t buffer[COLONY_DETAIL_SERIALIZED_SIZE];
-    int len = protocol_serialize_colony_detail(&detail, buffer);
-    if (len > 0) {
-        protocol_send_message(client->socket->fd, MSG_COLONY_INFO, buffer, (size_t)len);
+    ClientSendBatch batch = {0};
+    if (client_send_batch_add_message(&batch, MSG_COLONY_INFO, buffer, len) == 0) {
+        pthread_mutex_lock(&server->clients_mutex);
+        if (client->active && client->socket && client->socket->connected) {
+            client_queue_send_batch(client, &batch, false);
+        }
+        pthread_mutex_unlock(&server->clients_mutex);
     }
+
+    client_send_batch_free(&batch);
+    free(buffer);
 }
 
 void server_handle_command(Server* server, ClientSession* client, CommandType cmd, void* data) {
@@ -880,6 +1123,7 @@ ClientSession* server_add_client(Server* server, NetSocket* socket) {
     session->socket = socket;
     session->active = true;
     session->selected_colony = 0;
+    protocol_recv_state_init(&session->recv_state);
     
     pthread_mutex_lock(&server->clients_mutex);
     session->id = server->next_client_id++;
@@ -907,10 +1151,7 @@ void server_remove_client(Server* server, ClientSession* client) {
                 server->clients = curr->next;
             }
             
-            if (curr->socket) {
-                net_socket_close(curr->socket);
-            }
-            free(curr);
+            server_free_client_session(curr);
             server->client_count--;
             break;
         }
@@ -923,59 +1164,62 @@ void server_remove_client(Server* server, ClientSession* client) {
 
 void server_process_clients(Server* server) {
     if (!server) return;
-    
-    pthread_mutex_lock(&server->clients_mutex);
-    ClientSession* client = server->clients;
-    
-    while (client) {
-        ClientSession* next = client->next;
-        
+
+    ClientSession** clients = NULL;
+    size_t client_count = 0;
+    if (server_collect_active_clients(server, &clients, &client_count) < 0) {
+        return;
+    }
+
+    for (size_t client_idx = 0; client_idx < client_count; client_idx++) {
+        ClientSession* client = clients[client_idx];
         if (!client->active || !client->socket || !client->socket->connected) {
-            client = next;
             continue;
         }
-        
-        // Check for incoming data
-        if (net_has_data(client->socket)) {
+
+        for (int messages = 0; messages < SERVER_CLIENT_RECV_BUDGET_MESSAGES; messages++) {
             MessageHeader header;
             uint8_t* payload = NULL;
-            
-            // Set socket to blocking temporarily for complete message read
-            net_set_nonblocking(client->socket, false);
-            int result = protocol_recv_message(client->socket->fd, &header, &payload);
-            net_set_nonblocking(client->socket, true);
-            
+
+            int result = protocol_recv_message_nonblocking(client->socket->fd,
+                                                           &client->recv_state,
+                                                           &header,
+                                                           &payload);
+            if (result == 0) {
+                break;
+            }
             if (result < 0) {
-                // Client disconnected or error
                 printf("Client %u disconnected\n", client->id);
-                client->active = false;
-            } else {
-                // Process message
-                switch (header.type) {
-                    case MSG_COMMAND: {
-                        CommandType cmd;
-                        uint8_t cmd_data[256];
-                        if (protocol_deserialize_command(payload, header.payload_len, &cmd, cmd_data) > 0) {
-                            server_handle_command(server, client, cmd, cmd_data);
-                        }
-                        break;
+                server_mark_client_disconnected(client);
+                break;
+            }
+
+            switch (header.type) {
+                case MSG_COMMAND: {
+                    CommandType cmd;
+                    uint8_t cmd_data[256];
+                    if (protocol_deserialize_command(payload, header.payload_len, &cmd, cmd_data) > 0) {
+                        server_handle_command(server, client, cmd, cmd_data);
                     }
-                    case MSG_DISCONNECT:
-                        printf("Client %u requested disconnect\n", client->id);
-                        client->active = false;
-                        break;
-                    default:
-                        break;
+                    break;
                 }
-                
-                if (payload) free(payload);
+                case MSG_DISCONNECT:
+                    printf("Client %u requested disconnect\n", client->id);
+                    server_mark_client_disconnected(client);
+                    break;
+                default:
+                    break;
+            }
+
+            free(payload);
+            if (!client->active) {
+                break;
             }
         }
-        
-        client = next;
     }
-    
-    pthread_mutex_unlock(&server->clients_mutex);
+
+    free(clients);
+    server_pump_client_outboxes(server);
 }
 
 uint16_t server_get_port(Server* server) {

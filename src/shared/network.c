@@ -12,6 +12,15 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
+static void net_disable_sigpipe(int fd) {
+#ifdef SO_NOSIGPIPE
+    int opt = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &opt, sizeof(opt));
+#else
+    (void)fd;
+#endif
+}
+
 NetServer* net_server_create(uint16_t port) {
     NetServer* server = (NetServer*)malloc(sizeof(NetServer));
     if (!server) return NULL;
@@ -21,6 +30,7 @@ NetServer* net_server_create(uint16_t port) {
         free(server);
         return NULL;
     }
+    net_disable_sigpipe(server->fd);
     
     // Allow address reuse
     int opt = 1;
@@ -78,6 +88,7 @@ NetSocket* net_server_accept(NetServer* server) {
     if (client_fd < 0) {
         return NULL;
     }
+    net_disable_sigpipe(client_fd);
     
     NetSocket* socket = (NetSocket*)malloc(sizeof(NetSocket));
     if (!socket) {
@@ -114,6 +125,7 @@ NetSocket* net_client_connect(const char* host, uint16_t port) {
         freeaddrinfo(result);
         return NULL;
     }
+    net_disable_sigpipe(fd);
     
     if (connect(fd, result->ai_addr, result->ai_addrlen) < 0) {
         close(fd);

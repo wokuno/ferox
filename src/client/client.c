@@ -26,6 +26,7 @@ Client* client_create(void) {
     client->running = false;
     client->selected_colony = 0;
     client->selected_index = 0;
+    protocol_recv_state_init(&client->recv_state);
     
     // Initialize local world
     memset(&client->local_world, 0, sizeof(ProtoWorld));
@@ -46,6 +47,7 @@ void client_destroy(Client* client) {
     }
 
     proto_world_free(&client->local_world);
+    protocol_recv_state_free(&client->recv_state);
     
     free(client);
 }
@@ -61,6 +63,7 @@ bool client_connect(Client* client, const char* host, uint16_t port) {
     // Set non-blocking for async reads
     net_set_nonblocking(client->socket, true);
     net_set_nodelay(client->socket, true);
+    protocol_recv_state_reset(&client->recv_state);
     
     // Send connect message
     if (protocol_send_message(client->socket->fd, MSG_CONNECT, NULL, 0) < 0) {
@@ -83,6 +86,7 @@ void client_disconnect(Client* client) {
         client->socket = NULL;
     }
     
+    protocol_recv_state_reset(&client->recv_state);
     client->connected = false;
 }
 
@@ -341,24 +345,28 @@ static void client_process_input(Client* client) {
 }
 
 static void client_receive_updates(Client* client) {
-    if (!client->socket || !net_has_data(client->socket)) return;
-    
-    MessageHeader header;
-    uint8_t* payload = NULL;
-    
-    // Set blocking temporarily for receive
-    net_set_nonblocking(client->socket, false);
-    
-    if (protocol_recv_message(client->socket->fd, &header, &payload) == 0) {
+    if (!client->socket) return;
+
+    const int max_messages_per_frame = 50;
+    for (int messages = 0; messages < max_messages_per_frame; messages++) {
+        MessageHeader header;
+        uint8_t* payload = NULL;
+        int result = protocol_recv_message_nonblocking(client->socket->fd,
+                                                       &client->recv_state,
+                                                       &header,
+                                                       &payload);
+        if (result == 0) {
+            break;
+        }
+        if (result < 0) {
+            client->connected = false;
+            client->running = false;
+            break;
+        }
+
         client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
         free(payload);
-    } else {
-        // Connection lost
-        client->connected = false;
-        client->running = false;
     }
-    
-    net_set_nonblocking(client->socket, true);
 }
 
 static void client_render(Client* client) {

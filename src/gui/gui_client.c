@@ -30,6 +30,7 @@ GuiClient* gui_client_create(void) {
     client->running = false;
     client->selected_colony = 0;
     client->selected_index = 0;
+    protocol_recv_state_init(&client->recv_state);
     
     // Initialize local world
     proto_world_init(&client->local_world);
@@ -52,6 +53,7 @@ void gui_client_destroy(GuiClient* client) {
     }
     
     proto_world_free(&client->local_world);
+    protocol_recv_state_free(&client->recv_state);
     
     free(client);
 }
@@ -67,6 +69,7 @@ bool gui_client_connect(GuiClient* client, const char* host, uint16_t port) {
     // Set non-blocking for async reads
     net_set_nonblocking(client->socket, true);
     net_set_nodelay(client->socket, true);
+    protocol_recv_state_reset(&client->recv_state);
     
     // Send connect message
     if (protocol_send_message(client->socket->fd, MSG_CONNECT, NULL, 0) < 0) {
@@ -88,6 +91,7 @@ void gui_client_disconnect(GuiClient* client) {
         client->socket = NULL;
     }
     
+    protocol_recv_state_reset(&client->recv_state);
     client->connected = false;
 }
 
@@ -449,24 +453,26 @@ static void gui_client_receive_updates(GuiClient* client) {
     int messages_processed = 0;
     const int max_messages_per_frame = 50;  // Limit to prevent infinite loop
     
-    while (net_has_data(client->socket) && messages_processed < max_messages_per_frame) {
+    while (messages_processed < max_messages_per_frame) {
         MessageHeader header;
         uint8_t* payload = NULL;
         
-        int result = protocol_recv_message(client->socket->fd, &header, &payload);
+        int result = protocol_recv_message_nonblocking(client->socket->fd,
+                                                       &client->recv_state,
+                                                       &header,
+                                                       &payload);
         if (result == 0) {
-            gui_client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
-            free(payload);
-            messages_processed++;
-        } else if (result < 0) {
-            // Connection error
+            break;
+        }
+        if (result < 0) {
             fprintf(stderr, "Network receive error\n");
             client->connected = false;
             break;
-        } else {
-            // Partial read, try again next frame
-            break;
         }
+
+        gui_client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
+        free(payload);
+        messages_processed++;
     }
 }
 
