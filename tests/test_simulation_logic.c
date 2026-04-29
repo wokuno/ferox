@@ -94,6 +94,10 @@ static void fill_colony_rect(World* world, uint32_t colony_id, int start_x, int 
 static void configure_always_spread_colony(Colony* colony) {
     colony->genome.spread_rate = 1.0f;
     colony->genome.metabolism = 1.0f;
+    colony->genome.mutation_rate = 0.0f;
+    colony->genome.aggression = 0.2f;
+    colony->genome.toxin_production = 0.0f;
+    colony->genome.toxin_resistance = 1.0f;
     colony->genome.nutrient_sensitivity = 0.0f;
     colony->genome.toxin_sensitivity = 0.0f;
     colony->genome.quorum_threshold = 1.0f;
@@ -108,6 +112,152 @@ static void configure_always_spread_colony(Colony* colony) {
         colony->genome.spread_weights[d] = 4.0f;
         colony->success_history[d] = 1.0f;
     }
+}
+
+typedef struct CheckerboardInterfaceStats {
+    int mixed_windows;
+    int alternating_windows;
+} CheckerboardInterfaceStats;
+
+static bool interface_cell_matches(uint32_t value, uint32_t colony_a, uint32_t colony_b) {
+    return value == colony_a || value == colony_b;
+}
+
+static CheckerboardInterfaceStats measure_checkerboard_interface(World* world,
+                                                                 uint32_t colony_a,
+                                                                 uint32_t colony_b) {
+    CheckerboardInterfaceStats stats = {0};
+    if (!world || colony_a == 0 || colony_b == 0 || colony_a == colony_b) {
+        return stats;
+    }
+
+    for (int y = 0; y + 1 < world->height; y++) {
+        for (int x = 0; x + 1 < world->width; x++) {
+            uint32_t c00 = world_get_cell(world, x, y)->colony_id;
+            uint32_t c10 = world_get_cell(world, x + 1, y)->colony_id;
+            uint32_t c01 = world_get_cell(world, x, y + 1)->colony_id;
+            uint32_t c11 = world_get_cell(world, x + 1, y + 1)->colony_id;
+
+            if (!interface_cell_matches(c00, colony_a, colony_b) ||
+                !interface_cell_matches(c10, colony_a, colony_b) ||
+                !interface_cell_matches(c01, colony_a, colony_b) ||
+                !interface_cell_matches(c11, colony_a, colony_b)) {
+                continue;
+            }
+
+            bool has_a = c00 == colony_a || c10 == colony_a || c01 == colony_a || c11 == colony_a;
+            bool has_b = c00 == colony_b || c10 == colony_b || c01 == colony_b || c11 == colony_b;
+            if (!has_a || !has_b) {
+                continue;
+            }
+            int count_a = (c00 == colony_a ? 1 : 0) +
+                          (c10 == colony_a ? 1 : 0) +
+                          (c01 == colony_a ? 1 : 0) +
+                          (c11 == colony_a ? 1 : 0);
+            if (count_a != 2) {
+                continue;
+            }
+
+            stats.mixed_windows++;
+            if (c00 == c11 && c10 == c01 && c00 != c10) {
+                stats.alternating_windows++;
+            }
+        }
+    }
+
+    return stats;
+}
+
+static double checkerboard_interface_ratio(World* world, uint32_t colony_a, uint32_t colony_b) {
+    CheckerboardInterfaceStats stats = measure_checkerboard_interface(world, colony_a, colony_b);
+    if (stats.mixed_windows == 0) {
+        return 0.0;
+    }
+    return (double)stats.alternating_windows / (double)stats.mixed_windows;
+}
+
+static World* create_two_colony_contact_fixture(uint32_t* out_a, uint32_t* out_b) {
+    World* world = world_create(40, 30);
+    if (!world) {
+        return NULL;
+    }
+
+    Colony colony_a = create_test_colony();
+    Colony colony_b = create_test_colony();
+    configure_always_spread_colony(&colony_a);
+    configure_always_spread_colony(&colony_b);
+    colony_a.color.r = 220;
+    colony_a.color.g = 40;
+    colony_a.color.b = 40;
+    colony_b.color.r = 40;
+    colony_b.color.g = 80;
+    colony_b.color.b = 220;
+
+    uint32_t id_a = world_add_colony(world, colony_a);
+    uint32_t id_b = world_add_colony(world, colony_b);
+    if (id_a == 0 || id_b == 0) {
+        world_destroy(world);
+        return NULL;
+    }
+
+    fill_colony_rect(world, id_a, 5, 7, 9, 16);
+    fill_colony_rect(world, id_b, 26, 7, 9, 16);
+    world_get_colony(world, id_a)->cell_count = 144;
+    world_get_colony(world, id_a)->max_cell_count = 144;
+    world_get_colony(world, id_b)->cell_count = 144;
+    world_get_colony(world, id_b)->max_cell_count = 144;
+
+    if (out_a) *out_a = id_a;
+    if (out_b) *out_b = id_b;
+    return world;
+}
+
+static bool run_checkerboard_fixture_score(int serial_interval,
+                                           bool frontier_enabled,
+                                           CheckerboardInterfaceStats* out_stats,
+                                           double* out_score) {
+    rng_seed(31337);
+    srand(31337);
+    uint32_t id_a = 0;
+    uint32_t id_b = 0;
+    World* world = create_two_colony_contact_fixture(&id_a, &id_b);
+    if (!world || !out_stats || !out_score) {
+        world_destroy(world);
+        return false;
+    }
+
+    ThreadPool* pool = threadpool_create(1);
+    if (!pool) {
+        world_destroy(world);
+        return false;
+    }
+
+    AtomicWorld* aworld = atomic_world_create(world, pool, 1);
+    if (!aworld) {
+        threadpool_destroy(pool);
+        world_destroy(world);
+        return false;
+    }
+    aworld->serial_interval = serial_interval;
+    aworld->frontier_dense_pct = 90;
+    for (int i = 0; i < aworld->region_count; i++) {
+        aworld->thread_seeds[i] = (uint32_t)(31337u + (uint32_t)i * 7919u);
+    }
+    atomic_set_spread_frontier_enabled(aworld, frontier_enabled);
+
+    for (int i = 0; i < 14; i++) {
+        atomic_tick(aworld);
+    }
+    simulation_refresh_border_flags(world);
+
+    *out_stats = measure_checkerboard_interface(world, id_a, id_b);
+    *out_score = out_stats->mixed_windows > 0 ?
+        (double)out_stats->alternating_windows / (double)out_stats->mixed_windows : 0.0;
+
+    atomic_world_destroy(aworld);
+    threadpool_destroy(pool);
+    world_destroy(world);
+    return true;
 }
 
 // ============================================================================
@@ -1809,6 +1959,69 @@ TEST(combat_refreshes_stale_border_flags_before_resolution) {
     world_destroy(world);
 }
 
+TEST(checkerboard_interface_metric_detects_alternating_contacts) {
+    World* world = world_create(6, 6);
+    ASSERT_NOT_NULL(world);
+
+    Colony colony_a = create_test_colony();
+    Colony colony_b = create_test_colony();
+    uint32_t id_a = world_add_colony(world, colony_a);
+    uint32_t id_b = world_add_colony(world, colony_b);
+    ASSERT_NE(id_a, 0);
+    ASSERT_NE(id_b, 0);
+
+    for (int y = 1; y < 5; y++) {
+        for (int x = 1; x < 5; x++) {
+            world_get_cell(world, x, y)->colony_id = ((x + y) % 2 == 0) ? id_a : id_b;
+        }
+    }
+    ASSERT_GT(checkerboard_interface_ratio(world, id_a, id_b), 0.99);
+
+    for (int y = 1; y < 5; y++) {
+        for (int x = 1; x < 5; x++) {
+            world_get_cell(world, x, y)->colony_id = x < 3 ? id_a : id_b;
+        }
+    }
+    ASSERT_EQ(measure_checkerboard_interface(world, id_a, id_b).alternating_windows, 0);
+    ASSERT_EQ(checkerboard_interface_ratio(world, id_a, id_b), 0.0);
+
+    world_destroy(world);
+}
+
+TEST(seeded_first_contact_checkerboard_score_stays_near_serial_reference) {
+    typedef struct CheckerboardScenario {
+        int serial_interval;
+        bool frontier_enabled;
+    } CheckerboardScenario;
+
+    const CheckerboardScenario scenarios[] = {
+        {1, false},
+        {1, true},
+        {5, false},
+        {5, true},
+    };
+
+    for (size_t i = 0; i < sizeof(scenarios) / sizeof(scenarios[0]); i++) {
+        CheckerboardInterfaceStats stats = {0};
+        double score = 0.0;
+        ASSERT(run_checkerboard_fixture_score(scenarios[i].serial_interval,
+                                              scenarios[i].frontier_enabled,
+                                              &stats,
+                                              &score),
+               "checkerboard fixture score computed");
+        if (stats.mixed_windows < 32 || score > 0.60) {
+            printf("    checkerboard scenario serial_interval=%d frontier=%d mixed=%d alternating=%d score=%.3f\n",
+                   scenarios[i].serial_interval,
+                   scenarios[i].frontier_enabled ? 1 : 0,
+                   stats.mixed_windows,
+                   stats.alternating_windows,
+                   score);
+        }
+        ASSERT_GE(stats.mixed_windows, 32);
+        ASSERT(score <= 0.60, "seeded first-contact interface should not collapse into a checkerboard pattern");
+    }
+}
+
 TEST(behavior_layers_emit_signals_and_alarms) {
     World* world = world_create(12, 12);
     ASSERT_NOT_NULL(world);
@@ -2178,6 +2391,8 @@ int run_simulation_logic_tests(void) {
     RUN_TEST(shape_function_smooth_with_phase);
     RUN_TEST(border_refresh_uses_cardinal_contact_not_diagonal_contact);
     RUN_TEST(combat_refreshes_stale_border_flags_before_resolution);
+    RUN_TEST(checkerboard_interface_metric_detects_alternating_contacts);
+    RUN_TEST(seeded_first_contact_checkerboard_score_stays_near_serial_reference);
     
     printf("\n--- Simulation Logic Results ---\n");
     printf("Passed: %d\n", tests_passed);

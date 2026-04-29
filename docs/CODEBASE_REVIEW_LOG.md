@@ -1164,6 +1164,39 @@ Next ACK/baseline batch:
       - `git diff --check`: passed
       - `./scripts/test.sh quick`: passed `25/25`
       - `./scripts/test.sh all`: passed `29/29`
+  - `#161` follow-up slice:
+    - the remaining closeout condition is a deterministic morphology regression
+      that measures checkerboard-like contact regularity after first contact,
+      rather than relying on screenshots or subjective visual inspection
+    - implementation target before more behavior changes: add a small
+      test-local checkerboard/interface metric and a seeded atomic scenario
+      comparing the default maintenance cadence against the always-serial
+      reference path
+    - keep this as a regression/diagnostic first; only change combat ordering or
+      conflict randomization if the metric exposes a remaining artifact
+    - implementation notes:
+      - added a 2x2 interface metric that separately counts contested windows
+        with exactly two cells from each colony and the alternating diagonal
+        subset that forms a checkerboard lattice
+      - added a hand-seeded two-colony atomic first-contact fixture across
+        `serial_interval={1,5}` and frontier on/off, using one worker thread and
+        fixed atomic RNG seeds to avoid scheduler noise
+      - added deterministic per-cell direction-order rotation in atomic spread
+        to remove fixed compass-order bias during contested expansion
+      - the diagnostic currently guards against full checkerboard collapse
+        (`score <= 0.60` over at least `32` contested 2x2 windows); the stricter
+        research target remains `score <= 0.45` over at least `64` windows and
+        should drive the next combat/tie-breaking slice before `#161` closes
+    - validation so far:
+      - `cmake --build build --target test_simulation_logic`: passed
+      - `ctest --test-dir build --output-on-failure -R "SimulationLogicTests"`: passed `1/1`
+      - `cmake --build build --target test_simulation_logic test_performance_eval test_phase3 ferox_server`: passed
+      - `ctest --test-dir build --output-on-failure -R "SimulationLogicTests|Phase3Tests|PerformanceEvalTests"`: passed `3/3`
+      - pre-commit review subagent found no blocking issues and confirmed
+        `scripts/run.sh` is unrelated and should remain unstaged
+      - `git diff --check`: passed
+      - `./scripts/test.sh quick`: passed `25/25`
+      - `./scripts/test.sh all`: passed `29/29`
 - Wait-backend refactor:
   - moved platform-specific worker park/unpark logic out of `atomic_sim.c` and into a dedicated `phase_wait` backend layer
   - `atomic_sim.c` now depends only on atomic sequencing plus a narrow `phase_wait_eq` / `phase_wake_all` / `phase_wait_backoff` interface

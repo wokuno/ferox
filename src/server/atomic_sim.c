@@ -484,7 +484,9 @@ static void atomic_spread_from_cell(
     atomic_count_neighbor_mix(cells, width, height, x, y, colony_id,
                               &source_friendly, &source_enemy, &source_empty, &source_total);
 
-    for (int d = 0; d < 8; d++) {
+    int direction_start = (int)(xorshift32(rng_state) & 7u);
+    for (int step = 0; step < 8; step++) {
+        int d = (direction_start + step) & 7;
         int dx = DX8[d];
         int dy = DY8[d];
         int nx = x + dx;

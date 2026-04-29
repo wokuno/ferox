@@ -311,6 +311,10 @@ ownership, so combat and behavior/telemetry updates refresh border flags before
 using them. Tests cover diagonal-only bridges and stale border refresh so future
 changes do not silently mix these two topologies.
 
+Atomic spread also rotates its per-cell direction iteration using deterministic
+thread-local RNG. This keeps seeded runs reproducible while avoiding a fixed
+compass-order tie-breaker at contested expansion fronts.
+
 ### Atomic Compare-and-Swap (CAS)
 
 The key insight is using CAS for cell ownership instead of locks or pending buffers:
