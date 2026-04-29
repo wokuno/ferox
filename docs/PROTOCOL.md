@@ -65,7 +65,7 @@ typedef enum MessageType {
     MSG_CONNECT     = 0,  // Client -> Server: connection request
     MSG_DISCONNECT  = 1,  // Client -> Server: graceful disconnect
     MSG_WORLD_STATE = 2,  // Server -> Client: full world state
-    MSG_WORLD_DELTA = 3,  // Server -> Client: incremental update
+    MSG_WORLD_DELTA = 3,  // Server -> Client: large-world grid chunk
     MSG_COLONY_INFO = 4,  // Server -> Client: detailed colony info
     MSG_COMMAND     = 5,  // Client -> Server: user command
     MSG_ACK         = 6,  // Client -> Server: world-update acknowledgment
@@ -260,7 +260,8 @@ int proto_world_alloc_grid(ProtoWorld* world, int width, int height);
 
 ### MSG_WORLD_DELTA (Type 3)
 
-Incremental update used for large-world grid transport.
+Large-world grid-chunk continuation for a world snapshot. This message does not
+currently carry true changed-cell deltas.
 
 **Direction:** Server → Client  
 
@@ -417,7 +418,7 @@ typedef enum CommandType {
 
 Acknowledgment of completed world updates.
 
-**Direction:** Bidirectional  
+**Direction:** Client -> Server
 **Payload:** 9 bytes
 
 | Field | Size | Description |
@@ -426,12 +427,14 @@ Acknowledgment of completed world updates.
 | latest_sequence | 4 bytes | newest fully applied parent `MSG_WORLD_STATE` header sequence |
 | ack_bits | 4 bytes | bit 0 acknowledges `latest_sequence - 1`; bit 31 acknowledges `latest_sequence - 32` |
 
-Clients send world-update ACKs only after the complete update is applied. Inline
-grid snapshots can be ACKed immediately after `MSG_WORLD_STATE` is applied.
-Chunked large-world updates are ACKed only after the final accepted
-`MSG_WORLD_DELTA` grid chunk completes the local grid assembly. The server uses
-the ACK window to mark per-client baseline-ring entries as acknowledged; true
-changed-cell deltas remain a follow-up protocol mode.
+Clients send world-update ACKs only after the complete update is applied. ACKs
+always name the parent `MSG_WORLD_STATE` header sequence, not follow-up chunk
+message sequences. Inline grid snapshots can be ACKed immediately after
+`MSG_WORLD_STATE` is applied. Chunked large-world updates are ACKed only after
+the final accepted `MSG_WORLD_DELTA` grid chunk completes the local grid
+assembly. The server uses the ACK window to mark per-client baseline-ring
+entries as acknowledged; true changed-cell deltas remain a follow-up protocol
+mode.
 
 ---
 
@@ -643,9 +646,11 @@ If a client cannot keep up with updates:
   option, and Linux sends use `MSG_NOSIGNAL`, so closed peers are reported as
   send errors instead of process termination.
 
-Chunked grid recovery remains snapshot-based: clients accept chunks only for the
-current world tick and expected next grid offset. Out-of-order or mismatched
-chunks are ignored until a newer world snapshot restarts assembly.
+Chunked grid recovery remains passive and snapshot-based: clients accept chunks
+only for the current world tick and expected next grid offset. Out-of-order or
+mismatched chunks are ignored until a newer world snapshot restarts assembly.
+There is no chunk repair, retransmit, NACK, Merkle/hash anti-entropy, or
+ACK-driven resync path yet.
 
 Large-world chunk payloads keep the same wire format whether serialized from a
 temporary `uint16_t` cell array or from the protocol strided-field helper. The

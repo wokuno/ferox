@@ -25,6 +25,8 @@ without chasing noisy one-off results.
   - `./build/src/server/ferox_server --print-hardware`
 - Focused ctest suite:
   - `ctest --test-dir build --output-on-failure -R "HardwareProfileTests|SimdEvalTests|PerformanceEvalTests|PerformanceComponentTests|PerformanceProfilingTests|PerfUnitProtocolTests|ThreadpoolStressTests|SimulationLogicTests"`
+- Focused protocol/network reliability suite:
+  - `ctest --test-dir build --output-on-failure -R "ClientAckSequenceTests|ProtocolEdgeTests|Phase5Tests"`
 - Jitter-reduced summary (multi-iteration):
   - `python3 scripts/perf_scenarios.py --build-types Release --scales 1 --repeats 3`
 

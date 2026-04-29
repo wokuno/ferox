@@ -210,6 +210,143 @@ static bool client_send_batch_has_frames(const ClientSendBatch* batch) {
     return batch && batch->frame_count > 0;
 }
 
+static size_t client_send_batch_remaining_frames(const ClientSendBatch* batch) {
+    if (!client_send_batch_has_frames(batch) || batch->frame_index >= batch->frame_count) {
+        return 0;
+    }
+    return batch->frame_count - batch->frame_index;
+}
+
+static uint32_t transport_tick_lag(uint32_t newer, uint32_t older) {
+    return newer >= older ? newer - older : 0;
+}
+
+static void client_transport_refresh_freshness(ClientSession* client) {
+    if (!client) return;
+
+    ClientTransportStats* stats = &client->transport;
+    stats->queued_to_started_lag_ticks =
+        (stats->has_last_queued_world && stats->has_last_started_world)
+            ? transport_tick_lag(stats->last_queued_world_tick, stats->last_started_world_tick)
+            : 0;
+    stats->queued_to_acked_lag_ticks =
+        (stats->has_last_queued_world && stats->has_last_acked_world)
+            ? transport_tick_lag(stats->last_queued_world_tick, stats->last_acked_world_tick)
+            : 0;
+}
+
+static void client_transport_refresh_queue_depth(ClientSession* client) {
+    if (!client) return;
+
+    size_t depth = client_send_batch_remaining_frames(&client->send_current) +
+                   client_send_batch_remaining_frames(&client->send_pending);
+    client->transport.queue_depth_frames = depth;
+    if (depth > client->transport.max_queue_depth_frames) {
+        client->transport.max_queue_depth_frames = depth;
+    }
+}
+
+static uint32_t client_send_batch_world_tick(const ClientSendBatch* batch) {
+    if (batch && batch->has_world_tick) {
+        return batch->world_tick;
+    }
+    if (!batch || !batch->baseline_candidate.occupied) {
+        return 0;
+    }
+    return batch->baseline_candidate.tick;
+}
+
+static void client_transport_record_world_queued(ClientSession* client, const ClientSendBatch* batch) {
+    if (!client || !batch || !batch->has_world_sequence) return;
+
+    ClientTransportStats* stats = &client->transport;
+    stats->world_batches_queued++;
+    stats->has_last_queued_world = true;
+    stats->last_queued_world_sequence = batch->world_sequence;
+    stats->last_queued_world_tick = client_send_batch_world_tick(batch);
+    client_transport_refresh_freshness(client);
+}
+
+static void client_transport_record_world_replaced(ClientSession* client,
+                                                   const ClientSendBatch* batch,
+                                                   bool pending_batch) {
+    if (!client || !batch || !batch->has_world_sequence) return;
+
+    client->transport.world_batches_replaced++;
+    if (pending_batch) {
+        client->transport.pending_world_batches_replaced++;
+    } else {
+        client->transport.unsent_world_batches_replaced++;
+    }
+}
+
+static void client_transport_record_world_started(ClientSession* client, const ClientSendBatch* batch) {
+    if (!client || !batch || !batch->has_world_sequence) return;
+
+    ClientTransportStats* stats = &client->transport;
+    stats->world_batches_started++;
+    stats->has_last_started_world = true;
+    stats->last_started_world_sequence = batch->world_sequence;
+    stats->last_started_world_tick = client_send_batch_world_tick(batch);
+    client_transport_refresh_freshness(client);
+}
+
+static void client_transport_record_world_completed(ClientSession* client, const ClientSendBatch* batch) {
+    if (!client || !batch || !batch->has_world_sequence) return;
+
+    ClientTransportStats* stats = &client->transport;
+    stats->world_batches_completed++;
+    stats->has_last_completed_world = true;
+    stats->last_completed_world_sequence = batch->world_sequence;
+    stats->last_completed_world_tick = client_send_batch_world_tick(batch);
+}
+
+static void client_transport_reset_freshness(ClientSession* client) {
+    if (!client) return;
+
+    ClientTransportStats* stats = &client->transport;
+    stats->has_last_queued_world = false;
+    stats->last_queued_world_sequence = 0;
+    stats->last_queued_world_tick = 0;
+    stats->has_last_started_world = false;
+    stats->last_started_world_sequence = 0;
+    stats->last_started_world_tick = 0;
+    stats->has_last_completed_world = false;
+    stats->last_completed_world_sequence = 0;
+    stats->last_completed_world_tick = 0;
+    stats->has_last_acked_world = false;
+    stats->last_acked_world_sequence = 0;
+    stats->last_acked_world_tick = 0;
+    stats->queued_to_started_lag_ticks = 0;
+    stats->queued_to_acked_lag_ticks = 0;
+}
+
+static void client_reset_transport_for_world_reset(ClientSession* client) {
+    if (!client) return;
+
+    client_send_batch_free(&client->send_current);
+    client_send_batch_free(&client->send_pending);
+    for (size_t i = 0; i < CLIENT_BASELINE_RING_SIZE; i++) {
+        client_baseline_entry_free(&client->baseline_ring[i]);
+    }
+    client->baseline_next = 0;
+    protocol_ack_window_init(&client->world_ack_window);
+    client_transport_reset_freshness(client);
+    client_transport_refresh_queue_depth(client);
+}
+
+static void server_reset_client_transport_for_world_reset(Server* server) {
+    if (!server) return;
+
+    pthread_mutex_lock(&server->clients_mutex);
+    ClientSession* client = server->clients;
+    while (client) {
+        client_reset_transport_for_world_reset(client);
+        client = client->next;
+    }
+    pthread_mutex_unlock(&server->clients_mutex);
+}
+
 static int client_send_batch_reserve(ClientSendBatch* batch, size_t frame_count) {
     if (!batch) return -1;
     if (frame_count <= batch->frame_capacity) return 0;
@@ -260,7 +397,11 @@ static int client_send_batch_add_message(ClientSendBatch* batch,
 }
 
 static void client_send_batch_attach_world_baseline(ClientSendBatch* batch, const World* world, uint32_t tick) {
-    if (!batch || !batch->has_world_sequence || !world || !world->cells) return;
+    if (!batch || !batch->has_world_sequence) return;
+
+    batch->has_world_tick = true;
+    batch->world_tick = tick;
+    if (!world || !world->cells) return;
 
     uint32_t grid_size = (uint32_t)(world->width * world->height);
     if (grid_size == 0 || grid_size > MAX_GRID_SIZE) return;
@@ -302,8 +443,17 @@ static void client_baseline_ring_mark_acked(ClientSession* client) {
     for (size_t i = 0; i < CLIENT_BASELINE_RING_SIZE; i++) {
         ClientBaselineEntry* entry = &client->baseline_ring[i];
         if (entry->occupied &&
+            !entry->acked &&
             protocol_ack_window_contains(&client->world_ack_window, entry->sequence)) {
             entry->acked = true;
+            client->transport.baselines_acked++;
+            if (!client->transport.has_last_acked_world ||
+                entry->tick >= client->transport.last_acked_world_tick) {
+                client->transport.has_last_acked_world = true;
+                client->transport.last_acked_world_sequence = entry->sequence;
+                client->transport.last_acked_world_tick = entry->tick;
+                client_transport_refresh_freshness(client);
+            }
         }
     }
 }
@@ -311,6 +461,7 @@ static void client_baseline_ring_mark_acked(ClientSession* client) {
 static void client_handle_world_ack(ClientSession* client, const ProtoAckPayload* ack) {
     if (!client || !ack || ack->channel != PROTO_ACK_CHANNEL_WORLD_UPDATE) return;
 
+    client->transport.ack_messages_received++;
     protocol_ack_window_record(&client->world_ack_window, ack->latest_sequence);
     for (uint32_t bit = 0; bit < 32u; bit++) {
         if ((ack->ack_bits & (1u << bit)) != 0) {
@@ -330,20 +481,27 @@ static void client_send_batch_move(ClientSendBatch* dst, ClientSendBatch* src) {
 static void client_queue_send_batch(ClientSession* client, ClientSendBatch* batch, bool coalesce_unsent_current) {
     if (!client || !client_send_batch_has_frames(batch)) return;
 
+    client_transport_record_world_queued(client, batch);
     if (!client_send_batch_has_frames(&client->send_current)) {
         client_send_batch_move(&client->send_current, batch);
+        client_transport_refresh_queue_depth(client);
         return;
     }
 
     if (coalesce_unsent_current && !client->send_current.started) {
+        client_transport_record_world_replaced(client, &client->send_current, false);
+        client_transport_record_world_replaced(client, &client->send_pending, true);
         client_send_batch_free(&client->send_current);
         client_send_batch_free(&client->send_pending);
         client_send_batch_move(&client->send_current, batch);
+        client_transport_refresh_queue_depth(client);
         return;
     }
 
+    client_transport_record_world_replaced(client, &client->send_pending, true);
     client_send_batch_free(&client->send_pending);
     client_send_batch_move(&client->send_pending, batch);
+    client_transport_refresh_queue_depth(client);
 }
 
 static void server_free_client_session(ClientSession* client) {
@@ -442,8 +600,10 @@ static void server_pump_client_outboxes(Server* server) {
                 client_send_batch_free(&client->send_current);
                 if (client_send_batch_has_frames(&client->send_pending)) {
                     client_send_batch_move(&client->send_current, &client->send_pending);
+                    client_transport_refresh_queue_depth(client);
                     continue;
                 }
+                client_transport_refresh_queue_depth(client);
                 break;
             }
 
@@ -455,26 +615,39 @@ static void server_pump_client_outboxes(Server* server) {
                                                          frame->len,
                                                          &client->send_current.frame_offset);
             if (client->send_current.frame_offset > before) {
+                client->transport.bytes_sent += client->send_current.frame_offset - before;
                 client->send_current.started = true;
                 if (!was_started && client->send_current.baseline_candidate.occupied) {
+                    client_transport_record_world_started(client, &client->send_current);
                     client_baseline_ring_store(client, &client->send_current.baseline_candidate);
+                } else if (!was_started) {
+                    client_transport_record_world_started(client, &client->send_current);
                 }
             }
 
             if (result < 0) {
+                client->transport.send_error_events++;
                 printf("Client %u disconnected\n", client->id);
                 server_mark_client_disconnected(client);
                 break;
             }
             if (result == 0) {
+                client->transport.send_backpressure_events++;
+                client_transport_refresh_queue_depth(client);
                 break;
             }
 
+            bool batch_completed = client->send_current.frame_index + 1u >= client->send_current.frame_count;
+            client->transport.frames_sent++;
+            if (batch_completed) {
+                client_transport_record_world_completed(client, &client->send_current);
+            }
             free(frame->data);
             frame->data = NULL;
             frame->len = 0;
             client->send_current.frame_index++;
             client->send_current.frame_offset = 0;
+            client_transport_refresh_queue_depth(client);
         }
 
         if (client_send_batch_has_frames(&client->send_current) &&
@@ -483,6 +656,7 @@ static void server_pump_client_outboxes(Server* server) {
             if (client_send_batch_has_frames(&client->send_pending)) {
                 client_send_batch_move(&client->send_current, &client->send_pending);
             }
+            client_transport_refresh_queue_depth(client);
         }
     }
 
@@ -1166,6 +1340,7 @@ void server_handle_command(Server* server, ClientSession* client, CommandType cm
                     server->parallel_ctx->world = server->world;
                     parallel_init_regions(server->parallel_ctx, server->world_width, server->world_height);
                 }
+                server_reset_client_transport_for_world_reset(server);
             }
             printf("World reset by client %u\n", client->id);
             break;

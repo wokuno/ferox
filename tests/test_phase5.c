@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
@@ -55,6 +56,83 @@ static void* run_server_briefly(void* arg) {
     server_stop(data->server);
     
     return NULL;
+}
+
+static int add_socketpair_client(Server* server, int fds[2], ClientSession** out_client) {
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+        return -1;
+    }
+
+    NetSocket* server_socket = (NetSocket*)calloc(1, sizeof(NetSocket));
+    if (!server_socket) {
+        close(fds[0]);
+        close(fds[1]);
+        return -1;
+    }
+    server_socket->fd = fds[1];
+    server_socket->connected = true;
+    net_set_nonblocking(server_socket, true);
+
+    ClientSession* client = server_add_client(server, server_socket);
+    if (!client) {
+        free(server_socket);
+        close(fds[0]);
+        close(fds[1]);
+        return -1;
+    }
+
+    *out_client = client;
+    return 0;
+}
+
+static int set_dummy_send_batch(ClientSendBatch* batch,
+                                size_t frame_len,
+                                bool started,
+                                uint32_t sequence,
+                                uint32_t tick) {
+    if (!batch || frame_len == 0) {
+        return -1;
+    }
+
+    ClientFrame* frame = (ClientFrame*)calloc(1, sizeof(ClientFrame));
+    uint8_t* data = (uint8_t*)malloc(frame_len);
+    if (!frame || !data) {
+        free(frame);
+        free(data);
+        return -1;
+    }
+    memset(data, 0xA5, frame_len);
+    frame->data = data;
+    frame->len = frame_len;
+
+    memset(batch, 0, sizeof(*batch));
+    batch->frames = frame;
+    batch->frame_count = 1;
+    batch->frame_capacity = 1;
+    batch->started = started;
+    batch->has_world_sequence = true;
+    batch->world_sequence = sequence;
+    batch->has_world_tick = true;
+    batch->world_tick = tick;
+    return 0;
+}
+
+static bool fill_socket_send_buffer(int fd) {
+    int sndbuf = 4096;
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+
+    uint8_t buffer[4096];
+    memset(buffer, 0x5A, sizeof(buffer));
+    for (int i = 0; i < 8192; i++) {
+        ssize_t written = send(fd, buffer, sizeof(buffer), 0);
+        if (written < 0) {
+            return errno == EAGAIN || errno == EWOULDBLOCK;
+        }
+        if (written == 0) {
+            return false;
+        }
+    }
+    return false;
 }
 
 // Test: Server creation with valid parameters
@@ -245,9 +323,14 @@ int test_server_process_clients_records_world_ack(void) {
     client->baseline_ring[0].occupied = true;
     client->baseline_ring[0].sent = true;
     client->baseline_ring[0].sequence = 101u;
+    client->baseline_ring[0].tick = 9u;
     client->baseline_ring[1].occupied = true;
     client->baseline_ring[1].sent = true;
     client->baseline_ring[1].sequence = 100u;
+    client->baseline_ring[1].tick = 8u;
+    client->transport.has_last_queued_world = true;
+    client->transport.last_queued_world_sequence = 102u;
+    client->transport.last_queued_world_tick = 10u;
 
     ProtoAckPayload ack = {
         .channel = PROTO_ACK_CHANNEL_WORLD_UPDATE,
@@ -267,6 +350,160 @@ int test_server_process_clients_records_world_ack(void) {
                 "ACK window should contain bitfield sequence");
     TEST_ASSERT_EQ(client->baseline_ring[0].acked, true, "Latest baseline should be marked acked");
     TEST_ASSERT_EQ(client->baseline_ring[1].acked, true, "Bitfield baseline should be marked acked");
+    TEST_ASSERT_EQ(client->transport.ack_messages_received, 1u, "ACK message should be counted");
+    TEST_ASSERT_EQ(client->transport.baselines_acked, 2u, "Two baselines should be counted as acked");
+    TEST_ASSERT(client->transport.has_last_acked_world, "Latest ACKed world should be recorded");
+    TEST_ASSERT_EQ(client->transport.last_acked_world_sequence, 101u,
+                   "Newest ACKed baseline sequence should be recorded");
+    TEST_ASSERT_EQ(client->transport.last_acked_world_tick, 9u,
+                   "Newest ACKed baseline tick should be recorded");
+    TEST_ASSERT_EQ(client->transport.queued_to_acked_lag_ticks, 1u,
+                   "Queued-to-ACKed freshness lag should be tracked by tick");
+
+    close(fds[0]);
+    server_destroy(server);
+    return 0;
+}
+
+int test_server_broadcast_records_pending_drop_telemetry(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+    world_init_random_colonies(server->world, 2);
+
+    int fds[2];
+    ClientSession* client = NULL;
+    TEST_ASSERT_EQ(add_socketpair_client(server, fds, &client), 0, "Client socket pair should be added");
+    TEST_ASSERT_EQ(set_dummy_send_batch(&client->send_current, 1, true, 10u, 1u), 0,
+                   "Dummy started world batch should be installed");
+    TEST_ASSERT_EQ(set_dummy_send_batch(&client->send_pending, 1, false, 11u, 1u), 0,
+                   "Dummy pending world batch should be installed");
+    TEST_ASSERT(fill_socket_send_buffer(client->socket->fd), "Client send buffer should fill");
+
+    server_broadcast_world_state(server);
+
+    TEST_ASSERT_EQ(client->transport.world_batches_queued, 1u, "New world batch should be counted");
+    TEST_ASSERT_EQ(client->transport.world_batches_replaced, 1u, "Pending stale batch should be replaced");
+    TEST_ASSERT_EQ(client->transport.unsent_world_batches_replaced, 0u,
+                   "Started current batch should not be replaced");
+    TEST_ASSERT_EQ(client->transport.pending_world_batches_replaced, 1u,
+                   "Pending replacement counter should be incremented");
+    TEST_ASSERT(client->transport.send_backpressure_events > 0u,
+                "Backpressure should keep the started current batch active");
+    TEST_ASSERT_EQ(client->transport.max_queue_depth_frames, 2u,
+                   "Queue depth should remain bounded to current plus pending");
+    TEST_ASSERT(client->send_pending.has_world_sequence, "Pending batch should hold newest world");
+    TEST_ASSERT(client->send_pending.world_sequence == client->transport.last_queued_world_sequence,
+                "Pending batch should match last queued sequence");
+
+    close(fds[0]);
+    server_destroy(server);
+    return 0;
+}
+
+int test_server_broadcast_records_coalescing_telemetry(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+    world_init_random_colonies(server->world, 2);
+
+    int fds[2];
+    ClientSession* client = NULL;
+    TEST_ASSERT_EQ(add_socketpair_client(server, fds, &client), 0, "Client socket pair should be added");
+    TEST_ASSERT_EQ(set_dummy_send_batch(&client->send_current, 1, false, 10u, 1u), 0,
+                   "Dummy unsent world batch should be installed");
+
+    server_broadcast_world_state(server);
+
+    TEST_ASSERT_EQ(client->transport.world_batches_queued, 1u, "New world batch should be counted");
+    TEST_ASSERT_EQ(client->transport.world_batches_replaced, 1u, "Unsent stale batch should be replaced");
+    TEST_ASSERT_EQ(client->transport.unsent_world_batches_replaced, 1u,
+                   "Unsent replacement counter should be incremented");
+    TEST_ASSERT_EQ(client->transport.pending_world_batches_replaced, 0u,
+                   "No pending batch should be replaced");
+    TEST_ASSERT(client->transport.has_last_queued_world, "Last queued world should be recorded");
+    TEST_ASSERT(client->transport.world_batches_started >= 1u, "Queued world should start sending");
+    TEST_ASSERT(client->transport.world_batches_completed >= 1u, "Queued world should complete sending");
+    TEST_ASSERT(client->transport.frames_sent > 0u, "At least one frame should be sent");
+    TEST_ASSERT(client->transport.bytes_sent > 0u, "Sent bytes should be counted");
+    TEST_ASSERT_EQ(client->transport.queue_depth_frames, 0u, "Queue should drain for healthy socket");
+
+    close(fds[0]);
+    server_destroy(server);
+    return 0;
+}
+
+int test_server_pump_isolates_backpressured_client(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+
+    int slow_fds[2];
+    ClientSession* slow = NULL;
+    TEST_ASSERT_EQ(add_socketpair_client(server, slow_fds, &slow), 0, "Slow client should be added");
+    int healthy_fds[2];
+    ClientSession* healthy = NULL;
+    TEST_ASSERT_EQ(add_socketpair_client(server, healthy_fds, &healthy), 0, "Healthy client should be added");
+
+    TEST_ASSERT(fill_socket_send_buffer(slow->socket->fd), "Slow client send buffer should fill");
+    TEST_ASSERT_EQ(set_dummy_send_batch(&slow->send_current, 1, true, 20u, 2u), 0,
+                   "Slow client batch should be installed");
+    TEST_ASSERT_EQ(set_dummy_send_batch(&healthy->send_current, 1, true, 21u, 2u), 0,
+                   "Healthy client batch should be installed");
+
+    server_process_clients(server);
+
+    TEST_ASSERT(slow->transport.send_backpressure_events > 0u,
+                "Slow client should record send backpressure");
+    TEST_ASSERT_EQ(slow->transport.frames_sent, 0u, "Slow client frame should remain queued");
+    TEST_ASSERT_EQ(slow->transport.queue_depth_frames, 1u, "Slow client should retain one queued frame");
+    TEST_ASSERT_EQ(healthy->transport.send_backpressure_events, 0u,
+                   "Healthy client should not see backpressure");
+    TEST_ASSERT_EQ(healthy->transport.frames_sent, 1u, "Healthy client frame should send");
+    TEST_ASSERT_EQ(healthy->transport.bytes_sent, 1u, "Healthy client sent byte should be counted");
+    TEST_ASSERT_EQ(healthy->transport.world_batches_completed, 1u,
+                   "Healthy client world batch should complete");
+    TEST_ASSERT_EQ(healthy->transport.queue_depth_frames, 0u, "Healthy client queue should drain");
+
+    close(slow_fds[0]);
+    close(healthy_fds[0]);
+    server_destroy(server);
+    return 0;
+}
+
+int test_server_reset_clears_transport_freshness(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+
+    int fds[2];
+    ClientSession* client = NULL;
+    TEST_ASSERT_EQ(add_socketpair_client(server, fds, &client), 0, "Client socket pair should be added");
+    TEST_ASSERT_EQ(set_dummy_send_batch(&client->send_current, 1, true, 31u, 99u), 0,
+                   "Dummy current world batch should be installed");
+    TEST_ASSERT_EQ(set_dummy_send_batch(&client->send_pending, 1, false, 32u, 100u), 0,
+                   "Dummy pending world batch should be installed");
+    client->baseline_ring[0].occupied = true;
+    client->baseline_ring[0].sequence = 31u;
+    client->baseline_ring[0].tick = 99u;
+    client->transport.has_last_queued_world = true;
+    client->transport.last_queued_world_tick = 100u;
+    client->transport.has_last_started_world = true;
+    client->transport.last_started_world_tick = 99u;
+    client->transport.has_last_acked_world = true;
+    client->transport.last_acked_world_tick = 98u;
+    client->transport.queue_depth_frames = 2u;
+    protocol_ack_window_record(&client->world_ack_window, 31u);
+
+    server_handle_command(server, client, CMD_RESET, NULL);
+
+    TEST_ASSERT(!client->send_current.frames, "Current batch should be cleared");
+    TEST_ASSERT(!client->send_pending.frames, "Pending batch should be cleared");
+    TEST_ASSERT_EQ(client->baseline_ring[0].occupied, false, "Baseline ring should be cleared");
+    TEST_ASSERT_EQ(client->baseline_next, 0u, "Baseline insertion cursor should reset");
+    TEST_ASSERT_EQ(client->world_ack_window.initialized, false, "ACK window should reset");
+    TEST_ASSERT_EQ(client->transport.has_last_queued_world, false, "Queued freshness should reset");
+    TEST_ASSERT_EQ(client->transport.has_last_started_world, false, "Started freshness should reset");
+    TEST_ASSERT_EQ(client->transport.has_last_acked_world, false, "ACK freshness should reset");
+    TEST_ASSERT_EQ(client->transport.queue_depth_frames, 0u, "Queue depth should reset");
+    TEST_ASSERT_EQ(client->transport.queued_to_started_lag_ticks, 0u, "Started lag should reset");
+    TEST_ASSERT_EQ(client->transport.queued_to_acked_lag_ticks, 0u, "ACK lag should reset");
 
     close(fds[0]);
     server_destroy(server);
@@ -460,6 +697,10 @@ int main(void) {
     RUN_TEST(test_server_handles_pause_resume_commands);
     RUN_TEST(test_server_process_clients_buffers_fragmented_command);
     RUN_TEST(test_server_process_clients_records_world_ack);
+    RUN_TEST(test_server_broadcast_records_pending_drop_telemetry);
+    RUN_TEST(test_server_broadcast_records_coalescing_telemetry);
+    RUN_TEST(test_server_pump_isolates_backpressured_client);
+    RUN_TEST(test_server_reset_clears_transport_freshness);
     
     // World tests
     printf("\n--- World Tests ---\n");

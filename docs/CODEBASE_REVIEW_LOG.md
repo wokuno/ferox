@@ -1020,9 +1020,38 @@ Next ACK/baseline batch:
     - `./scripts/test.sh quick`: passed `25/25`
     - `./scripts/test.sh all`: passed `29/29`
 - Post-`#128` GitHub issue order from sidecar triage:
+  - closed `#128` after `09107e6` was pushed and the issue was updated with
+    validation and pre-commit review notes
   - close out `#99` / `#162` next with queue/drop telemetry, per-client
     freshness metrics, explicit resync/anti-entropy policy, and slow-client
     soak coverage
+  - current `#99` / `#162` implementation slice:
+    - add per-client counters for queued/replaced world batches, send
+      backpressure, bytes/frames sent, completed batches, and ACKed baselines
+    - retain last queued/started/completed/ACKed world tick + sequence so
+      freshness lag is observable per client
+    - keep resync policy snapshot-based for now: each new world state resets
+      chunk assembly, while future true deltas can use the ACKed baseline ring
+    - add regression coverage for unsent coalescing telemetry and a
+      backpressured-client pump that does not block a healthy client
+    - documentation clarified that `MSG_WORLD_DELTA` is currently large-world
+      grid chunk continuation, not true changed-cell delta, and that chunk
+      recovery is passive snapshot restart only
+    - pre-commit review found stale delta wording plus reset/tick freshness
+      risk; docs were corrected and `CMD_RESET` now clears queued batches,
+      ACK windows, baselines, and freshness fields for all clients
+    - validation:
+      - `cmake --build build --target test_phase5 ferox_server`: passed
+      - `ctest --test-dir build --output-on-failure -R "Phase5Tests"`: passed `1/1`
+      - `ctest --test-dir build --output-on-failure -R "ClientAckSequenceTests|ProtocolEdgeTests|Phase5Tests"`: passed `3/3`
+      - `ctest --test-dir build -N`: reports `29` tests
+      - `./scripts/test.sh quick`: passed `25/25`
+      - `./scripts/test.sh all`: passed `29/29`
+    - after pre-commit review fixes:
+      - `cmake --build build --target test_phase5 ferox_server`: passed
+      - `ctest --test-dir build --output-on-failure -R "ClientAckSequenceTests|ProtocolEdgeTests|Phase5Tests"`: passed `3/3`
+      - `./scripts/test.sh quick`: passed `25/25`
+      - `./scripts/test.sh all`: passed `29/29`
   - then start `#127` true changed-cell world deltas behind a feature flag and
     keep full snapshot / chunk fallback
   - then evaluate `#104` / `#161` neighborhood topology and checkerboard

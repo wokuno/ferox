@@ -5,14 +5,15 @@ run correctness and performance diagnostics.
 
 ## Test Matrix
 
-Ferox currently defines **28 CTest targets** (see `ctest -N`):
+Ferox currently defines **29 CTest targets** (see `ctest -N`):
 
 - Phase suites: `Phase1Tests` .. `Phase6Tests`
 - Advanced correctness/stability: `GeneticsAdvancedTests`, `WorldAdvancedTests`,
   `SimulationLogicTests`, `SimulationCommonTests`, `VisualStabilityTests`,
   `RdControlsTests`, `CombatSystemTests`, `GuiTests`
 - Stress and edge coverage: `SimulationStressTests`, `ThreadpoolStressTests`,
-  `ProtocolEdgeTests`, `NamesExhaustiveTests`, `ColorsExhaustiveTests`
+  `ProtocolEdgeTests`, `ClientAckSequenceTests`, `NamesExhaustiveTests`,
+  `ColorsExhaustiveTests`
 - Science/regression checks: `ScienceBenchmarkConfigTests`,
   `SimulationStatRegressionTests`
 - Runtime detection coverage: `HardwareProfileTests`
@@ -33,7 +34,10 @@ Sources are in `tests/` and wired in `tests/CMakeLists.txt`.
 ctest --test-dir build --output-on-failure
 
 # Run quick correctness slice
-ctest --test-dir build --output-on-failure -R "Phase|SimulationLogicTests|ProtocolEdgeTests"
+ctest --test-dir build --output-on-failure -R "Phase|SimulationLogicTests|ProtocolEdgeTests|ClientAckSequenceTests"
+
+# Run focused protocol/network reliability checks
+ctest --test-dir build --output-on-failure -R "ClientAckSequenceTests|ProtocolEdgeTests|Phase5Tests"
 
 # Run perf-focused + hardware slice
 ctest --test-dir build --output-on-failure -R "HardwareProfileTests|SimdEvalTests|PerformanceEvalTests|PerformanceComponentTests|PerformanceProfilingTests|PerfUnitProtocolTests"

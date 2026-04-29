@@ -51,8 +51,41 @@ typedef struct ClientSendBatch {
     bool started;
     bool has_world_sequence;
     uint32_t world_sequence;
+    bool has_world_tick;
+    uint32_t world_tick;
     ClientBaselineEntry baseline_candidate;
 } ClientSendBatch;
+
+typedef struct ClientTransportStats {
+    uint64_t world_batches_queued;
+    uint64_t world_batches_replaced;
+    uint64_t unsent_world_batches_replaced;
+    uint64_t pending_world_batches_replaced;
+    uint64_t send_backpressure_events;
+    uint64_t send_error_events;
+    uint64_t frames_sent;
+    uint64_t bytes_sent;
+    uint64_t world_batches_started;
+    uint64_t world_batches_completed;
+    uint64_t ack_messages_received;
+    uint64_t baselines_acked;
+    size_t queue_depth_frames;
+    size_t max_queue_depth_frames;
+    bool has_last_queued_world;
+    uint32_t last_queued_world_sequence;
+    uint32_t last_queued_world_tick;
+    bool has_last_started_world;
+    uint32_t last_started_world_sequence;
+    uint32_t last_started_world_tick;
+    bool has_last_completed_world;
+    uint32_t last_completed_world_sequence;
+    uint32_t last_completed_world_tick;
+    bool has_last_acked_world;
+    uint32_t last_acked_world_sequence;
+    uint32_t last_acked_world_tick;
+    uint32_t queued_to_started_lag_ticks;
+    uint32_t queued_to_acked_lag_ticks;
+} ClientTransportStats;
 
 // Client session represents a connected client
 typedef struct ClientSession {
@@ -66,6 +99,7 @@ typedef struct ClientSession {
     ClientSendBatch send_pending;
     ClientBaselineEntry baseline_ring[CLIENT_BASELINE_RING_SIZE];
     size_t baseline_next;
+    ClientTransportStats transport;
     struct ClientSession* next;
 } ClientSession;
 
