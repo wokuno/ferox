@@ -52,13 +52,16 @@ Priority values:
 ## Protocol and Networking
 
 Current transport baseline: TCP frames now have resumable nonblocking receive
-state, server broadcasts use bounded per-client world-update batches, and
-world-update ACK/baseline scaffolding exists for future deltas. The scaffolding
-does not reduce current payload sizes and does not provide ACK-driven recovery
-yet; the remaining protocol roadmap still needs smaller delta payloads and
-richer resync / anti-entropy policy.
+state, server broadcasts use bounded per-client world-update batches, clients
+ACK complete world-update parents, and the server can send sparse changed-cell
+grid patches from the latest completed + ACKed baseline when the parent+patch
+frames are smaller than the actual RLE/chunk fallback for that broadcast. Dense,
+missing-baseline, mismatched-baseline, or highly RLE-compressible updates still
+fall back to full inline grids or large-world chunks. The remaining protocol
+roadmap still needs adaptive codecs, interest management, and richer resync /
+anti-entropy policy.
 
-- [ ] `PERF-028` `P0` `open` Add world-state delta messages to reduce full snapshot transport cost.
+- [x] `PERF-028` `P0` `done` Add world-state delta messages to reduce full snapshot transport cost.
 - [x] `PERF-029` `P0` `done` Add per-client baseline ring and robust ack-bitfield tracking.
 - [ ] `PERF-030` `P1` `open` Add adaptive codec selection (RLE-only vs delta+bitpack vs LZ4/Zstd path).
 - [ ] `PERF-031` `P1` `open` Add interest management prioritization to reduce irrelevant updates.

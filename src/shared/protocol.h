@@ -200,6 +200,7 @@ typedef struct ProtoCell {
 
 typedef enum ProtoWorldDeltaKind {
     PROTO_WORLD_DELTA_GRID_CHUNK = 1,
+    PROTO_WORLD_DELTA_GRID_PATCH = 2,
 } ProtoWorldDeltaKind;
 
 typedef struct ProtoWorldDeltaGridChunk {
@@ -212,6 +213,17 @@ typedef struct ProtoWorldDeltaGridChunk {
     bool final_chunk;
     uint16_t* cells;
 } ProtoWorldDeltaGridChunk;
+
+typedef struct ProtoWorldDeltaGridPatch {
+    uint32_t tick;
+    uint32_t width;
+    uint32_t height;
+    uint32_t total_cells;
+    uint32_t base_sequence;
+    uint32_t change_count;
+    uint32_t* indices;
+    uint16_t* cells;
+} ProtoWorldDeltaGridPatch;
 
 // World data structure for serialization (prefixed to avoid conflict with types.h)
 typedef struct ProtoWorld {
@@ -232,6 +244,7 @@ typedef struct ProtoWorld {
 typedef ProtoWorld proto_world;
 typedef ProtoColony proto_colony;
 typedef ProtoWorldDeltaGridChunk proto_world_delta_grid_chunk;
+typedef ProtoWorldDeltaGridPatch proto_world_delta_grid_patch;
 
 // Command data structures
 typedef struct CommandSelectColony {
@@ -272,6 +285,19 @@ int protocol_serialize_world_delta_grid_chunk_from_u32_field(uint32_t tick,
                                                              uint8_t** buffer,
                                                              size_t* len);
 int protocol_deserialize_world_delta_grid_chunk(const uint8_t* buffer, size_t len, ProtoWorldDeltaGridChunk* chunk);
+int protocol_serialize_world_delta_grid_patch(const ProtoWorldDeltaGridPatch* patch, uint8_t** buffer, size_t* len);
+int protocol_serialize_world_delta_grid_patch_from_u32_field(uint32_t tick,
+                                                             uint32_t width,
+                                                             uint32_t height,
+                                                             uint32_t total_cells,
+                                                             uint32_t base_sequence,
+                                                             const uint16_t* baseline_grid,
+                                                             const void* records,
+                                                             size_t record_stride,
+                                                             size_t field_offset,
+                                                             uint8_t** buffer,
+                                                             size_t* len);
+int protocol_deserialize_world_delta_grid_patch(const uint8_t* buffer, size_t len, ProtoWorldDeltaGridPatch* patch);
 
 int protocol_serialize_colony(const ProtoColony* colony, uint8_t* buffer);
 int protocol_deserialize_colony(const uint8_t* buffer, ProtoColony* colony);
@@ -291,6 +317,8 @@ void proto_world_free(ProtoWorld* world);
 void proto_world_alloc_grid(ProtoWorld* world, uint32_t width, uint32_t height);
 void proto_world_delta_grid_chunk_init(ProtoWorldDeltaGridChunk* chunk);
 void proto_world_delta_grid_chunk_free(ProtoWorldDeltaGridChunk* chunk);
+void proto_world_delta_grid_patch_init(ProtoWorldDeltaGridPatch* patch);
+void proto_world_delta_grid_patch_free(ProtoWorldDeltaGridPatch* patch);
 
 // Helper to send/receive complete messages
 int protocol_send_message(int socket, MessageType type, const uint8_t* payload, size_t len);

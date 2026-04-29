@@ -690,6 +690,214 @@ TEST(world_delta_grid_chunk_rejects_invalid_bounds) {
     proto_world_delta_grid_chunk_free(&chunk);
 }
 
+TEST(world_delta_grid_patch_roundtrip_sparse_changes) {
+    uint32_t indices[3] = {1, 9, 63};
+    uint16_t cells[3] = {7, 8, 9};
+    ProtoWorldDeltaGridPatch patch = {
+        .tick = 123,
+        .width = 8,
+        .height = 8,
+        .total_cells = 64,
+        .base_sequence = 555,
+        .change_count = 3,
+        .indices = indices,
+        .cells = cells
+    };
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_delta_grid_patch(&patch, &buffer, &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_NOT_NULL(buffer);
+    ASSERT_EQ(len, (size_t)(25 + (6 * 3)));
+
+    ProtoWorldDeltaGridPatch decoded;
+    proto_world_delta_grid_patch_init(&decoded);
+    result = protocol_deserialize_world_delta_grid_patch(buffer, len, &decoded);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(decoded.tick, patch.tick);
+    ASSERT_EQ(decoded.width, patch.width);
+    ASSERT_EQ(decoded.height, patch.height);
+    ASSERT_EQ(decoded.total_cells, patch.total_cells);
+    ASSERT_EQ(decoded.base_sequence, patch.base_sequence);
+    ASSERT_EQ(decoded.change_count, patch.change_count);
+
+    uint16_t reconstructed[64] = {0};
+    for (uint32_t i = 0; i < decoded.change_count; i++) {
+        ASSERT_EQ(decoded.indices[i], indices[i]);
+        ASSERT_EQ(decoded.cells[i], cells[i]);
+        reconstructed[decoded.indices[i]] = decoded.cells[i];
+    }
+    ASSERT_EQ(reconstructed[1], 7);
+    ASSERT_EQ(reconstructed[9], 8);
+    ASSERT_EQ(reconstructed[63], 9);
+
+    free(buffer);
+    proto_world_delta_grid_patch_free(&decoded);
+}
+
+TEST(world_delta_grid_patch_u32_field_detects_only_changed_cells) {
+    uint16_t baseline[64] = {0};
+    TestGridRecord records[64];
+    for (uint32_t i = 0; i < 64; i++) {
+        baseline[i] = (uint16_t)(i % 5u);
+        records[i].marker = 0xB6u;
+        records[i].colony_id = baseline[i];
+        records[i].age = (uint8_t)i;
+    }
+    records[4].colony_id = 0x10009u;
+    records[17].colony_id = 11u;
+    records[40].colony_id = baseline[40];
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_delta_grid_patch_from_u32_field(99,
+                                                                          8,
+                                                                          8,
+                                                                          64,
+                                                                          12,
+                                                                          baseline,
+                                                                          records,
+                                                                          sizeof(records[0]),
+                                                                          offsetof(TestGridRecord, colony_id),
+                                                                          &buffer,
+                                                                          &len);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(len, (size_t)(25 + (6 * 2)));
+
+    ProtoWorldDeltaGridPatch decoded;
+    proto_world_delta_grid_patch_init(&decoded);
+    result = protocol_deserialize_world_delta_grid_patch(buffer, len, &decoded);
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(decoded.base_sequence, 12u);
+    ASSERT_EQ(decoded.change_count, 2u);
+    ASSERT_EQ(decoded.indices[0], 4u);
+    ASSERT_EQ(decoded.cells[0], 9u);
+    ASSERT_EQ(decoded.indices[1], 17u);
+    ASSERT_EQ(decoded.cells[1], 11u);
+
+    free(buffer);
+    proto_world_delta_grid_patch_free(&decoded);
+}
+
+TEST(world_delta_grid_patch_rejects_dense_or_not_useful) {
+    uint16_t baseline[16] = {0};
+    TestGridRecord records[16];
+    for (uint32_t i = 0; i < 16; i++) {
+        records[i].marker = 0xC7u;
+        records[i].colony_id = i + 1u;
+        records[i].age = (uint8_t)i;
+    }
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_delta_grid_patch_from_u32_field(1,
+                                                                          4,
+                                                                          4,
+                                                                          16,
+                                                                          99,
+                                                                          baseline,
+                                                                          records,
+                                                                          sizeof(records[0]),
+                                                                          offsetof(TestGridRecord, colony_id),
+                                                                          &buffer,
+                                                                          &len);
+    ASSERT_EQ(result, -1);
+    ASSERT_EQ(buffer == NULL, true);
+}
+
+TEST(world_delta_grid_patch_rejects_bad_bounds_and_truncation) {
+    uint32_t unsorted_indices[2] = {5, 5};
+    uint16_t cells[2] = {1, 2};
+    ProtoWorldDeltaGridPatch patch = {
+        .tick = 1,
+        .width = 8,
+        .height = 8,
+        .total_cells = 64,
+        .base_sequence = 1,
+        .change_count = 2,
+        .indices = unsorted_indices,
+        .cells = cells
+    };
+
+    uint8_t* buffer = NULL;
+    size_t len = 0;
+    int result = protocol_serialize_world_delta_grid_patch(&patch, &buffer, &len);
+    ASSERT_EQ(result, -1);
+
+    uint32_t out_of_bounds_indices[1] = {64};
+    patch.change_count = 1;
+    patch.indices = out_of_bounds_indices;
+    result = protocol_serialize_world_delta_grid_patch(&patch, &buffer, &len);
+    ASSERT_EQ(result, -1);
+
+    uint32_t valid_indices[1] = {7};
+    patch.indices = valid_indices;
+    result = protocol_serialize_world_delta_grid_patch(&patch, &buffer, &len);
+    ASSERT_EQ(result, 0);
+
+    ProtoWorldDeltaGridPatch decoded;
+    proto_world_delta_grid_patch_init(&decoded);
+    result = protocol_deserialize_world_delta_grid_patch(buffer, len - 1u, &decoded);
+    ASSERT_EQ(result, -1);
+
+    free(buffer);
+}
+
+TEST(world_delta_kind_separation) {
+    uint16_t cells[1] = {3};
+    ProtoWorldDeltaGridChunk chunk;
+    proto_world_delta_grid_chunk_init(&chunk);
+    chunk.tick = 1;
+    chunk.width = 2;
+    chunk.height = 2;
+    chunk.total_cells = 4;
+    chunk.start_index = 0;
+    chunk.cell_count = 1;
+    chunk.final_chunk = true;
+    chunk.cells = cells;
+
+    uint8_t* chunk_buffer = NULL;
+    size_t chunk_len = 0;
+    int result = protocol_serialize_world_delta_grid_chunk(&chunk, &chunk_buffer, &chunk_len);
+    ASSERT_EQ(result, 0);
+
+    uint32_t patch_index[1] = {1};
+    ProtoWorldDeltaGridPatch patch = {
+        .tick = 1,
+        .width = 2,
+        .height = 2,
+        .total_cells = 4,
+        .base_sequence = 1,
+        .change_count = 1,
+        .indices = patch_index,
+        .cells = cells
+    };
+    uint8_t* patch_buffer = NULL;
+    size_t patch_len = 0;
+    result = protocol_serialize_world_delta_grid_patch(&patch, &patch_buffer, &patch_len);
+    ASSERT_EQ(result, -1);
+
+    patch.width = 8;
+    patch.height = 8;
+    patch.total_cells = 64;
+    result = protocol_serialize_world_delta_grid_patch(&patch, &patch_buffer, &patch_len);
+    ASSERT_EQ(result, 0);
+
+    ProtoWorldDeltaGridChunk decoded_chunk;
+    proto_world_delta_grid_chunk_init(&decoded_chunk);
+    result = protocol_deserialize_world_delta_grid_chunk(patch_buffer, patch_len, &decoded_chunk);
+    ASSERT_EQ(result, -1);
+
+    ProtoWorldDeltaGridPatch decoded_patch;
+    proto_world_delta_grid_patch_init(&decoded_patch);
+    result = protocol_deserialize_world_delta_grid_patch(chunk_buffer, chunk_len, &decoded_patch);
+    ASSERT_EQ(result, -1);
+
+    free(chunk_buffer);
+    free(patch_buffer);
+}
+
 // ============================================================================
 // Colony Name Tests
 // ============================================================================
@@ -1110,6 +1318,11 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(world_delta_grid_chunk_roundtrip);
     RUN_TEST(world_delta_grid_chunk_u32_field_matches_array_serializer);
     RUN_TEST(world_delta_grid_chunk_rejects_invalid_bounds);
+    RUN_TEST(world_delta_grid_patch_roundtrip_sparse_changes);
+    RUN_TEST(world_delta_grid_patch_u32_field_detects_only_changed_cells);
+    RUN_TEST(world_delta_grid_patch_rejects_dense_or_not_useful);
+    RUN_TEST(world_delta_grid_patch_rejects_bad_bounds_and_truncation);
+    RUN_TEST(world_delta_kind_separation);
     
     printf("\nColony Name Tests:\n");
     RUN_TEST(maximum_length_colony_name);

@@ -612,6 +612,71 @@ static int protocol_begin_world_delta_grid_chunk(uint32_t tick,
     return 0;
 }
 
+static int protocol_begin_world_delta_grid_patch(uint32_t tick,
+                                                 uint32_t width,
+                                                 uint32_t height,
+                                                 uint32_t total_cells,
+                                                 uint32_t base_sequence,
+                                                 uint32_t change_count,
+                                                 uint8_t** buffer,
+                                                 size_t* len,
+                                                 int* offset) {
+    if (!buffer || !len || !offset) {
+        return -1;
+    }
+    *buffer = NULL;
+    *len = 0;
+    if (width == 0 || height == 0 || width > UINT32_MAX / height) {
+        return -1;
+    }
+    if (width * height != total_cells) {
+        return -1;
+    }
+    if (total_cells == 0 || total_cells > MAX_GRID_SIZE) {
+        return -1;
+    }
+
+    size_t header_size = 1 + (6 * 4);
+    if (change_count > (MAX_PAYLOAD_SIZE - header_size) / 6u) {
+        return -1;
+    }
+
+    size_t total_size = header_size + ((size_t)change_count * (sizeof(uint32_t) + sizeof(uint16_t)));
+    if (total_size > MAX_PAYLOAD_SIZE) {
+        return -1;
+    }
+
+    *buffer = (uint8_t*)malloc(total_size);
+    if (!*buffer) {
+        return -1;
+    }
+
+    *offset = 0;
+    (*buffer)[(*offset)++] = (uint8_t)PROTO_WORLD_DELTA_GRID_PATCH;
+    write_u32(*buffer + *offset, tick);
+    *offset += 4;
+    write_u32(*buffer + *offset, width);
+    *offset += 4;
+    write_u32(*buffer + *offset, height);
+    *offset += 4;
+    write_u32(*buffer + *offset, total_cells);
+    *offset += 4;
+    write_u32(*buffer + *offset, base_sequence);
+    *offset += 4;
+    write_u32(*buffer + *offset, change_count);
+    *offset += 4;
+
+    *len = total_size;
+    return 0;
+}
+
+static bool protocol_delta_grid_patch_is_useful(uint32_t total_cells, uint32_t change_count) {
+    size_t header_size = 1 + (6 * 4);
+    size_t patch_size = header_size + ((size_t)change_count * (sizeof(uint32_t) + sizeof(uint16_t)));
+    size_t raw_grid_size = (size_t)total_cells * sizeof(uint16_t);
+    return patch_size < raw_grid_size;
+}
+
 int protocol_serialize_world_delta_grid_chunk_from_u32_field(uint32_t tick,
                                                              uint32_t width,
                                                              uint32_t height,
@@ -731,6 +796,187 @@ int protocol_deserialize_world_delta_grid_chunk(const uint8_t* buffer, size_t le
     for (uint32_t i = 0; i < chunk->cell_count; i++) {
         chunk->cells[i] = read_u16(buffer + offset);
         offset += 2;
+    }
+
+    return 0;
+}
+
+int protocol_serialize_world_delta_grid_patch(const ProtoWorldDeltaGridPatch* patch, uint8_t** buffer, size_t* len) {
+    if (!patch || !buffer || !len) {
+        return -1;
+    }
+    if (patch->change_count > 0 && (!patch->indices || !patch->cells)) {
+        return -1;
+    }
+    if (!protocol_delta_grid_patch_is_useful(patch->total_cells, patch->change_count)) {
+        return -1;
+    }
+
+    int offset = 0;
+    if (protocol_begin_world_delta_grid_patch(patch->tick,
+                                              patch->width,
+                                              patch->height,
+                                              patch->total_cells,
+                                              patch->base_sequence,
+                                              patch->change_count,
+                                              buffer,
+                                              len,
+                                              &offset) < 0) {
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < patch->change_count; i++) {
+        if (patch->indices[i] >= patch->total_cells) {
+            free(*buffer);
+            *buffer = NULL;
+            *len = 0;
+            return -1;
+        }
+        if (i > 0 && patch->indices[i] <= patch->indices[i - 1u]) {
+            free(*buffer);
+            *buffer = NULL;
+            *len = 0;
+            return -1;
+        }
+        write_u32(*buffer + offset, patch->indices[i]);
+        offset += 4;
+        write_u16(*buffer + offset, patch->cells[i]);
+        offset += 2;
+    }
+
+    *len = (size_t)offset;
+    return 0;
+}
+
+int protocol_serialize_world_delta_grid_patch_from_u32_field(uint32_t tick,
+                                                             uint32_t width,
+                                                             uint32_t height,
+                                                             uint32_t total_cells,
+                                                             uint32_t base_sequence,
+                                                             const uint16_t* baseline_grid,
+                                                             const void* records,
+                                                             size_t record_stride,
+                                                             size_t field_offset,
+                                                             uint8_t** buffer,
+                                                             size_t* len) {
+    if (!baseline_grid || !records || !buffer || !len) {
+        return -1;
+    }
+    if (record_stride < sizeof(uint32_t) || field_offset > record_stride - sizeof(uint32_t)) {
+        return -1;
+    }
+    if (total_cells == 0 || total_cells > MAX_GRID_SIZE) {
+        return -1;
+    }
+    if (total_cells > SIZE_MAX / record_stride) {
+        return -1;
+    }
+
+    const uint8_t* base = (const uint8_t*)records;
+    uint32_t change_count = 0;
+    for (uint32_t i = 0; i < total_cells; i++) {
+        uint32_t value = 0;
+        memcpy(&value, base + ((size_t)i * record_stride) + field_offset, sizeof(value));
+        if ((uint16_t)value != baseline_grid[i]) {
+            change_count++;
+        }
+    }
+
+    if (!protocol_delta_grid_patch_is_useful(total_cells, change_count)) {
+        return -1;
+    }
+
+    int offset = 0;
+    if (protocol_begin_world_delta_grid_patch(tick,
+                                              width,
+                                              height,
+                                              total_cells,
+                                              base_sequence,
+                                              change_count,
+                                              buffer,
+                                              len,
+                                              &offset) < 0) {
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < total_cells; i++) {
+        uint32_t value = 0;
+        memcpy(&value, base + ((size_t)i * record_stride) + field_offset, sizeof(value));
+        uint16_t cell = (uint16_t)value;
+        if (cell != baseline_grid[i]) {
+            write_u32(*buffer + offset, i);
+            offset += 4;
+            write_u16(*buffer + offset, cell);
+            offset += 2;
+        }
+    }
+
+    *len = (size_t)offset;
+    return 0;
+}
+
+int protocol_deserialize_world_delta_grid_patch(const uint8_t* buffer, size_t len, ProtoWorldDeltaGridPatch* patch) {
+    if (!buffer || !patch || len < (size_t)(1 + (6 * 4))) {
+        return -1;
+    }
+
+    int offset = 0;
+    uint8_t kind = buffer[offset++];
+    if (kind != (uint8_t)PROTO_WORLD_DELTA_GRID_PATCH) {
+        return -1;
+    }
+
+    patch->tick = read_u32(buffer + offset);
+    offset += 4;
+    patch->width = read_u32(buffer + offset);
+    offset += 4;
+    patch->height = read_u32(buffer + offset);
+    offset += 4;
+    patch->total_cells = read_u32(buffer + offset);
+    offset += 4;
+    patch->base_sequence = read_u32(buffer + offset);
+    offset += 4;
+    patch->change_count = read_u32(buffer + offset);
+    offset += 4;
+
+    if (patch->total_cells == 0 || patch->total_cells > MAX_GRID_SIZE) {
+        return -1;
+    }
+    if (patch->width == 0 || patch->height == 0 || patch->width > UINT32_MAX / patch->height) {
+        return -1;
+    }
+    if (patch->width * patch->height != patch->total_cells) {
+        return -1;
+    }
+    if ((size_t)patch->change_count > (MAX_PAYLOAD_SIZE - (1 + (6 * 4))) / 6u) {
+        return -1;
+    }
+    if ((size_t)offset + ((size_t)patch->change_count * 6u) > len) {
+        return -1;
+    }
+
+    if (patch->change_count > 0) {
+        patch->indices = (uint32_t*)malloc((size_t)patch->change_count * sizeof(uint32_t));
+        patch->cells = (uint16_t*)malloc((size_t)patch->change_count * sizeof(uint16_t));
+        if (!patch->indices || !patch->cells) {
+            proto_world_delta_grid_patch_free(patch);
+            return -1;
+        }
+    }
+
+    for (uint32_t i = 0; i < patch->change_count; i++) {
+        patch->indices[i] = read_u32(buffer + offset);
+        offset += 4;
+        patch->cells[i] = read_u16(buffer + offset);
+        offset += 2;
+        if (patch->indices[i] >= patch->total_cells) {
+            proto_world_delta_grid_patch_free(patch);
+            return -1;
+        }
+        if (i > 0 && patch->indices[i] <= patch->indices[i - 1u]) {
+            proto_world_delta_grid_patch_free(patch);
+            return -1;
+        }
     }
 
     return 0;
@@ -1089,6 +1335,20 @@ void proto_world_delta_grid_chunk_free(ProtoWorldDeltaGridChunk* chunk) {
     free(chunk->cells);
     chunk->cells = NULL;
     chunk->cell_count = 0;
+}
+
+void proto_world_delta_grid_patch_init(ProtoWorldDeltaGridPatch* patch) {
+    if (!patch) return;
+    memset(patch, 0, sizeof(*patch));
+}
+
+void proto_world_delta_grid_patch_free(ProtoWorldDeltaGridPatch* patch) {
+    if (!patch) return;
+    free(patch->indices);
+    free(patch->cells);
+    patch->indices = NULL;
+    patch->cells = NULL;
+    patch->change_count = 0;
 }
 
 // Grid compression format:

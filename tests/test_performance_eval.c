@@ -8,6 +8,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdatomic.h>
+#include <stddef.h>
 
 #include "../src/shared/types.h"
 #include "../src/shared/utils.h"
@@ -389,6 +390,87 @@ TEST(server_large_world_chunk_broadcast_eval) {
     ASSERT(elapsed > 0.0, "large-world chunk broadcast timing must be positive");
 
     server_destroy(server);
+}
+
+typedef struct {
+    uint32_t colony_id;
+} PerfGridRecord;
+
+TEST(world_delta_patch_transport_bytes_eval) {
+    const uint32_t total_cells = 4096u;
+    const size_t raw_grid_bytes = (size_t)total_cells * sizeof(uint16_t);
+    const uint32_t change_counts[] = {0u, 1u, 32u, 512u};
+
+    uint16_t* baseline = (uint16_t*)calloc(total_cells, sizeof(uint16_t));
+    PerfGridRecord* records = (PerfGridRecord*)calloc(total_cells, sizeof(PerfGridRecord));
+    ASSERT_NOT_NULL(baseline);
+    ASSERT_NOT_NULL(records);
+
+    printf("    [perf] delta patch bytes csv: changes,patch_bytes,raw_grid_bytes,patch_raw_ratio\n");
+    for (size_t case_idx = 0; case_idx < sizeof(change_counts) / sizeof(change_counts[0]); case_idx++) {
+        uint32_t changes = change_counts[case_idx];
+        memset(records, 0, (size_t)total_cells * sizeof(records[0]));
+        for (uint32_t i = 0; i < changes; i++) {
+            records[i].colony_id = (i % 251u) + 1u;
+        }
+
+        uint8_t* buffer = NULL;
+        size_t len = 0;
+        int rc = protocol_serialize_world_delta_grid_patch_from_u32_field(77,
+                                                                          64,
+                                                                          64,
+                                                                          total_cells,
+                                                                          42,
+                                                                          baseline,
+                                                                          records,
+                                                                          sizeof(records[0]),
+                                                                          offsetof(PerfGridRecord, colony_id),
+                                                                          &buffer,
+                                                                          &len);
+        ASSERT_EQ(rc, 0);
+        ASSERT_NOT_NULL(buffer);
+        ASSERT_EQ(len, (size_t)(25u + (6u * changes)));
+        ASSERT(len < raw_grid_bytes, "sparse patch should be smaller than raw grid");
+
+        ProtoWorldDeltaGridPatch patch;
+        proto_world_delta_grid_patch_init(&patch);
+        rc = protocol_deserialize_world_delta_grid_patch(buffer, len, &patch);
+        ASSERT_EQ(rc, 0);
+        ASSERT_EQ(patch.change_count, changes);
+        for (uint32_t i = 0; i < patch.change_count; i++) {
+            ASSERT_EQ(patch.indices[i], i);
+            ASSERT_EQ(patch.cells[i], (uint16_t)((i % 251u) + 1u));
+        }
+        printf("    [perf] delta patch bytes: %u,%zu,%zu,%.4f\n",
+               changes, len, raw_grid_bytes, (double)len / (double)raw_grid_bytes);
+
+        proto_world_delta_grid_patch_free(&patch);
+        free(buffer);
+    }
+
+    memset(records, 0, (size_t)total_cells * sizeof(records[0]));
+    for (uint32_t i = 0; i < 1400u; i++) {
+        records[i].colony_id = (i % 251u) + 1u;
+    }
+    uint8_t* dense_buffer = NULL;
+    size_t dense_len = 0;
+    int dense_rc = protocol_serialize_world_delta_grid_patch_from_u32_field(77,
+                                                                            64,
+                                                                            64,
+                                                                            total_cells,
+                                                                            42,
+                                                                            baseline,
+                                                                            records,
+                                                                            sizeof(records[0]),
+                                                                            offsetof(PerfGridRecord, colony_id),
+                                                                            &dense_buffer,
+                                                                            &dense_len);
+    ASSERT_EQ(dense_rc, -1);
+    ASSERT_EQ(dense_buffer == NULL, true);
+    printf("    [perf] delta patch dense fallback: changes=1400 raw_grid_bytes=%zu\n", raw_grid_bytes);
+
+    free(baseline);
+    free(records);
 }
 
 TEST(simulation_tick_throughput) {
@@ -781,6 +863,7 @@ int run_performance_eval_tests(void) {
     RUN_TEST(protocol_world_path_breakdown_eval);
     RUN_TEST(server_broadcast_path_breakdown_eval);
     RUN_TEST(server_large_world_chunk_broadcast_eval);
+    RUN_TEST(world_delta_patch_transport_bytes_eval);
     RUN_TEST(simulation_tick_throughput);
     RUN_TEST(frontier_telemetry_seeded_run_eval);
     RUN_TEST(atomic_tick_throughput_and_speedup_eval);

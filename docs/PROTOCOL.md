@@ -260,12 +260,18 @@ int proto_world_alloc_grid(ProtoWorld* world, int width, int height);
 
 ### MSG_WORLD_DELTA (Type 3)
 
-Large-world grid-chunk continuation for a world snapshot. This message does not
-currently carry true changed-cell deltas.
+Kinding envelope for grid updates that complete a parent `MSG_WORLD_STATE`.
 
 **Direction:** Server → Client  
 
-Current payload kind:
+The first payload byte is the delta kind:
+
+| Kind | Name | Description |
+|------|------|-------------|
+| `1` | `PROTO_WORLD_DELTA_GRID_CHUNK` | contiguous raw grid slice for large-world snapshot fallback |
+| `2` | `PROTO_WORLD_DELTA_GRID_PATCH` | sorted changed-cell patch against an ACKed baseline |
+
+Grid chunk payload:
 
 ```c
 typedef struct ProtoWorldDeltaGridChunk {
@@ -283,6 +289,31 @@ typedef struct ProtoWorldDeltaGridChunk {
 Each chunk contains raw `uint16_t colony_id` values for a contiguous grid slice.
 Clients assemble chunks in order and mark the grid available once the final
 chunk for that tick arrives.
+
+Changed-cell patch payload:
+
+```c
+typedef struct ProtoWorldDeltaGridPatch {
+    uint32_t tick;
+    uint32_t width;
+    uint32_t height;
+    uint32_t total_cells;
+    uint32_t base_sequence;
+    uint32_t change_count;
+    uint32_t* indices;   // sorted ascending
+    uint16_t* cells;
+} ProtoWorldDeltaGridPatch;
+```
+
+Patch entries are repeated `(index:uint32, colony_id:uint16)` pairs. The server
+first rejects patches that are not smaller than raw grid bytes, then sends a
+patch only when the resulting parent+patch frames are smaller than the actual
+full-grid fallback for that broadcast. That keeps highly compressible inline
+RLE snapshots on the full-grid path. Patches are based on the latest completed
+and ACKed full-grid baseline for that client. Clients accept a patch
+only after the parent `MSG_WORLD_STATE` metadata arrives, the dimensions and
+tick match, the current grid exists, and `base_sequence` matches the latest
+ACKed world-update sequence.
 
 ---
 
@@ -432,9 +463,9 @@ always name the parent `MSG_WORLD_STATE` header sequence, not follow-up chunk
 message sequences. Inline grid snapshots can be ACKed immediately after
 `MSG_WORLD_STATE` is applied. Chunked large-world updates are ACKed only after
 the final accepted `MSG_WORLD_DELTA` grid chunk completes the local grid
-assembly. The server uses the ACK window to mark per-client baseline-ring
-entries as acknowledged; true changed-cell deltas remain a follow-up protocol
-mode.
+assembly. Patch updates are ACKed only after the changed-cell patch applies to
+the retained baseline grid. The server uses the ACK window to mark per-client
+baseline-ring entries as acknowledged for future delta parents.
 
 ---
 
@@ -633,8 +664,9 @@ If a client cannot keep up with updates:
 
 - The server keeps at most one active send batch and one pending send batch per
   client.
-- A batch contains the world snapshot, all associated grid chunks, and optional
-  selected-colony detail for the same broadcast tick.
+- A batch contains the world snapshot, either all associated grid chunks or one
+  changed-cell patch, and optional selected-colony detail for the same broadcast
+  tick.
 - Once any byte from the active batch has entered the socket stream, that batch
   is never replaced. This preserves frame and chunk ordering.
 - Fresh broadcasts may replace only an unsent batch, or the pending batch behind

@@ -1054,6 +1054,50 @@ Next ACK/baseline batch:
       - `./scripts/test.sh all`: passed `29/29`
   - then start `#127` true changed-cell world deltas behind a feature flag and
     keep full snapshot / chunk fallback
+  - `#127` starting notes:
+    - prerequisites now landed: `#107` direct large-world chunk serialization
+      and `#128` ACK/baseline tracking
+    - add a new `MSG_WORLD_DELTA` payload kind for changed-cell grid patches
+      rather than overloading the existing large-world grid chunk kind
+    - use only ACKed per-client full-grid baselines as delta parents
+    - keep current full snapshot / large-world chunk transport as fallback
+      whenever no suitable ACKed baseline exists or a patch would exceed
+      payload limits
+    - clients should ACK the parent `MSG_WORLD_STATE` sequence only after the
+      patch or final grid chunk is applied
+  - `#127` implementation notes:
+    - added `PROTO_WORLD_DELTA_GRID_PATCH` as a second `MSG_WORLD_DELTA` payload
+      kind with sorted `(index, colony_id)` entries against an ACKed parent
+      `MSG_WORLD_STATE` sequence
+    - server emits patches only when the latest completed world batch is also
+      ACKed, the matching full-grid baseline is still in the ring, the patch is
+      smaller than raw grid bytes, and the parent+patch frames are smaller than
+      the actual fallback frames for that broadcast
+    - dense, missing-baseline, dimension-mismatched, serialization-failure, or
+      highly RLE-compressible cases fall back to existing inline-grid /
+      large-world chunk transport
+    - terminal and GUI clients preserve matching existing grids across gridless
+      parent world metadata, apply patches in place only when `base_sequence`
+      matches the latest ACKed baseline, and ACK the parent world-state sequence
+      only after patch completion
+    - validation so far:
+      - `cmake --build build --target test_client_ack_sequence test_protocol_edge test_phase5 test_performance_eval ferox_client ferox_gui ferox_server`: passed
+      - `ctest --test-dir build --output-on-failure -R "ClientAckSequenceTests|ProtocolEdgeTests|Phase5Tests|PerformanceEvalTests"`: passed `4/4`
+      - `./scripts/test.sh quick`: passed `25/25`
+      - `./scripts/test.sh all`: passed `29/29`
+    - pre-commit review follow-up:
+      - review flagged that patch selection was only comparing against raw grid
+        bytes, which could regress highly compressible inline RLE snapshots
+      - added exact frame-size comparison for parent+patch versus the broadcast
+        fallback path and a regression test that keeps sparse all-zero grids on
+        inline RLE while still patching sparse noisy grids
+      - chunk application now frees/replaces only grid storage when starting a
+        new chunk assembly path, preserving parent world metadata explicitly
+      - validation after review fixes:
+        - `cmake --build build --target test_client_ack_sequence test_protocol_edge test_phase5 test_performance_eval ferox_client ferox_gui ferox_server`: passed
+        - `ctest --test-dir build --output-on-failure -R "ClientAckSequenceTests|ProtocolEdgeTests|Phase5Tests|PerformanceEvalTests"`: passed `4/4`
+        - `./scripts/test.sh quick`: passed `25/25`
+        - `./scripts/test.sh all`: passed `29/29`
   - then evaluate `#104` / `#161` neighborhood topology and checkerboard
     artifact behavior, documenting topology policy before code changes
 - Wait-backend refactor:

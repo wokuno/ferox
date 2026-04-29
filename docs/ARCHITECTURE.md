@@ -45,15 +45,19 @@ World batches also carry a baseline candidate keyed by the parent
 bounded baseline ring only after the batch writes its first byte, so coalesced
 unsent work never becomes a future delta baseline. Client ACKs mark completed
 baseline entries after inline-grid snapshots or final accepted grid chunks. The
-ring stores full-grid candidates for future delta generation only; current wire
-payloads are still full snapshots or large-world grid chunks. The ring holds at
-most eight `uint16_t` grids per connected client, so retained ring memory is
-bounded to `16 * width * height` bytes per client before allocator overhead. An
-active or pending unsent batch can temporarily hold one additional candidate
-grid until it is first written, coalesced, or freed. Per-client transport stats
-track queued/replaced world batches, send backpressure, frames/bytes sent,
-completed batches, ACKed baselines, and tick lag from the latest queued update
-to the latest started or ACKed update.
+ring stores full-grid candidates for changed-cell patch generation. If the
+latest completed baseline is also ACKed by the client, the next batch may carry
+a sorted changed-cell patch, but only when parent+patch frames are smaller than
+the actual fallback frames for that broadcast, including RLE-compressed inline
+grids; otherwise it falls back to full inline grid data or large-world grid
+chunks. The ring holds at most
+eight `uint16_t` grids per connected client, so retained ring memory is bounded
+to `16 * width * height` bytes per client before allocator overhead. An active
+or pending unsent batch can temporarily hold one additional candidate grid until
+it is first written, coalesced, or freed. Per-client transport stats track
+queued/replaced world batches, send backpressure, frames/bytes sent, completed
+batches, ACKed baselines, and tick lag from the latest queued update to the
+latest started or ACKed update.
 
 ## Simulation Pipeline
 

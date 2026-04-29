@@ -181,9 +181,28 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
 
 bool gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len) {
     if (!client || !data) return false;
-    
-    // Free old grid before deserializing new one
+
+    ProtoWorld next_world;
+    proto_world_init(&next_world);
+    if (protocol_deserialize_world_state(data, len, &next_world) < 0) {
+        return false;
+    }
+
+    bool preserve_grid = !next_world.has_grid &&
+                         client->local_world.grid &&
+                         client->local_world.width == next_world.width &&
+                         client->local_world.height == next_world.height &&
+                         client->local_world.grid_size == next_world.width * next_world.height;
+    if (preserve_grid) {
+        next_world.grid = client->local_world.grid;
+        next_world.grid_size = client->local_world.grid_size;
+        client->local_world.grid = NULL;
+        client->local_world.grid_size = 0;
+        client->local_world.has_grid = false;
+    }
+
     proto_world_free(&client->local_world);
+    client->local_world = next_world;
     client->pending_grid_active = false;
     client->pending_grid_tick = 0;
     client->pending_grid_next_index = 0;
@@ -192,16 +211,44 @@ bool gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len)
     if (client->has_selected_detail && client->selected_detail.base.id != client->selected_colony) {
         client->has_selected_detail = false;
     }
-    
-    if (protocol_deserialize_world_state(data, len, &client->local_world) < 0) {
+
+    return next_world.has_grid;
+}
+
+static bool gui_client_apply_world_delta_grid_patch(GuiClient* client, const uint8_t* data, size_t len) {
+    ProtoWorldDeltaGridPatch patch;
+    proto_world_delta_grid_patch_init(&patch);
+    if (protocol_deserialize_world_delta_grid_patch(data, len, &patch) < 0) {
+        proto_world_delta_grid_patch_free(&patch);
         return false;
     }
 
-    return client->local_world.has_grid;
+    if (!client->pending_grid_sequence_valid ||
+        !client->world_ack_window.initialized ||
+        patch.base_sequence != client->world_ack_window.latest_sequence ||
+        client->local_world.tick != patch.tick ||
+        client->local_world.width != patch.width ||
+        client->local_world.height != patch.height ||
+        client->local_world.grid_size != patch.total_cells ||
+        !client->local_world.grid) {
+        proto_world_delta_grid_patch_free(&patch);
+        return false;
+    }
+
+    for (uint32_t i = 0; i < patch.change_count; i++) {
+        client->local_world.grid[patch.indices[i]] = patch.cells[i];
+    }
+    client->local_world.has_grid = true;
+    client->pending_grid_active = false;
+    proto_world_delta_grid_patch_free(&patch);
+    return true;
 }
 
 bool gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t len) {
     if (!client || !data) return false;
+    if (len > 0 && data[0] == (uint8_t)PROTO_WORLD_DELTA_GRID_PATCH) {
+        return gui_client_apply_world_delta_grid_patch(client, data, len);
+    }
 
     ProtoWorldDeltaGridChunk chunk;
     proto_world_delta_grid_chunk_init(&chunk);
@@ -221,7 +268,10 @@ bool gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t
         client->pending_grid_tick != chunk.tick ||
         client->local_world.grid_size != chunk.total_cells ||
         chunk.start_index == 0) {
-        proto_world_free(&client->local_world);
+        free(client->local_world.grid);
+        client->local_world.grid = NULL;
+        client->local_world.grid_size = 0;
+        client->local_world.has_grid = false;
         client->local_world.width = chunk.width;
         client->local_world.height = chunk.height;
         proto_world_alloc_grid(&client->local_world, chunk.width, chunk.height);

@@ -20,6 +20,12 @@ static ProtoAckPayload g_last_ack;
     } \
 } while (0)
 
+static void reset_send_stub(void) {
+    g_send_calls = 0;
+    g_last_send_type = MSG_ERROR;
+    memset(&g_last_ack, 0, sizeof(g_last_ack));
+}
+
 static int test_protocol_send_message(int socket, MessageType type, const uint8_t* payload, size_t len) {
     (void)socket;
     g_send_calls++;
@@ -91,6 +97,7 @@ bool input_is_initialized(void) { return true; }
 #undef protocol_send_message
 
 static void test_chunked_world_parent_sequence_zero_is_acked(void) {
+    reset_send_stub();
     Client client;
     memset(&client, 0, sizeof(client));
 
@@ -142,13 +149,137 @@ static void test_chunked_world_parent_sequence_zero_is_acked(void) {
     CHECK(g_last_ack.ack_bits == 0u);
     CHECK(!client.pending_grid_sequence_valid);
     CHECK(client.local_world.has_grid);
+    CHECK(client.local_world.tick == 77u);
+    CHECK(client.local_world.speed_multiplier == 1.0f);
 
     free(world_payload);
     free(chunk_payload);
     proto_world_free(&client.local_world);
 }
 
+static void test_grid_patch_acks_parent_world_sequence(void) {
+    reset_send_stub();
+    Client client;
+    memset(&client, 0, sizeof(client));
+
+    NetSocket socket = {
+        .fd = 42,
+        .connected = true
+    };
+    client.socket = &socket;
+    client.connected = true;
+    protocol_ack_window_init(&client.world_ack_window);
+    protocol_ack_window_record(&client.world_ack_window, 12u);
+
+    proto_world_alloc_grid(&client.local_world, 8, 8);
+    CHECK(client.local_world.grid != NULL);
+    client.local_world.width = 8;
+    client.local_world.height = 8;
+    client.local_world.tick = 40;
+    for (uint32_t i = 0; i < client.local_world.grid_size; i++) {
+        client.local_world.grid[i] = (uint16_t)(i % 3u);
+    }
+
+    ProtoWorld world;
+    proto_world_init(&world);
+    world.width = 8;
+    world.height = 8;
+    world.tick = 41;
+    world.speed_multiplier = 1.0f;
+
+    uint8_t* world_payload = NULL;
+    size_t world_len = 0;
+    CHECK(protocol_serialize_world_state(&world, &world_payload, &world_len) == 0);
+
+    client_handle_message_with_sequence(&client, MSG_WORLD_STATE, 13u, true, world_payload, world_len);
+    CHECK(client.pending_grid_sequence == 13u);
+    CHECK(client.pending_grid_sequence_valid);
+    CHECK(g_send_calls == 0);
+    CHECK(client.local_world.grid != NULL);
+    CHECK(client.local_world.has_grid == false);
+    CHECK(client.local_world.tick == 41u);
+
+    uint32_t indices[2] = {4, 63};
+    uint16_t cells[2] = {11, 12};
+    ProtoWorldDeltaGridPatch patch = {
+        .tick = 41,
+        .width = 8,
+        .height = 8,
+        .total_cells = 64,
+        .base_sequence = 12,
+        .change_count = 2,
+        .indices = indices,
+        .cells = cells
+    };
+
+    uint8_t* patch_payload = NULL;
+    size_t patch_len = 0;
+    CHECK(protocol_serialize_world_delta_grid_patch(&patch, &patch_payload, &patch_len) == 0);
+
+    client_handle_message_with_sequence(&client, MSG_WORLD_DELTA, 14u, true, patch_payload, patch_len);
+    CHECK(g_send_calls == 1);
+    CHECK(g_last_send_type == MSG_ACK);
+    CHECK(g_last_ack.latest_sequence == 13u);
+    CHECK(client.local_world.has_grid);
+    CHECK(client.local_world.grid[4] == 11u);
+    CHECK(client.local_world.grid[63] == 12u);
+    CHECK(!client.pending_grid_sequence_valid);
+
+    free(world_payload);
+    free(patch_payload);
+    proto_world_free(&client.local_world);
+}
+
+static void test_grid_patch_rejects_mismatched_base_sequence(void) {
+    reset_send_stub();
+    Client client;
+    memset(&client, 0, sizeof(client));
+
+    NetSocket socket = {
+        .fd = 42,
+        .connected = true
+    };
+    client.socket = &socket;
+    client.connected = true;
+    protocol_ack_window_init(&client.world_ack_window);
+    protocol_ack_window_record(&client.world_ack_window, 12u);
+    proto_world_alloc_grid(&client.local_world, 8, 8);
+    CHECK(client.local_world.grid != NULL);
+    client.local_world.width = 8;
+    client.local_world.height = 8;
+    client.local_world.tick = 41;
+    client.pending_grid_sequence = 13u;
+    client.pending_grid_sequence_valid = true;
+
+    uint32_t indices[1] = {4};
+    uint16_t cells[1] = {11};
+    ProtoWorldDeltaGridPatch patch = {
+        .tick = 41,
+        .width = 8,
+        .height = 8,
+        .total_cells = 64,
+        .base_sequence = 99,
+        .change_count = 1,
+        .indices = indices,
+        .cells = cells
+    };
+
+    uint8_t* patch_payload = NULL;
+    size_t patch_len = 0;
+    CHECK(protocol_serialize_world_delta_grid_patch(&patch, &patch_payload, &patch_len) == 0);
+
+    client_handle_message_with_sequence(&client, MSG_WORLD_DELTA, 14u, true, patch_payload, patch_len);
+    CHECK(g_send_calls == 0);
+    CHECK(client.pending_grid_sequence_valid);
+    CHECK(client.local_world.grid[4] == 0u);
+
+    free(patch_payload);
+    proto_world_free(&client.local_world);
+}
+
 int main(void) {
     test_chunked_world_parent_sequence_zero_is_acked();
+    test_grid_patch_acks_parent_world_sequence();
+    test_grid_patch_rejects_mismatched_base_sequence();
     return 0;
 }

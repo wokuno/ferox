@@ -135,6 +135,97 @@ static bool fill_socket_send_buffer(int fd) {
     return false;
 }
 
+static uint32_t grid_cell_count(const World* world) {
+    return (uint32_t)(world->width * world->height);
+}
+
+static void set_world_grid_pattern(World* world, uint32_t modulus) {
+    uint32_t cells = grid_cell_count(world);
+    for (uint32_t i = 0; i < cells; i++) {
+        world->cells[i].colony_id = (modulus > 0 && i % modulus == 0) ? 1u : 0u;
+    }
+}
+
+static void set_world_grid_noisy_pattern(World* world) {
+    uint32_t cells = grid_cell_count(world);
+    for (uint32_t i = 0; i < cells; i++) {
+        world->cells[i].colony_id = (i % 251u) + 1u;
+    }
+}
+
+static int install_acked_baseline(ClientSession* client, const World* world, uint32_t sequence, uint32_t tick) {
+    ClientBaselineEntry* entry = &client->baseline_ring[0];
+    uint32_t cells = grid_cell_count(world);
+    entry->occupied = true;
+    entry->sent = true;
+    entry->acked = true;
+    entry->sequence = sequence;
+    entry->tick = tick;
+    entry->width = (uint32_t)world->width;
+    entry->height = (uint32_t)world->height;
+    entry->grid_size = cells;
+    entry->bytes = (size_t)cells * sizeof(uint16_t);
+    entry->grid = (uint16_t*)calloc((size_t)cells, sizeof(uint16_t));
+    if (!entry->grid) {
+        return -1;
+    }
+    for (uint32_t i = 0; i < cells; i++) {
+        entry->grid[i] = (uint16_t)world->cells[i].colony_id;
+    }
+    client->transport.has_last_completed_world = true;
+    client->transport.last_completed_world_sequence = sequence;
+    client->transport.last_completed_world_tick = tick;
+    client->transport.has_last_acked_world = true;
+    client->transport.last_acked_world_sequence = sequence;
+    client->transport.last_acked_world_tick = tick;
+    return 0;
+}
+
+static int drain_next_message(int fd, MessageHeader* header, uint8_t** payload) {
+    fd_set readfds;
+    struct timeval tv = {
+        .tv_sec = 1,
+        .tv_usec = 0
+    };
+    FD_ZERO(&readfds);
+    FD_SET(fd, &readfds);
+    if (select(fd + 1, &readfds, NULL, NULL, &tv) <= 0) {
+        return -1;
+    }
+    return protocol_recv_message(fd, header, payload);
+}
+
+static int drain_world_update_frames(int fd,
+                                     int max_messages,
+                                     bool* saw_patch,
+                                     bool* saw_chunk,
+                                     ProtoWorldDeltaGridPatch* patch_out) {
+    for (int i = 0; i < max_messages; i++) {
+        MessageHeader header;
+        uint8_t* payload = NULL;
+        if (drain_next_message(fd, &header, &payload) < 0) {
+            return -1;
+        }
+
+        if (header.type == MSG_WORLD_DELTA && payload && header.payload_len > 0) {
+            if (payload[0] == (uint8_t)PROTO_WORLD_DELTA_GRID_PATCH) {
+                *saw_patch = true;
+                if (patch_out) {
+                    TEST_ASSERT_EQ(protocol_deserialize_world_delta_grid_patch(payload,
+                                                                               header.payload_len,
+                                                                               patch_out),
+                                   0, "Patch payload should deserialize");
+                }
+            } else if (payload[0] == (uint8_t)PROTO_WORLD_DELTA_GRID_CHUNK) {
+                *saw_chunk = true;
+            }
+        }
+        free(payload);
+    }
+
+    return 0;
+}
+
 // Test: Server creation with valid parameters
 int test_server_creates_with_valid_parameters(void) {
     Server* server = server_create(0, 50, 50, 2);
@@ -510,6 +601,139 @@ int test_server_reset_clears_transport_freshness(void) {
     return 0;
 }
 
+int test_server_broadcast_uses_patch_for_acked_sparse_baseline(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+    set_world_grid_noisy_pattern(server->world);
+
+    int fds[2];
+    ClientSession* client = NULL;
+    TEST_ASSERT_EQ(add_socketpair_client(server, fds, &client), 0, "Client socket pair should be added");
+    TEST_ASSERT_EQ(install_acked_baseline(client, server->world, 777u, server->world->tick),
+                   0, "ACKed baseline should install");
+
+    server->world->tick++;
+    server->world->cells[3].colony_id = 400u;
+    server->world->cells[123].colony_id = 401u;
+    server_broadcast_world_state(server);
+
+    bool saw_patch = false;
+    bool saw_chunk = false;
+    ProtoWorldDeltaGridPatch patch;
+    proto_world_delta_grid_patch_init(&patch);
+    TEST_ASSERT_EQ(drain_world_update_frames(fds[0], 2, &saw_patch, &saw_chunk, &patch),
+                   0, "World state and patch should drain");
+    TEST_ASSERT(saw_patch, "Sparse changed-cell patch should be sent");
+    TEST_ASSERT_EQ(saw_chunk, false, "Sparse patch should not use grid chunk fallback");
+    TEST_ASSERT_EQ(patch.base_sequence, 777u, "Patch should reference ACKed baseline sequence");
+    TEST_ASSERT_EQ(patch.change_count, 2u, "Patch should contain only changed cells");
+    TEST_ASSERT_EQ(patch.indices[0], 3u, "First changed index should be sorted");
+    TEST_ASSERT_EQ(patch.cells[0], 400u, "First changed value should match");
+    TEST_ASSERT_EQ(patch.indices[1], 123u, "Second changed index should be sorted");
+    TEST_ASSERT_EQ(patch.cells[1], 401u, "Second changed value should match");
+
+    proto_world_delta_grid_patch_free(&patch);
+    close(fds[0]);
+    server_destroy(server);
+    return 0;
+}
+
+int test_server_broadcast_prefers_compressed_inline_over_patch(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+    set_world_grid_pattern(server->world, 0);
+
+    int fds[2];
+    ClientSession* client = NULL;
+    TEST_ASSERT_EQ(add_socketpair_client(server, fds, &client), 0, "Client socket pair should be added");
+    TEST_ASSERT_EQ(install_acked_baseline(client, server->world, 778u, server->world->tick),
+                   0, "ACKed baseline should install");
+
+    server->world->tick++;
+    server->world->cells[3].colony_id = 4u;
+    server->world->cells[123].colony_id = 5u;
+    server_broadcast_world_state(server);
+
+    MessageHeader header;
+    uint8_t* payload = NULL;
+    TEST_ASSERT_EQ(drain_next_message(fds[0], &header, &payload), 0, "World state should drain");
+    TEST_ASSERT_EQ(header.type, MSG_WORLD_STATE, "First frame should be world state");
+    ProtoWorld world;
+    proto_world_init(&world);
+    TEST_ASSERT_EQ(protocol_deserialize_world_state(payload, header.payload_len, &world),
+                   0, "World state should deserialize");
+    TEST_ASSERT(world.has_grid, "Compressed inline grid should beat parent plus patch");
+
+    proto_world_free(&world);
+    free(payload);
+    close(fds[0]);
+    server_destroy(server);
+    return 0;
+}
+
+int test_server_broadcast_falls_back_without_acked_baseline(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+    set_world_grid_pattern(server->world, 17u);
+
+    int fds[2];
+    ClientSession* client = NULL;
+    TEST_ASSERT_EQ(add_socketpair_client(server, fds, &client), 0, "Client socket pair should be added");
+
+    server_broadcast_world_state(server);
+
+    MessageHeader header;
+    uint8_t* payload = NULL;
+    TEST_ASSERT_EQ(drain_next_message(fds[0], &header, &payload), 0, "World state should drain");
+    TEST_ASSERT_EQ(header.type, MSG_WORLD_STATE, "First frame should be world state");
+    ProtoWorld world;
+    proto_world_init(&world);
+    TEST_ASSERT_EQ(protocol_deserialize_world_state(payload, header.payload_len, &world),
+                   0, "World state should deserialize");
+    TEST_ASSERT(world.has_grid, "No baseline should fall back to inline full grid");
+
+    proto_world_free(&world);
+    free(payload);
+    close(fds[0]);
+    server_destroy(server);
+    return 0;
+}
+
+int test_server_broadcast_falls_back_when_patch_not_useful(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+    set_world_grid_pattern(server->world, 0);
+
+    int fds[2];
+    ClientSession* client = NULL;
+    TEST_ASSERT_EQ(add_socketpair_client(server, fds, &client), 0, "Client socket pair should be added");
+    TEST_ASSERT_EQ(install_acked_baseline(client, server->world, 888u, server->world->tick),
+                   0, "ACKed baseline should install");
+
+    uint32_t cells = grid_cell_count(server->world);
+    server->world->tick++;
+    for (uint32_t i = 0; i < cells; i++) {
+        server->world->cells[i].colony_id = (i % 251u) + 1u;
+    }
+    server_broadcast_world_state(server);
+
+    MessageHeader header;
+    uint8_t* payload = NULL;
+    TEST_ASSERT_EQ(drain_next_message(fds[0], &header, &payload), 0, "World state should drain");
+    TEST_ASSERT_EQ(header.type, MSG_WORLD_STATE, "First frame should be world state");
+    ProtoWorld world;
+    proto_world_init(&world);
+    TEST_ASSERT_EQ(protocol_deserialize_world_state(payload, header.payload_len, &world),
+                   0, "World state should deserialize");
+    TEST_ASSERT(world.has_grid, "Dense patch should fall back to inline full grid");
+
+    proto_world_free(&world);
+    free(payload);
+    close(fds[0]);
+    server_destroy(server);
+    return 0;
+}
+
 // Test: Server port assignment
 int test_server_assigns_unique_ports(void) {
     // Create server on port 0 (auto-assign)
@@ -701,6 +925,10 @@ int main(void) {
     RUN_TEST(test_server_broadcast_records_coalescing_telemetry);
     RUN_TEST(test_server_pump_isolates_backpressured_client);
     RUN_TEST(test_server_reset_clears_transport_freshness);
+    RUN_TEST(test_server_broadcast_uses_patch_for_acked_sparse_baseline);
+    RUN_TEST(test_server_broadcast_prefers_compressed_inline_over_patch);
+    RUN_TEST(test_server_broadcast_falls_back_without_acked_baseline);
+    RUN_TEST(test_server_broadcast_falls_back_when_patch_not_useful);
     
     // World tests
     printf("\n--- World Tests ---\n");

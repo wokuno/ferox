@@ -437,6 +437,93 @@ static void client_baseline_ring_store(ClientSession* client, ClientBaselineEntr
     client->baseline_next = (slot + 1u) % CLIENT_BASELINE_RING_SIZE;
 }
 
+static const ClientBaselineEntry* client_baseline_ring_find_delta_parent(const ClientSession* client,
+                                                                         uint32_t width,
+                                                                         uint32_t height,
+                                                                         uint32_t grid_size) {
+    if (!client) return NULL;
+    if (!client->transport.has_last_completed_world ||
+        !client->transport.has_last_acked_world ||
+        client->transport.last_completed_world_sequence != client->transport.last_acked_world_sequence) {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < CLIENT_BASELINE_RING_SIZE; i++) {
+        const ClientBaselineEntry* entry = &client->baseline_ring[i];
+        if (!entry->occupied || !entry->acked || !entry->grid) {
+            continue;
+        }
+        if (entry->width != width || entry->height != height || entry->grid_size != grid_size) {
+            continue;
+        }
+        if (entry->sequence == client->transport.last_acked_world_sequence) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static int client_build_world_delta_patch(const ClientSession* client,
+                                          const World* world,
+                                          uint32_t tick,
+                                          uint8_t** buffer,
+                                          size_t* len) {
+    if (!client || !world || !world->cells || !buffer || !len) return -1;
+
+    uint32_t grid_size = (uint32_t)(world->width * world->height);
+    const ClientBaselineEntry* parent =
+        client_baseline_ring_find_delta_parent(client,
+                                               (uint32_t)world->width,
+                                               (uint32_t)world->height,
+                                               grid_size);
+    if (!parent) {
+        return -1;
+    }
+
+    return protocol_serialize_world_delta_grid_patch_from_u32_field(tick,
+                                                                    (uint32_t)world->width,
+                                                                    (uint32_t)world->height,
+                                                                    grid_size,
+                                                                    parent->sequence,
+                                                                    parent->grid,
+                                                                    world->cells,
+                                                                    sizeof(Cell),
+                                                                    offsetof(Cell, colony_id),
+                                                                    buffer,
+                                                                    len);
+}
+
+static bool transport_frame_bytes_add(size_t payload_len, size_t* total) {
+    if (!total || payload_len > SIZE_MAX - MESSAGE_HEADER_SIZE ||
+        *total > SIZE_MAX - MESSAGE_HEADER_SIZE - payload_len) {
+        return false;
+    }
+    *total += MESSAGE_HEADER_SIZE + payload_len;
+    return true;
+}
+
+static bool world_delta_patch_is_cheaper(size_t delta_parent_len,
+                                         size_t patch_len,
+                                         size_t fallback_world_len,
+                                         const size_t* chunk_lengths,
+                                         size_t chunk_count) {
+    size_t patch_bytes = 0;
+    size_t fallback_bytes = 0;
+    if (!transport_frame_bytes_add(delta_parent_len, &patch_bytes) ||
+        !transport_frame_bytes_add(patch_len, &patch_bytes) ||
+        !transport_frame_bytes_add(fallback_world_len, &fallback_bytes)) {
+        return false;
+    }
+
+    for (size_t i = 0; i < chunk_count; i++) {
+        if (!transport_frame_bytes_add(chunk_lengths[i], &fallback_bytes)) {
+            return false;
+        }
+    }
+
+    return patch_bytes < fallback_bytes;
+}
+
 static void client_baseline_ring_mark_acked(ClientSession* client) {
     if (!client) return;
 
@@ -1158,6 +1245,14 @@ void server_broadcast_world_state(Server* server) {
         return;
     }
 
+    uint8_t* delta_parent_buffer = NULL;
+    size_t delta_parent_len = 0;
+    ProtoWorld delta_parent_world = proto_world;
+    delta_parent_world.grid = NULL;
+    delta_parent_world.grid_size = 0;
+    delta_parent_world.has_grid = false;
+    protocol_serialize_world_state(&delta_parent_world, &delta_parent_buffer, &delta_parent_len);
+
     uint32_t grid_size = (uint32_t)(server->world->width * server->world->height);
     size_t chunk_count = 0;
     uint8_t** chunk_buffers = NULL;
@@ -1214,8 +1309,27 @@ void server_broadcast_world_state(Server* server) {
     while (client) {
         if (client->active && client->socket && client->socket->connected) {
             ClientSendBatch batch = {0};
-            int result = client_send_batch_add_message(&batch, MSG_WORLD_STATE, buffer, len);
-            if (result == 0) {
+            uint8_t* patch_buffer = NULL;
+            size_t patch_len = 0;
+            bool use_patch = delta_parent_buffer &&
+                             client_build_world_delta_patch(client,
+                                                            server->world,
+                                                            proto_world.tick,
+                                                            &patch_buffer,
+                                                            &patch_len) == 0 &&
+                             world_delta_patch_is_cheaper(delta_parent_len,
+                                                          patch_len,
+                                                          len,
+                                                          chunk_lengths,
+                                                          chunk_count);
+            int result = client_send_batch_add_message(&batch,
+                                                       MSG_WORLD_STATE,
+                                                       use_patch ? delta_parent_buffer : buffer,
+                                                       use_patch ? delta_parent_len : len);
+            if (result == 0 && use_patch) {
+                result = client_send_batch_add_message(&batch, MSG_WORLD_DELTA, patch_buffer, patch_len);
+            }
+            if (result == 0 && !use_patch) {
                 for (size_t chunk_idx = 0; chunk_idx < chunk_count; chunk_idx++) {
                     result = client_send_batch_add_message(&batch,
                                                            MSG_WORLD_DELTA,
@@ -1241,6 +1355,7 @@ void server_broadcast_world_state(Server* server) {
                 client_send_batch_attach_world_baseline(&batch, server->world, proto_world.tick);
                 client_queue_send_batch(client, &batch, true);
             }
+            free(patch_buffer);
             client_send_batch_free(&batch);
         }
 
@@ -1256,6 +1371,7 @@ void server_broadcast_world_state(Server* server) {
     free(chunk_buffers);
     free(chunk_lengths);
     
+    free(delta_parent_buffer);
     free(buffer);
     proto_world_free(&proto_world);
 }

@@ -329,14 +329,17 @@ Functions like `simulation_resolve_combat()` (2 passes + toxin diffusion), `simu
 and `simulation_spread()` still do separate full-grid iterations. Further fusion is possible but
 adds code complexity.
 
-### 3) No delta protocol for state broadcast
-Server sends full `MSG_WORLD_STATE` snapshots each tick. A delta/diff protocol could reduce
-network bandwidth by 10-100× for mostly-static grids.
+### 3) Initial changed-cell protocol exists, broader transport policy remains
+Server broadcasts now use full inline grids, large-world grid chunks, or sparse
+changed-cell grid patches depending on client baseline state and exact fallback
+transport size, so highly RLE-compressible snapshots stay on the full-grid path.
+Patches are generated only from the latest completed + ACKed full-grid baseline
+for that client, and dense or missing-baseline cases fall back to the full-grid
+paths.
 
-Current large-world chunk transport avoids the extra per-chunk staging copy:
+Large-world chunk transport also avoids the extra per-chunk staging copy:
 chunk payloads are serialized directly from `World.cells` while preserving the
-existing `MSG_WORLD_STATE` + ordered `MSG_WORLD_DELTA` wire format. This reduces
-simulation-thread prep work, but it does not yet reduce bytes on the wire.
+ordered `MSG_WORLD_STATE` + `MSG_WORLD_DELTA` batch model.
 
 Local post-change transport snapshot:
 
@@ -346,8 +349,11 @@ Local post-change transport snapshot:
   - strided `uint32_t` field serializer: `2.912 ns/cell` serialize,
     `3.564 ns/cell` deserialize
   - encoded size unchanged at `524392` bytes across 4 chunks
-- `test_performance_eval`: passed `14/14`
+- `test_performance_eval`: passed `15/15`
   - `large-world chunk broadcast`: `29.08 ms` for 12 broadcasts
+  - `world_delta_patch_transport_bytes_eval` reports deterministic patch/raw
+    byte ratios and asserts sparse patches are smaller while dense cases fall
+    back
   - existing `320x180` zero-client broadcast remains below the inline-grid
     threshold and is tracked separately as `broadcast end-to-end (0 clients)`
 
@@ -357,7 +363,9 @@ Local post-change transport snapshot:
 2. **Tiled transport updates** — Block nutrient/scent stencils so active rows fit cache better.
 3. **Dirty frontier / dirty tiles** — Stop rescanning the full grid for telemetry, combat, and eventually snapshots.
 4. **Combat pass filtering** — Build a cheap mixed-border/tile broadphase before expensive combat scans.
-5. **Protocol delta stream** — Send only changed cells instead of full grid snapshots once dirty metadata exists.
+5. **Protocol codec and resync policy** — Add adaptive codecs, dirty metadata,
+   interest management, and active anti-entropy/resync around the initial
+   changed-cell patch transport.
 6. **SIMD spread/combat** — Vectorize inner loops of `simulation_spread()` and `simulation_resolve_combat()`.
 
 ## Optional External Profiling Tools
