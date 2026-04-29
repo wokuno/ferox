@@ -220,7 +220,7 @@ TEST(batch_submit_with_remainder) {
     ASSERT_NOT_NULL(pool);
 
     const int total = 1037;
-    const int submit_chunk = 64;
+    enum { submit_chunk = 64 };
     void* args[submit_chunk];
     for (int i = 0; i < submit_chunk; i++) {
         args[i] = NULL;

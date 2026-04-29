@@ -5,12 +5,12 @@ run correctness and performance diagnostics.
 
 ## Test Matrix
 
-Ferox currently defines **27 CTest targets** (see `ctest -N`):
+Ferox currently defines **28 CTest targets** (see `ctest -N`):
 
 - Phase suites: `Phase1Tests` .. `Phase6Tests`
 - Advanced correctness/stability: `GeneticsAdvancedTests`, `WorldAdvancedTests`,
-  `SimulationLogicTests`, `VisualStabilityTests`, `RdControlsTests`,
-  `CombatSystemTests`, `GuiTests`
+  `SimulationLogicTests`, `SimulationCommonTests`, `VisualStabilityTests`,
+  `RdControlsTests`, `CombatSystemTests`, `GuiTests`
 - Stress and edge coverage: `SimulationStressTests`, `ThreadpoolStressTests`,
   `ProtocolEdgeTests`, `NamesExhaustiveTests`, `ColorsExhaustiveTests`
 - Science/regression checks: `ScienceBenchmarkConfigTests`,

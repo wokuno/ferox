@@ -27,6 +27,7 @@ static void copy_string(char* dst, size_t dst_size, const char* src) {
     dst[len] = '\0';
 }
 
+#if defined(__linux__)
 static void trim_trailing_whitespace(char* text) {
     if (!text) {
         return;
@@ -77,6 +78,7 @@ static bool read_first_line(const char* path, char* buffer, size_t buffer_size) 
     trim_trailing_whitespace(buffer);
     return true;
 }
+#endif
 
 static bool env_is_set(const char* name) {
     const char* raw = getenv(name);
@@ -103,6 +105,7 @@ static bool is_arm64_arch(const char* arch_name) {
 }
 #endif
 
+#if defined(__linux__)
 static const char* gpu_vendor_name(const char* vendor_id) {
     if (!vendor_id || !*vendor_id) {
         return "none";
@@ -125,7 +128,6 @@ static const char* gpu_vendor_name(const char* vendor_id) {
     return "Unknown";
 }
 
-#if defined(__linux__)
 static bool linux_has_amd_compute_runtime(void) {
     if (access("/dev/kfd", F_OK) == 0) {
         return true;

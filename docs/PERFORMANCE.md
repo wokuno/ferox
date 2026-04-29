@@ -117,7 +117,8 @@ Interpretation:
 - Combat and scent updates matter, but they are secondary to telemetry + nutrient transport in the current local profile.
 - Snapshot building is no longer the top bottleneck, which argues for focusing on simulation-core work before transport redesign.
 
-See [docs/PERFORMANCE_RESEARCH.md](/Users/wokuno/Desktop/ferox/docs/PERFORMANCE_RESEARCH.md) for the external research mapping and next experiment list.
+See [docs/PERFORMANCE_RESEARCH.md](PERFORMANCE_RESEARCH.md) for the external
+research mapping and next experiment list.
 
 ## 2026-03-06 Implemented Follow-up
 

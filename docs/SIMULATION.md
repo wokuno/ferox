@@ -7,12 +7,16 @@ This document explains how the simulation works, including the world grid, tick 
 - **Atomic path order (`atomic_tick`)**: parallel age → HGT kinetics update (cost/loss) → parallel spread (CAS) → sync to `World` → nutrient update → scent update → combat resolution → cell turnover/death → mutation → division check → recombination check → dynamic colony spawn → stats/behavior update → sync back.
 - **Spread dynamics**: 8-neighbor spreading from occupied cells only, with age-0 cascade prevention; spread claims empty cells only in atomic phase (`neighbor_colony != 0` is skipped, not overtaken there).
 - **Strategy archetypes**: new genomes are seeded from 8 archetypes in `genome_create_random()` (`BERSERKER`, `TURTLE`, `SWARM`, `TOXIC`, `HIVE`, `NOMAD`, `PARASITE`, `CHAOTIC`), then mutated over time.
-- **Scent/quorum/biofilm/dormancy/persister switching**: quorum uses an explicit production-diffusion-degradation field; colony `signal_strength` is derived from local field concentration plus density drive, then thresholded by `quorum_threshold`; biofilm grows/decays each tick and EPS-rich biofilm reduces effective diffusivity for nutrient/toxin/signal transport; stress also drives active<->persister switching (`persister_entry_stress`, `persister_exit_stress`, entry/exit rates), while dormancy remains the deeper high-protection mode.
+- **Scent/quorum/biofilm/dormancy**: quorum uses an explicit production-diffusion-degradation field; colony `signal_strength` is derived from local field concentration plus density drive, then thresholded by `quorum_threshold`; biofilm grows/decays each tick and affects spread, stress, combat, and turnover pressure while diffusion itself uses the configured reaction-diffusion controls; stress drives `NORMAL`/`STRESSED`/`DORMANT` state changes through existing dormancy and sporulation traits.
 - **HGT kinetics**: adjacent enemy colonies exchange plasmid-like material using donor/recipient/transconjugant rates, with optional plasmid cost and segregation loss controlled by `world->hgt_kinetics`; aggregate metrics are tracked in `world->hgt_metrics`.
 
-## Expensive-Trait Cost Accounting
+## Candidate Expensive-Trait Cost Accounting
 
-To prevent all lineages converging on universal max values, expensive social traits now add an explicit energetic burden that feeds both growth and survival.
+`src/server/simulation_common.c` contains tested candidate helpers for explicit
+energetic-burden accounting, but the live `simulation_tick()`/`atomic_tick()`
+paths do not currently apply these multipliers directly. Treat this section as
+the preserved extraction target for future production integration, not current
+runtime behavior.
 
 ### Costed Traits and Weights
 
@@ -25,7 +29,7 @@ To prevent all lineages converging on universal max values, expensive social tra
 
 `trait_load = clamp(sum(weighted_traits), 0, 1)`
 
-### How It Affects Dynamics
+### Intended Runtime Effects
 
 - **Growth pressure**: spread chance is multiplied by `growth_cost_multiplier = clamp(1 - trait_load, 0.35, 1.0)`.
 - **Survival pressure**: turnover/starvation/toxin death calculations are multiplied by `survival_cost_multiplier = 1 + trait_load * 0.55`.
@@ -874,11 +878,11 @@ Colonies can exist in different behavioral states that affect their metabolism a
 
 ### State Behaviors
 
-In addition to `NORMAL/STRESSED/DORMANT`, each living colony has an active/persister substate:
-
-- **ACTIVE**: full spread/combat pressure, baseline turnover survival.
-- **PERSISTER**: reduced spread, reduced toxin output, improved turnover survival.
-- **DORMANT coupling**: dormant colonies are always treated as persister-like for survival/throughput modifiers.
+The `Colony` structure still carries an `is_persister` field reserved for a
+future persistence model. In the live runtime today, colony state transitions
+are represented by `NORMAL`, `STRESSED`, and `DORMANT`; persister helper
+functions are covered by `SimulationCommonTests` but are not wired into the
+main tick paths.
 
 | State | Spread Rate | Resilience | Metabolism | Description |
 |-------|-------------|------------|------------|-------------|
@@ -886,12 +890,12 @@ In addition to `NORMAL/STRESSED/DORMANT`, each living colony has an active/persi
 | STRESSED | Context-dependent combat pressure | Context-dependent | Context-dependent | Transitional state when stress > 0.5 |
 | DORMANT | Strongly reduced expansion pressure | Higher effective survival | Lower effective activity | Triggered by stress + sporulation/dormancy thresholds |
 
-### Persister Transition Controls
+### Reserved Persister Follow-Up
 
-- `persister_entry_stress`: stress threshold where active cells may switch to persister mode.
-- `persister_exit_stress`: lower stress threshold for switching back to active mode (hysteresis).
-- `persister_entry_rate`: per-tick transition probability scale while stress remains above entry threshold.
-- `persister_exit_rate`: per-tick transition probability scale while stress stays below exit threshold.
+Future persistence work should introduce explicit model controls and production
+integration together. Do not assume `persister_entry_stress`,
+`persister_exit_stress`, `persister_entry_rate`, or `persister_exit_rate` exist
+in the current `Genome`; those fields were removed from the active type surface.
 
 ### Stress Accumulation
 
@@ -1225,6 +1229,7 @@ The world is divided into regions for parallel processing with lock-free spreadi
 
 ### Tick Rate
 
-Default tick rate is 100ms (10 ticks/second) when running the server directly. The `scripts/run.sh` helper uses 200ms by default for smoother visualization. Adjustable via:
+Default tick rate is 100ms (10 ticks/second) when running the server directly.
+The `scripts/run.sh` helper also defaults to 100ms. Adjustable via:
 - Server command-line option (`-r` or `--rate`)
 - Client speed controls (MSG_COMMAND)

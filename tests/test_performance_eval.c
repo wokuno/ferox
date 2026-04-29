@@ -664,7 +664,7 @@ TEST(threadpool_granularity_eval) {
     const int scale = get_perf_scale();
     const int total_increments = 50000 * scale;
     const int chunk = 250;
-    const int submit_chunk = 256;
+    enum { submit_chunk = 256 };
     const int batch_tasks = total_increments / chunk;
 
     ThreadPool* pool = threadpool_create(4);

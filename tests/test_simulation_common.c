@@ -214,6 +214,39 @@ TEST(baseline_sweep_avoids_universal_max_trait_dominance) {
     ASSERT(!best_all_max, "all-max expensive trait profile should not dominate baseline sweep");
 }
 
+TEST(dormant_colony_is_treated_as_persister_like) {
+    Colony colony = make_colony(50);
+    colony.is_dormant = true;
+    colony.is_persister = false;
+
+    ASSERT(colony_in_persister_state(&colony), "dormant colony should be persister-like");
+
+    colony_update_persister_switching(&colony);
+    ASSERT(colony.is_persister, "dormant colony should set persister flag in helper");
+}
+
+TEST(persister_activity_factors_reduce_work_and_turnover) {
+    Colony active = make_colony(51);
+    active.genome.dormancy_resistance = 0.5f;
+
+    Colony persister = active;
+    persister.is_persister = true;
+
+    Colony dormant = active;
+    dormant.is_dormant = true;
+
+    ASSERT(colony_spread_activity_factor(&persister) < colony_spread_activity_factor(&active),
+           "persister spread should be below active spread");
+    ASSERT(colony_signal_activity_factor(&persister) < colony_signal_activity_factor(&active),
+           "persister signaling should be below active signaling");
+    ASSERT(colony_toxin_output_factor(&persister) < colony_toxin_output_factor(&active),
+           "persister toxin output should be below active output");
+    ASSERT(colony_turnover_factor(&persister) < colony_turnover_factor(&active),
+           "persister turnover factor should be below active turnover");
+    ASSERT(colony_spread_activity_factor(&dormant) < colony_spread_activity_factor(&persister),
+           "dormant spread should be below persister spread");
+}
+
 TEST(get_direction_weight_maps_all_cardinals_and_default) {
     Genome g;
     memset(&g, 0, sizeof(Genome));
@@ -349,6 +382,8 @@ int run_simulation_common_tests(void) {
     RUN_TEST(expensive_trait_load_reflects_configured_weights);
     RUN_TEST(growth_and_survival_costs_create_tradeoff_for_max_traits);
     RUN_TEST(baseline_sweep_avoids_universal_max_trait_dominance);
+    RUN_TEST(dormant_colony_is_treated_as_persister_like);
+    RUN_TEST(persister_activity_factors_reduce_work_and_turnover);
     RUN_TEST(get_direction_weight_maps_all_cardinals_and_default);
     RUN_TEST(calculate_curvature_boost_reflects_neighbor_count);
     RUN_TEST(calculate_perception_modifier_handles_range_and_threat_branches);

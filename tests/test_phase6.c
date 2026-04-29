@@ -232,9 +232,9 @@ static int test_client_selects_next_alive_colony(void) {
     
     // Set up test world with colonies
     c->local_world.colony_count = 3;
-    c->local_world.colonies[0] = (ProtoColony){1, "Alpha", 10.0f, 10.0f, 5.0f, 50, 50, 0.5f, 255, 0, 0, true, 0, 0.0f};
-    c->local_world.colonies[1] = (ProtoColony){2, "Beta", 20.0f, 20.0f, 5.0f, 50, 50, 0.5f, 0, 255, 0, false, 0, 0.0f}; // dead
-    c->local_world.colonies[2] = (ProtoColony){3, "Gamma", 30.0f, 30.0f, 5.0f, 50, 50, 0.5f, 0, 0, 255, true, 0, 0.0f};
+    c->local_world.colonies[0] = (ProtoColony){1, "Alpha", 10.0f, 10.0f, 5.0f, 50, 50, 0.5f, 255, 0, 0, true, 0, 0.0f, 0.0f};
+    c->local_world.colonies[1] = (ProtoColony){2, "Beta", 20.0f, 20.0f, 5.0f, 50, 50, 0.5f, 0, 255, 0, false, 0, 0.0f, 0.0f}; // dead
+    c->local_world.colonies[2] = (ProtoColony){3, "Gamma", 30.0f, 30.0f, 5.0f, 50, 50, 0.5f, 0, 0, 255, true, 0, 0.0f, 0.0f};
     
     // Initially no selection
     if (c->selected_colony != 0) {
@@ -274,8 +274,8 @@ static int test_client_get_selected_returns_correct_colony(void) {
     
     // Set up test world
     c->local_world.colony_count = 2;
-    c->local_world.colonies[0] = (ProtoColony){1, "Alpha", 10.0f, 10.0f, 5.0f, 50, 50, 0.5f, 255, 0, 0, true, 0, 0.0f};
-    c->local_world.colonies[1] = (ProtoColony){2, "Beta", 20.0f, 20.0f, 5.0f, 50, 50, 0.5f, 0, 255, 0, true, 0, 0.0f};
+    c->local_world.colonies[0] = (ProtoColony){1, "Alpha", 10.0f, 10.0f, 5.0f, 50, 50, 0.5f, 255, 0, 0, true, 0, 0.0f, 0.0f};
+    c->local_world.colonies[1] = (ProtoColony){2, "Beta", 20.0f, 20.0f, 5.0f, 50, 50, 0.5f, 0, 255, 0, true, 0, 0.0f, 0.0f};
     
     // No selection initially
     const ProtoColony* sel = client_get_selected_colony(c);

@@ -114,7 +114,7 @@ case "$CATEGORY" in
         echo "⚡ Running performance evaluation tests..."
         echo "   Tip: set FEROX_PERF_SCALE=2 (or higher) for heavier timing loops"
         echo ""
-        VERBOSE=verbose run_ctest "SimdEvalTests|PerformanceEvalTests" "SIMD + performance eval tests"
+        VERBOSE=verbose run_ctest "HardwareProfileTests|SimdEvalTests|PerformanceEvalTests|PerformanceComponentTests|PerformanceProfilingTests|PerfUnitProtocolTests" "performance diagnostics"
         ;;
 
     science|bench|benchmarks)
@@ -209,7 +209,7 @@ case "$CATEGORY" in
     
     quick)
         echo "⚡ Running quick tests (no stress tests)..."
-        run_ctest_excluding "Stress|VisualStability" "quick tests"
+        run_ctest_excluding "Stress|VisualStability|AllTests" "quick tests"
         ;;
     
     *)

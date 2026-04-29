@@ -4,6 +4,8 @@
 #include "../shared/utils.h"
 #include <math.h>
 
+// Candidate shared simulation helpers. This file is covered by
+// SimulationCommonTests but is not linked into the live server runtime yet.
 const int DX8[] = {0, 1, 1, 1, 0, -1, -1, -1};
 const int DY8[] = {-1, -1, 0, 1, 1, 1, 0, -1};
 const float DIR8_WEIGHT[] = {1.0f, 0.7071f, 1.0f, 0.7071f, 1.0f, 0.7071f, 1.0f, 0.7071f};
@@ -238,14 +240,15 @@ void colony_update_persister_switching(Colony* colony) {
         return;
     }
 
-    float enter_stress = utils_clamp_f(colony->genome.persister_entry_stress, 0.15f, 0.98f);
-    float exit_stress = utils_clamp_f(colony->genome.persister_exit_stress, 0.0f, 0.92f);
-    if (exit_stress >= enter_stress - 0.02f) {
-        exit_stress = utils_clamp_f(enter_stress - 0.02f, 0.0f, 0.92f);
-    }
-
-    float entry_rate = utils_clamp_f(colony->genome.persister_entry_rate, 0.0f, 1.0f);
-    float exit_rate = utils_clamp_f(colony->genome.persister_exit_rate, 0.0f, 1.0f);
+    float enter_stress = utils_clamp_f(colony->genome.sporulation_threshold * 0.85f, 0.25f, 0.98f);
+    float hysteresis = 0.08f + colony->genome.dormancy_resistance * 0.18f;
+    float exit_stress = utils_clamp_f(enter_stress - hysteresis, 0.0f, 0.92f);
+    float entry_rate = utils_clamp_f(0.02f + (1.0f - colony->genome.dormancy_resistance) * 0.18f,
+                                     0.0f,
+                                     0.35f);
+    float exit_rate = utils_clamp_f(0.04f + colony->genome.dormancy_resistance * 0.20f,
+                                    0.0f,
+                                    0.35f);
 
     if (!colony->is_persister) {
         if (colony->stress_level > enter_stress) {

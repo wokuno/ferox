@@ -762,15 +762,17 @@ Probability of **horizontal gene transfer** when adjacent to another colony.
 
 ### Survival Strategy Traits
 
-#### Expensive-Trait Energetic Burden (derived)
+#### Expensive-Trait Energetic Burden (candidate helper)
 
-The simulator applies explicit cost accounting to four high-impact traits:
+`SimulationCommonTests` cover a candidate explicit cost-accounting helper for
+four high-impact traits. The live tick paths do not currently apply this helper
+directly:
 
 `trait_load = toxin_production*0.24 + (biofilm_investment*biofilm_tendency)*0.20 + signal_emission*0.16 + motility*0.18`
 
-- Higher `trait_load` reduces effective spread pressure.
-- Higher `trait_load` increases nutrient maintenance demand and per-tick death pressure.
-- This discourages universal all-max trait profiles and produces stable strategy tradeoffs.
+- Intended integration would reduce effective spread pressure.
+- Intended integration would increase nutrient maintenance demand and per-tick death pressure.
+- This is preserved as a tested future integration target for stable strategy tradeoffs.
 
 ---
 

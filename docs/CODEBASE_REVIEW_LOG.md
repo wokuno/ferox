@@ -824,6 +824,85 @@ Post-review verification:
   outside the sandbox passed `24/24`.
 - Unsandboxed `./scripts/test.sh all`: passed `27/27`.
 - `./scripts/test.sh perf`: passed `2/2`.
+
+Next open-issue batch after pushed commit `ec5c3f5`:
+- Branch `codex/open-issue-hardening` was pushed to GitHub with the `#171`,
+  `#172`, and `#173` implementation batch.
+- The pre-existing local `scripts/run.sh` modification remains unstaged and out
+  of scope.
+- Candidate next issues:
+  - `#174`: resolve stale `simulation_common.c` build/docs status.
+  - `#163`: finish warning-sensitive test/build cleanup and any remaining broken
+    doc/script references not already addressed by the first batch.
+  - `#99` / `#162`: inspect the slow-client/fragmented-frame network path and
+    select a safe implementation slice before changing code.
+- Parallel review lanes were assigned for network reliability, stale simulation
+  common code, and remaining warning/docs drift before implementation.
+
+`#163` follow-up progress:
+- Forced a clean rebuild to confirm current warning classes instead of relying
+  on historical notes.
+- Remaining warnings were limited to platform-specific hardware-profile helpers
+  on macOS plus positional `ProtoColony` initializers missing
+  `shape_evolution` in the terminal demo client and Phase 6 tests.
+- Wrapped Linux-only hardware helper functions in the existing Linux compile
+  guard and completed `ProtoColony` initializers with explicit
+  `shape_evolution` values.
+- Replaced block-scope `const int` array bounds with enum constants in
+  performance/threadpool tests so strict `-Wvla -Werror=vla` checks do not see
+  accidental VLAs.
+- Aligned `./scripts/test.sh perf` with the documented six-target performance
+  diagnostics slice and changed `quick` to exclude `AllTests`, since the
+  aggregate runner includes stress/visual sources.
+- Fixed remaining docs drift: terminal client connection syntax, a local
+  absolute performance-doc link, and the `scripts/run.sh` tick-rate default.
+
+`#174` follow-up progress:
+- The stale `simulation_common` lane confirmed the file duplicates live static
+  helpers and is not linked into the server runtime.
+- Instead of deleting the existing helper surface, the next slice keeps it as a
+  candidate/test-only extraction target: `SimulationCommonTests` now compile
+  `src/server/simulation_common.c` directly and cover dormant/persister helper
+  behavior.
+- `colony_update_persister_switching()` now derives thresholds/rates from the
+  existing `sporulation_threshold` and `dormancy_resistance` genome fields
+  instead of nonexistent `persister_*` fields.
+- `docs/API.md`, `docs/SIMULATION.md`, and `docs/GENETICS.md` now distinguish
+  live dormancy behavior from candidate/test-only persister and expensive-trait
+  helper work.
+
+`#99` / `#162` network review result:
+- The safe next implementation slice is not a small patch: it needs stateful
+  protocol receive/send progress plus per-client coalescible world-update
+  outboxes.
+- Coalescing must happen only before any bytes of a batch are written; dropping
+  a partially sent batch would corrupt the stream/chunk sequence.
+- This network batch should be implemented separately after the current
+  warning/stale-code cleanup lands.
+
+Second-batch verification:
+- `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`: passed.
+- `cmake --build build --clean-first`: passed with the current warning classes
+  removed.
+- `ctest --test-dir build -N`: lists `28` tests, including
+  `SimulationCommonTests`.
+- `ctest --test-dir build --output-on-failure -R "SimulationCommonTests|Phase6Tests|HardwareProfileTests"`: passed `3/3`.
+- Unsandboxed `./scripts/test.sh all`: passed `28/28` before the final
+  script/doc cleanup.
+- Strict VLA syntax checks passed for `tests/test_performance_eval.c` and
+  `tests/test_threadpool_stress.c`.
+- `ctest --test-dir build -N -R "HardwareProfileTests|SimdEvalTests|PerformanceEvalTests|PerformanceComponentTests|PerformanceProfilingTests|PerfUnitProtocolTests"` lists `6` tests.
+- `ctest --test-dir build -N -E "Stress|VisualStability|AllTests"` lists `24`
+  quick tests.
+- `bash -n scripts/test.sh`: passed.
+- `./scripts/test.sh perf`: passed `6/6`.
+- Unsandboxed `./scripts/test.sh quick`: passed `24/24`.
+- `ctest --test-dir build --output-on-failure -R "ThreadpoolStressTests|AllTests"`: passed `2/2`.
+- Pre-commit review subagent found one remaining documentation blocker: the live
+  simulation snapshot overstated biofilm as reducing field diffusivity. Updated
+  `docs/SIMULATION.md` to state the current behavior: biofilm affects spread,
+  stress, combat, and turnover pressure, while diffusion uses configured
+  reaction-diffusion controls.
 - Wait-backend refactor:
   - moved platform-specific worker park/unpark logic out of `atomic_sim.c` and into a dedicated `phase_wait` backend layer
   - `atomic_sim.c` now depends only on atomic sequencing plus a narrow `phase_wait_eq` / `phase_wake_all` / `phase_wait_backoff` interface

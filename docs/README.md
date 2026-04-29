@@ -91,7 +91,7 @@
 
 **Connect a client:**
 ```bash
-./build/src/client/ferox_client localhost 8765
+./build/src/client/ferox_client -h localhost -p 8765
 ```
 
 ### Testing
