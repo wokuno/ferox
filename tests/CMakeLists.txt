@@ -32,6 +32,11 @@ add_executable(test_phase6 test_phase6.c)
 target_link_libraries(test_phase6 PRIVATE ferox_client_lib ferox_server_lib)
 add_test(NAME Phase6Tests COMMAND test_phase6)
 
+# Client ACK sequence tests
+add_executable(test_client_ack_sequence test_client_ack_sequence.c)
+target_link_libraries(test_client_ack_sequence PRIVATE ferox_shared)
+add_test(NAME ClientAckSequenceTests COMMAND test_client_ack_sequence)
+
 # Advanced genetics tests
 add_executable(test_genetics_advanced test_genetics_advanced.c)
 target_link_libraries(test_genetics_advanced PRIVATE ferox_server_lib)

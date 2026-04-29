@@ -52,12 +52,13 @@ Priority values:
 ## Protocol and Networking
 
 Current transport baseline: TCP frames now have resumable nonblocking receive
-state and server broadcasts use bounded per-client world-update batches. The
-remaining protocol roadmap still needs smaller delta payloads, explicit acks,
-and richer resync/anti-entropy policy.
+state, server broadcasts use bounded per-client world-update batches, and
+world-update ACK/baseline scaffolding exists for future deltas. The remaining
+protocol roadmap still needs smaller delta payloads and richer resync /
+anti-entropy policy.
 
 - [ ] `PERF-028` `P0` `open` Add world-state delta messages to reduce full snapshot transport cost.
-- [ ] `PERF-029` `P0` `open` Add per-client baseline ring and robust ack-bitfield tracking.
+- [x] `PERF-029` `P0` `done` Add per-client baseline ring and robust ack-bitfield tracking.
 - [ ] `PERF-030` `P1` `open` Add adaptive codec selection (RLE-only vs delta+bitpack vs LZ4/Zstd path).
 - [ ] `PERF-031` `P1` `open` Add interest management prioritization to reduce irrelevant updates.
 - [ ] `PERF-032` `P1` `open` Add paced UDP send policy and packet batching metrics.

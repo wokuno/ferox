@@ -981,6 +981,52 @@ Next protocol/perf batch:
   - pre-commit review subagent found no blockers; residual risk was limited to
     coverage depth for truncation and full client assembly, and truncation
     parity is now covered
+
+Next ACK/baseline batch:
+- Closed `#107` after `b0b6347` was pushed and the issue was updated with
+  validation and local measurements.
+- Start `#128` before true `#127` changed-cell deltas:
+  - define concrete `MSG_ACK` payload semantics for world-update completion
+  - add wraparound-safe ACK window helpers in the shared protocol layer
+  - have terminal and GUI clients ACK complete world updates after inline-grid
+    snapshots or final accepted large-world chunks
+  - add server-side ACK parsing and per-client baseline bookkeeping scaffolding
+    keyed by the parent `MSG_WORLD_STATE` sequence
+  - keep behavior as full snapshot / chunked-grid fallback; no changed-cell
+    delta wire format in this batch
+  - document baseline lifecycle and memory bounds before committing code
+- `#128` implementation notes:
+  - added concrete 9-byte `MSG_ACK` payload serialization plus shared ACK
+    window tracking with sequence wraparound coverage
+  - terminal and GUI clients now ACK complete world updates only after inline
+    snapshots or final accepted grid chunks
+  - server sessions now retain a bounded eight-entry baseline ring keyed by the
+    parent world-state sequence and mark entries ACKed from client bitfields
+  - validation so far:
+    - `cmake --build build --target test_protocol_edge test_phase5 ferox_client ferox_gui ferox_server`: passed
+    - `ctest --test-dir build --output-on-failure -R "ProtocolEdgeTests|Phase5Tests"`: passed `2/2`
+    - `./scripts/test.sh quick`: passed `24/24`
+    - `./scripts/test.sh all`: passed `28/28`
+  - pre-commit review found a blocking sequence-`0` edge case for the first
+    chunked world update; fixed with an explicit pending-sequence validity flag
+    and covered by `ClientAckSequenceTests`
+  - final pre-commit review found stale `PROTOCOL.md` handshake diagrams that
+    implied server-to-client ACKs; corrected docs to describe `MSG_ACK` as
+    client-to-server world-update completion only
+  - after review fixes:
+    - `cmake -S . -B build`: passed
+    - `cmake --build build --target test_client_ack_sequence test_protocol_edge test_phase5 ferox_client ferox_gui ferox_server`: passed
+    - `ctest --test-dir build --output-on-failure -R "ClientAckSequenceTests|ProtocolEdgeTests|Phase5Tests"`: passed `3/3`
+    - `./scripts/test.sh quick`: passed `25/25`
+    - `./scripts/test.sh all`: passed `29/29`
+- Post-`#128` GitHub issue order from sidecar triage:
+  - close out `#99` / `#162` next with queue/drop telemetry, per-client
+    freshness metrics, explicit resync/anti-entropy policy, and slow-client
+    soak coverage
+  - then start `#127` true changed-cell world deltas behind a feature flag and
+    keep full snapshot / chunk fallback
+  - then evaluate `#104` / `#161` neighborhood topology and checkerboard
+    artifact behavior, documenting topology policy before code changes
 - Wait-backend refactor:
   - moved platform-specific worker park/unpark logic out of `atomic_sim.c` and into a dedicated `phase_wait` backend layer
   - `atomic_sim.c` now depends only on atomic sequencing plus a narrow `phase_wait_eq` / `phase_wake_all` / `phase_wait_backoff` interface

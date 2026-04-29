@@ -189,6 +189,12 @@ static void sleep_ms(int ms) {
     nanosleep(&ts, NULL);
 }
 
+static void client_baseline_entry_free(ClientBaselineEntry* entry) {
+    if (!entry) return;
+    free(entry->grid);
+    memset(entry, 0, sizeof(*entry));
+}
+
 static void client_send_batch_free(ClientSendBatch* batch) {
     if (!batch) return;
 
@@ -196,6 +202,7 @@ static void client_send_batch_free(ClientSendBatch* batch) {
         free(batch->frames[i].data);
     }
     free(batch->frames);
+    client_baseline_entry_free(&batch->baseline_candidate);
     memset(batch, 0, sizeof(*batch));
 }
 
@@ -242,7 +249,76 @@ static int client_send_batch_add_message(ClientSendBatch* batch,
     batch->frames[batch->frame_count].data = frame;
     batch->frames[batch->frame_count].len = frame_len;
     batch->frame_count++;
+    if (type == MSG_WORLD_STATE) {
+        MessageHeader header;
+        if (protocol_deserialize_header(frame, &header) == MESSAGE_HEADER_SIZE) {
+            batch->has_world_sequence = true;
+            batch->world_sequence = header.sequence;
+        }
+    }
     return 0;
+}
+
+static void client_send_batch_attach_world_baseline(ClientSendBatch* batch, const World* world, uint32_t tick) {
+    if (!batch || !batch->has_world_sequence || !world || !world->cells) return;
+
+    uint32_t grid_size = (uint32_t)(world->width * world->height);
+    if (grid_size == 0 || grid_size > MAX_GRID_SIZE) return;
+
+    uint16_t* grid = (uint16_t*)malloc((size_t)grid_size * sizeof(uint16_t));
+    if (!grid) return;
+
+    for (uint32_t i = 0; i < grid_size; i++) {
+        grid[i] = (uint16_t)world->cells[i].colony_id;
+    }
+
+    client_baseline_entry_free(&batch->baseline_candidate);
+    batch->baseline_candidate.occupied = true;
+    batch->baseline_candidate.sent = false;
+    batch->baseline_candidate.acked = false;
+    batch->baseline_candidate.sequence = batch->world_sequence;
+    batch->baseline_candidate.tick = tick;
+    batch->baseline_candidate.width = (uint32_t)world->width;
+    batch->baseline_candidate.height = (uint32_t)world->height;
+    batch->baseline_candidate.grid_size = grid_size;
+    batch->baseline_candidate.bytes = (size_t)grid_size * sizeof(uint16_t);
+    batch->baseline_candidate.grid = grid;
+}
+
+static void client_baseline_ring_store(ClientSession* client, ClientBaselineEntry* candidate) {
+    if (!client || !candidate || !candidate->occupied) return;
+
+    size_t slot = client->baseline_next % CLIENT_BASELINE_RING_SIZE;
+    client_baseline_entry_free(&client->baseline_ring[slot]);
+    candidate->sent = true;
+    client->baseline_ring[slot] = *candidate;
+    memset(candidate, 0, sizeof(*candidate));
+    client->baseline_next = (slot + 1u) % CLIENT_BASELINE_RING_SIZE;
+}
+
+static void client_baseline_ring_mark_acked(ClientSession* client) {
+    if (!client) return;
+
+    for (size_t i = 0; i < CLIENT_BASELINE_RING_SIZE; i++) {
+        ClientBaselineEntry* entry = &client->baseline_ring[i];
+        if (entry->occupied &&
+            protocol_ack_window_contains(&client->world_ack_window, entry->sequence)) {
+            entry->acked = true;
+        }
+    }
+}
+
+static void client_handle_world_ack(ClientSession* client, const ProtoAckPayload* ack) {
+    if (!client || !ack || ack->channel != PROTO_ACK_CHANNEL_WORLD_UPDATE) return;
+
+    protocol_ack_window_record(&client->world_ack_window, ack->latest_sequence);
+    for (uint32_t bit = 0; bit < 32u; bit++) {
+        if ((ack->ack_bits & (1u << bit)) != 0) {
+            protocol_ack_window_record(&client->world_ack_window,
+                                       ack->latest_sequence - (bit + 1u));
+        }
+    }
+    client_baseline_ring_mark_acked(client);
 }
 
 static void client_send_batch_move(ClientSendBatch* dst, ClientSendBatch* src) {
@@ -280,6 +356,9 @@ static void server_free_client_session(ClientSession* client) {
     protocol_recv_state_free(&client->recv_state);
     client_send_batch_free(&client->send_current);
     client_send_batch_free(&client->send_pending);
+    for (size_t i = 0; i < CLIENT_BASELINE_RING_SIZE; i++) {
+        client_baseline_entry_free(&client->baseline_ring[i]);
+    }
     free(client);
 }
 
@@ -370,12 +449,16 @@ static void server_pump_client_outboxes(Server* server) {
 
             ClientFrame* frame = &client->send_current.frames[client->send_current.frame_index];
             size_t before = client->send_current.frame_offset;
+            bool was_started = client->send_current.started;
             int result = protocol_send_frame_nonblocking(client->socket->fd,
                                                          frame->data,
                                                          frame->len,
                                                          &client->send_current.frame_offset);
             if (client->send_current.frame_offset > before) {
                 client->send_current.started = true;
+                if (!was_started && client->send_current.baseline_candidate.occupied) {
+                    client_baseline_ring_store(client, &client->send_current.baseline_candidate);
+                }
             }
 
             if (result < 0) {
@@ -981,6 +1064,7 @@ void server_broadcast_world_state(Server* server) {
             }
 
             if (result == 0) {
+                client_send_batch_attach_world_baseline(&batch, server->world, proto_world.tick);
                 client_queue_send_batch(client, &batch, true);
             }
             client_send_batch_free(&batch);
@@ -1116,6 +1200,7 @@ ClientSession* server_add_client(Server* server, NetSocket* socket) {
     session->active = true;
     session->selected_colony = 0;
     protocol_recv_state_init(&session->recv_state);
+    protocol_ack_window_init(&session->world_ack_window);
     
     pthread_mutex_lock(&server->clients_mutex);
     session->id = server->next_client_id++;
@@ -1199,6 +1284,13 @@ void server_process_clients(Server* server) {
                     printf("Client %u requested disconnect\n", client->id);
                     server_mark_client_disconnected(client);
                     break;
+                case MSG_ACK: {
+                    ProtoAckPayload ack;
+                    if (protocol_deserialize_ack(payload, header.payload_len, &ack) > 0) {
+                        client_handle_world_ack(client, &ack);
+                    }
+                    break;
+                }
                 default:
                     break;
             }

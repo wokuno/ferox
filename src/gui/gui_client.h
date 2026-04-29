@@ -19,9 +19,12 @@ typedef struct GuiClient {
     uint32_t selected_index;      // Index in colony array for cycling
     float fps;                    // Current frames per second
     ProtocolRecvState recv_state;
+    ProtocolAckWindow world_ack_window;
     bool pending_grid_active;
     uint32_t pending_grid_tick;
     uint32_t pending_grid_next_index;
+    uint32_t pending_grid_sequence;
+    bool pending_grid_sequence_valid;
 } GuiClient;
 
 // Create and destroy
@@ -41,8 +44,8 @@ void gui_client_send_command(GuiClient* client, CommandType cmd, void* data);
 // Message handling
 void gui_client_handle_message(GuiClient* client, MessageType type, 
                                  const uint8_t* payload, size_t len);
-void gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len);
-void gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t len);
+bool gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len);
+bool gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t len);
 
 // Selection
 void gui_client_select_next_colony(GuiClient* client);

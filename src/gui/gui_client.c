@@ -31,6 +31,7 @@ GuiClient* gui_client_create(void) {
     client->selected_colony = 0;
     client->selected_index = 0;
     protocol_recv_state_init(&client->recv_state);
+    protocol_ack_window_init(&client->world_ack_window);
     
     // Initialize local world
     proto_world_init(&client->local_world);
@@ -70,6 +71,9 @@ bool gui_client_connect(GuiClient* client, const char* host, uint16_t port) {
     net_set_nonblocking(client->socket, true);
     net_set_nodelay(client->socket, true);
     protocol_recv_state_reset(&client->recv_state);
+    protocol_ack_window_init(&client->world_ack_window);
+    client->pending_grid_sequence = 0;
+    client->pending_grid_sequence_valid = false;
     
     // Send connect message
     if (protocol_send_message(client->socket->fd, MSG_CONNECT, NULL, 0) < 0) {
@@ -92,6 +96,8 @@ void gui_client_disconnect(GuiClient* client) {
     }
     
     protocol_recv_state_reset(&client->recv_state);
+    protocol_ack_window_init(&client->world_ack_window);
+    client->pending_grid_sequence_valid = false;
     client->connected = false;
 }
 
@@ -105,16 +111,48 @@ void gui_client_send_command(GuiClient* client, CommandType cmd, void* data) {
     protocol_send_message(client->socket->fd, MSG_COMMAND, buffer, (size_t)len);
 }
 
-void gui_client_handle_message(GuiClient* client, MessageType type,
-                                const uint8_t* payload, size_t len) {
+static void gui_client_send_world_ack(GuiClient* client, uint32_t sequence) {
+    if (!client || !client->connected || !client->socket) return;
+
+    protocol_ack_window_record(&client->world_ack_window, sequence);
+    ProtoAckPayload ack = {
+        .channel = PROTO_ACK_CHANNEL_WORLD_UPDATE,
+        .latest_sequence = client->world_ack_window.latest_sequence,
+        .ack_bits = client->world_ack_window.ack_bits
+    };
+    uint8_t buffer[PROTO_ACK_SERIALIZED_SIZE];
+    if (protocol_serialize_ack(&ack, buffer) == PROTO_ACK_SERIALIZED_SIZE) {
+        protocol_send_message(client->socket->fd, MSG_ACK, buffer, sizeof(buffer));
+    }
+}
+
+static void gui_client_handle_message_with_sequence(GuiClient* client,
+                                                    MessageType type,
+                                                    uint32_t sequence,
+                                                    bool has_sequence,
+                                                    const uint8_t* payload,
+                                                    size_t len) {
     if (!client) return;
     
     switch (type) {
-        case MSG_WORLD_STATE:
-            gui_client_update_world(client, payload, len);
+        case MSG_WORLD_STATE: {
+            bool complete = gui_client_update_world(client, payload, len);
+            if (has_sequence) {
+                if (complete) {
+                    gui_client_send_world_ack(client, sequence);
+                } else {
+                    client->pending_grid_sequence = sequence;
+                    client->pending_grid_sequence_valid = true;
+                }
+            }
             break;
+        }
         case MSG_WORLD_DELTA:
-            gui_client_apply_world_delta(client, payload, len);
+            if (gui_client_apply_world_delta(client, payload, len) &&
+                has_sequence && client->pending_grid_sequence_valid) {
+                gui_client_send_world_ack(client, client->pending_grid_sequence);
+                client->pending_grid_sequence_valid = false;
+            }
             break;
         case MSG_COLONY_INFO:
             if (payload && len >= COLONY_DETAIL_SERIALIZED_SIZE) {
@@ -136,38 +174,47 @@ void gui_client_handle_message(GuiClient* client, MessageType type,
     }
 }
 
-void gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len) {
-    if (!client || !data) return;
+void gui_client_handle_message(GuiClient* client, MessageType type,
+                                const uint8_t* payload, size_t len) {
+    gui_client_handle_message_with_sequence(client, type, 0, false, payload, len);
+}
+
+bool gui_client_update_world(GuiClient* client, const uint8_t* data, size_t len) {
+    if (!client || !data) return false;
     
     // Free old grid before deserializing new one
     proto_world_free(&client->local_world);
     client->pending_grid_active = false;
     client->pending_grid_tick = 0;
     client->pending_grid_next_index = 0;
+    client->pending_grid_sequence = 0;
+    client->pending_grid_sequence_valid = false;
     if (client->has_selected_detail && client->selected_detail.base.id != client->selected_colony) {
         client->has_selected_detail = false;
     }
     
     if (protocol_deserialize_world_state(data, len, &client->local_world) < 0) {
-        return;
+        return false;
     }
+
+    return client->local_world.has_grid;
 }
 
-void gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t len) {
-    if (!client || !data) return;
+bool gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t len) {
+    if (!client || !data) return false;
 
     ProtoWorldDeltaGridChunk chunk;
     proto_world_delta_grid_chunk_init(&chunk);
     if (protocol_deserialize_world_delta_grid_chunk(data, len, &chunk) < 0) {
         proto_world_delta_grid_chunk_free(&chunk);
-        return;
+        return false;
     }
 
     if (client->local_world.tick != chunk.tick ||
         client->local_world.width != chunk.width ||
         client->local_world.height != chunk.height) {
         proto_world_delta_grid_chunk_free(&chunk);
-        return;
+        return false;
     }
 
     if (!client->pending_grid_active ||
@@ -180,7 +227,7 @@ void gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t
         proto_world_alloc_grid(&client->local_world, chunk.width, chunk.height);
         if (!client->local_world.grid) {
             proto_world_delta_grid_chunk_free(&chunk);
-            return;
+            return false;
         }
         client->local_world.has_grid = false;
         client->pending_grid_active = true;
@@ -192,7 +239,7 @@ void gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t
         !client->local_world.grid ||
         chunk.start_index + chunk.cell_count > client->local_world.grid_size) {
         proto_world_delta_grid_chunk_free(&chunk);
-        return;
+        return false;
     }
 
     memcpy(&client->local_world.grid[chunk.start_index], chunk.cells,
@@ -202,9 +249,12 @@ void gui_client_apply_world_delta(GuiClient* client, const uint8_t* data, size_t
     if (chunk.final_chunk || client->pending_grid_next_index >= client->local_world.grid_size) {
         client->local_world.has_grid = true;
         client->pending_grid_active = false;
+        proto_world_delta_grid_chunk_free(&chunk);
+        return true;
     }
 
     proto_world_delta_grid_chunk_free(&chunk);
+    return false;
 }
 
 void gui_client_select_next_colony(GuiClient* client) {
@@ -470,7 +520,12 @@ static void gui_client_receive_updates(GuiClient* client) {
             break;
         }
 
-        gui_client_handle_message(client, (MessageType)header.type, payload, header.payload_len);
+        gui_client_handle_message_with_sequence(client,
+                                                (MessageType)header.type,
+                                                header.sequence,
+                                                true,
+                                                payload,
+                                                header.payload_len);
         free(payload);
         messages_processed++;
     }

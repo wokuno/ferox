@@ -40,6 +40,15 @@ Each client has one active batch and one pending batch. New world updates may
 replace only unsent queued work, never a batch that has already written bytes to
 the socket. When an unsent world batch is replaced, any older pending batch is
 also discarded so stale detail or chunk data cannot trail a newer snapshot.
+World batches also carry a baseline candidate keyed by the parent
+`MSG_WORLD_STATE` header sequence. The candidate is inserted into the client's
+bounded baseline ring only after the batch writes its first byte, so coalesced
+unsent work never becomes a future delta baseline. Client ACKs mark completed
+baseline entries after inline-grid snapshots or final accepted grid chunks. The
+ring holds at most eight `uint16_t` grids per connected client, so retained ring
+memory is bounded to `16 * width * height` bytes per client before allocator
+overhead. An active or pending unsent batch can temporarily hold one additional
+candidate grid until it is first written, coalesced, or freed.
 
 ## Simulation Pipeline
 

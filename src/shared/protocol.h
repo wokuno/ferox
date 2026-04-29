@@ -14,6 +14,7 @@
 #define MAX_GRID_CHUNK_CELLS 65536u       // 128KB of raw grid cells per delta chunk
 #define WOBBLE_POINTS 8  // Number of points for organic border wobble
 #define PROTO_DIRECTION_COUNT 8
+#define PROTO_ACK_SERIALIZED_SIZE 9
 
 typedef enum ProtoColonyBehaviorMode {
     PROTO_COLONY_BEHAVIOR_MODE_BALANCED = 0,
@@ -67,6 +68,10 @@ typedef enum MessageType {
     MSG_ERROR           // Error response
 } MessageType;
 
+typedef enum ProtoAckChannel {
+    PROTO_ACK_CHANNEL_WORLD_UPDATE = 1,
+} ProtoAckChannel;
+
 // Command types
 typedef enum CommandType {
     CMD_PAUSE,
@@ -87,6 +92,18 @@ typedef struct MessageHeader {
 } MessageHeader;
 
 #define MESSAGE_HEADER_SIZE 14
+
+typedef struct ProtoAckPayload {
+    uint8_t channel;
+    uint32_t latest_sequence;
+    uint32_t ack_bits;
+} ProtoAckPayload;
+
+typedef struct ProtocolAckWindow {
+    bool initialized;
+    uint32_t latest_sequence;
+    uint32_t ack_bits;
+} ProtocolAckWindow;
 
 typedef struct ProtocolRecvState {
     uint8_t header_buf[MESSAGE_HEADER_SIZE];
@@ -233,6 +250,11 @@ typedef struct CommandSpawnColony {
 // Serialization functions
 int protocol_serialize_header(const MessageHeader* header, uint8_t* buffer);
 int protocol_deserialize_header(const uint8_t* buffer, MessageHeader* header);
+int protocol_serialize_ack(const ProtoAckPayload* ack, uint8_t* buffer);
+int protocol_deserialize_ack(const uint8_t* buffer, size_t len, ProtoAckPayload* ack);
+void protocol_ack_window_init(ProtocolAckWindow* window);
+void protocol_ack_window_record(ProtocolAckWindow* window, uint32_t sequence);
+bool protocol_ack_window_contains(const ProtocolAckWindow* window, uint32_t sequence);
 
 int protocol_serialize_world_state(const ProtoWorld* world, uint8_t** buffer, size_t* len);
 int protocol_deserialize_world_state(const uint8_t* buffer, size_t len, ProtoWorld* world);

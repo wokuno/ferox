@@ -227,6 +227,52 @@ int test_server_process_clients_buffers_fragmented_command(void) {
     return 0;
 }
 
+int test_server_process_clients_records_world_ack(void) {
+    Server* server = server_create(0, 50, 50, 2);
+    TEST_ASSERT(server != NULL, "Server should be created");
+
+    int fds[2];
+    TEST_ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0, "Socket pair should be created");
+
+    NetSocket* server_socket = (NetSocket*)calloc(1, sizeof(NetSocket));
+    TEST_ASSERT(server_socket != NULL, "Server socket wrapper should be allocated");
+    server_socket->fd = fds[1];
+    server_socket->connected = true;
+    net_set_nonblocking(server_socket, true);
+
+    ClientSession* client = server_add_client(server, server_socket);
+    TEST_ASSERT(client != NULL, "Client should be added");
+    client->baseline_ring[0].occupied = true;
+    client->baseline_ring[0].sent = true;
+    client->baseline_ring[0].sequence = 101u;
+    client->baseline_ring[1].occupied = true;
+    client->baseline_ring[1].sent = true;
+    client->baseline_ring[1].sequence = 100u;
+
+    ProtoAckPayload ack = {
+        .channel = PROTO_ACK_CHANNEL_WORLD_UPDATE,
+        .latest_sequence = 101u,
+        .ack_bits = 0x1u
+    };
+    uint8_t ack_buffer[PROTO_ACK_SERIALIZED_SIZE];
+    TEST_ASSERT_EQ(protocol_serialize_ack(&ack, ack_buffer), PROTO_ACK_SERIALIZED_SIZE,
+                   "ACK payload should serialize");
+    TEST_ASSERT_EQ(protocol_send_message(fds[0], MSG_ACK, ack_buffer, sizeof(ack_buffer)), 0,
+                   "ACK frame should send");
+
+    server_process_clients(server);
+    TEST_ASSERT(protocol_ack_window_contains(&client->world_ack_window, 101u),
+                "ACK window should contain latest sequence");
+    TEST_ASSERT(protocol_ack_window_contains(&client->world_ack_window, 100u),
+                "ACK window should contain bitfield sequence");
+    TEST_ASSERT_EQ(client->baseline_ring[0].acked, true, "Latest baseline should be marked acked");
+    TEST_ASSERT_EQ(client->baseline_ring[1].acked, true, "Bitfield baseline should be marked acked");
+
+    close(fds[0]);
+    server_destroy(server);
+    return 0;
+}
+
 // Test: Server port assignment
 int test_server_assigns_unique_ports(void) {
     // Create server on port 0 (auto-assign)
@@ -413,6 +459,7 @@ int main(void) {
     printf("\n--- Command Handling Tests ---\n");
     RUN_TEST(test_server_handles_pause_resume_commands);
     RUN_TEST(test_server_process_clients_buffers_fragmented_command);
+    RUN_TEST(test_server_process_clients_records_world_ack);
     
     // World tests
     printf("\n--- World Tests ---\n");

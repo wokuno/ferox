@@ -80,6 +80,77 @@ int protocol_deserialize_header(const uint8_t* buffer, MessageHeader* header) {
     return MESSAGE_HEADER_SIZE;
 }
 
+int protocol_serialize_ack(const ProtoAckPayload* ack, uint8_t* buffer) {
+    if (!ack || !buffer) return -1;
+
+    buffer[0] = ack->channel;
+    write_u32(buffer + 1, ack->latest_sequence);
+    write_u32(buffer + 5, ack->ack_bits);
+    return PROTO_ACK_SERIALIZED_SIZE;
+}
+
+int protocol_deserialize_ack(const uint8_t* buffer, size_t len, ProtoAckPayload* ack) {
+    if (!buffer || !ack || len < PROTO_ACK_SERIALIZED_SIZE) return -1;
+
+    ack->channel = buffer[0];
+    ack->latest_sequence = read_u32(buffer + 1);
+    ack->ack_bits = read_u32(buffer + 5);
+    return PROTO_ACK_SERIALIZED_SIZE;
+}
+
+static bool protocol_sequence_newer(uint32_t candidate, uint32_t reference) {
+    uint32_t delta = candidate - reference;
+    return delta != 0u && delta < 0x80000000u;
+}
+
+void protocol_ack_window_init(ProtocolAckWindow* window) {
+    if (!window) return;
+    memset(window, 0, sizeof(*window));
+}
+
+void protocol_ack_window_record(ProtocolAckWindow* window, uint32_t sequence) {
+    if (!window) return;
+
+    if (!window->initialized) {
+        window->initialized = true;
+        window->latest_sequence = sequence;
+        window->ack_bits = 0;
+        return;
+    }
+
+    if (sequence == window->latest_sequence) {
+        return;
+    }
+
+    if (protocol_sequence_newer(sequence, window->latest_sequence)) {
+        uint32_t diff = sequence - window->latest_sequence;
+        if (diff > 32u) {
+            window->ack_bits = 0;
+        } else if (diff == 32u) {
+            window->ack_bits = 1u << 31u;
+        } else {
+            window->ack_bits = (window->ack_bits << diff) | (1u << (diff - 1u));
+        }
+        window->latest_sequence = sequence;
+        return;
+    }
+
+    uint32_t delta = window->latest_sequence - sequence;
+    if (delta >= 1u && delta <= 32u) {
+        window->ack_bits |= 1u << (delta - 1u);
+    }
+}
+
+bool protocol_ack_window_contains(const ProtocolAckWindow* window, uint32_t sequence) {
+    if (!window || !window->initialized) return false;
+    if (sequence == window->latest_sequence) return true;
+    if (protocol_sequence_newer(sequence, window->latest_sequence)) return false;
+
+    uint32_t delta = window->latest_sequence - sequence;
+    if (delta == 0u || delta > 32u) return false;
+    return (window->ack_bits & (1u << (delta - 1u))) != 0;
+}
+
 int protocol_serialize_colony(const ProtoColony* colony, uint8_t* buffer) {
     if (!colony || !buffer) return -1;
     

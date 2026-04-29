@@ -255,6 +255,61 @@ TEST(header_all_message_types) {
     }
 }
 
+TEST(ack_payload_roundtrip) {
+    ProtoAckPayload ack = {
+        .channel = PROTO_ACK_CHANNEL_WORLD_UPDATE,
+        .latest_sequence = 12345u,
+        .ack_bits = 0x80000001u
+    };
+    uint8_t buffer[PROTO_ACK_SERIALIZED_SIZE];
+
+    int result = protocol_serialize_ack(&ack, buffer);
+    ASSERT_EQ(result, PROTO_ACK_SERIALIZED_SIZE);
+
+    ProtoAckPayload decoded;
+    result = protocol_deserialize_ack(buffer, sizeof(buffer), &decoded);
+    ASSERT_EQ(result, PROTO_ACK_SERIALIZED_SIZE);
+    ASSERT_EQ(decoded.channel, ack.channel);
+    ASSERT_EQ(decoded.latest_sequence, ack.latest_sequence);
+    ASSERT_EQ(decoded.ack_bits, ack.ack_bits);
+}
+
+TEST(ack_window_tracks_recent_sequences) {
+    ProtocolAckWindow window;
+    protocol_ack_window_init(&window);
+
+    protocol_ack_window_record(&window, 10u);
+    ASSERT_TRUE(protocol_ack_window_contains(&window, 10u));
+    ASSERT_EQ(protocol_ack_window_contains(&window, 9u), false);
+
+    protocol_ack_window_record(&window, 12u);
+    ASSERT_TRUE(protocol_ack_window_contains(&window, 12u));
+    ASSERT_TRUE(protocol_ack_window_contains(&window, 10u));
+    ASSERT_EQ(protocol_ack_window_contains(&window, 11u), false);
+
+    protocol_ack_window_record(&window, 11u);
+    ASSERT_TRUE(protocol_ack_window_contains(&window, 11u));
+    ASSERT_EQ(window.latest_sequence, 12u);
+    ASSERT_EQ((window.ack_bits & 0x3u), 0x3u);
+
+    protocol_ack_window_record(&window, 44u);
+    ASSERT_TRUE(protocol_ack_window_contains(&window, 44u));
+    ASSERT_TRUE(protocol_ack_window_contains(&window, 12u));
+    ASSERT_EQ(protocol_ack_window_contains(&window, 11u), false);
+}
+
+TEST(ack_window_handles_wraparound) {
+    ProtocolAckWindow window;
+    protocol_ack_window_init(&window);
+
+    protocol_ack_window_record(&window, 0xFFFFFFFEu);
+    protocol_ack_window_record(&window, 1u);
+    ASSERT_EQ(window.latest_sequence, 1u);
+    ASSERT_TRUE(protocol_ack_window_contains(&window, 1u));
+    ASSERT_TRUE(protocol_ack_window_contains(&window, 0xFFFFFFFEu));
+    ASSERT_EQ(protocol_ack_window_contains(&window, 0xFFFFFFFDu), false);
+}
+
 // ============================================================================
 // Payload Tests
 // ============================================================================
@@ -1039,6 +1094,9 @@ int run_protocol_edge_tests(void) {
     RUN_TEST(header_serialization_roundtrip);
     RUN_TEST(malformed_header_wrong_magic);
     RUN_TEST(header_all_message_types);
+    RUN_TEST(ack_payload_roundtrip);
+    RUN_TEST(ack_window_tracks_recent_sequences);
+    RUN_TEST(ack_window_handles_wraparound);
     
     printf("\nPayload Tests:\n");
     RUN_TEST(zero_length_payload);

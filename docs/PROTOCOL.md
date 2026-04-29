@@ -68,7 +68,7 @@ typedef enum MessageType {
     MSG_WORLD_DELTA = 3,  // Server -> Client: incremental update
     MSG_COLONY_INFO = 4,  // Server -> Client: detailed colony info
     MSG_COMMAND     = 5,  // Client -> Server: user command
-    MSG_ACK         = 6,  // Bidirectional: acknowledgment
+    MSG_ACK         = 6,  // Client -> Server: world-update acknowledgment
     MSG_ERROR       = 7   // Server -> Client: error response
 } MessageType;
 ```
@@ -83,7 +83,7 @@ Sent by client to initiate connection. Payload is empty.
 - Direction: Client → Server
 - Payload: None
 
-**Response:** Server sends MSG_ACK followed by MSG_WORLD_STATE
+**Response:** Server sends MSG_WORLD_STATE
 
 ---
 
@@ -415,10 +415,23 @@ typedef enum CommandType {
 
 ### MSG_ACK (Type 6)
 
-Acknowledgment of received message.
+Acknowledgment of completed world updates.
 
 **Direction:** Bidirectional  
-**Payload:** None (or optional sequence number of acknowledged message)
+**Payload:** 9 bytes
+
+| Field | Size | Description |
+|-------|------|-------------|
+| channel | 1 byte | `PROTO_ACK_CHANNEL_WORLD_UPDATE` = 1 |
+| latest_sequence | 4 bytes | newest fully applied parent `MSG_WORLD_STATE` header sequence |
+| ack_bits | 4 bytes | bit 0 acknowledges `latest_sequence - 1`; bit 31 acknowledges `latest_sequence - 32` |
+
+Clients send world-update ACKs only after the complete update is applied. Inline
+grid snapshots can be ACKed immediately after `MSG_WORLD_STATE` is applied.
+Chunked large-world updates are ACKed only after the final accepted
+`MSG_WORLD_DELTA` grid chunk completes the local grid assembly. The server uses
+the ACK window to mark per-client baseline-ring entries as acknowledged; true
+changed-cell deltas remain a follow-up protocol mode.
 
 ---
 
@@ -593,9 +606,6 @@ buffer[offset + MAX_COLONY_NAME - 1] = '\0';  // Safety null
        │          MSG_CONNECT               │
        │────────────────────────────────────►│
        │                                     │
-       │          MSG_ACK                   │
-       │◄────────────────────────────────────│
-       │                                     │
        │          MSG_WORLD_STATE           │
        │◄────────────────────────────────────│
        │                                     │
@@ -651,8 +661,6 @@ staging copy.
        │     MSG_COMMAND (CMD_PAUSE)        │
        │────────────────────────────────────►│
        │                                     │ server->paused = true
-       │          MSG_ACK                   │
-       │◄────────────────────────────────────│
        │                                     │
        │     MSG_COMMAND (SELECT_COLONY)    │
        │────────────────────────────────────►│

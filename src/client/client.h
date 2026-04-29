@@ -18,9 +18,12 @@ typedef struct Client {
     uint32_t selected_colony;
     uint32_t selected_index;  // Index in colony array for cycling
     ProtocolRecvState recv_state;
+    ProtocolAckWindow world_ack_window;
     bool pending_grid_active;
     uint32_t pending_grid_tick;
     uint32_t pending_grid_next_index;
+    uint32_t pending_grid_sequence;
+    bool pending_grid_sequence_valid;
 } Client;
 
 // Create and destroy
@@ -39,8 +42,8 @@ void client_send_command(Client* client, CommandType cmd, void* data);
 
 // Message handling
 void client_handle_message(Client* client, MessageType type, const uint8_t* payload, size_t len);
-void client_update_world(Client* client, const uint8_t* data, size_t len);
-void client_apply_world_delta(Client* client, const uint8_t* data, size_t len);
+bool client_update_world(Client* client, const uint8_t* data, size_t len);
+bool client_apply_world_delta(Client* client, const uint8_t* data, size_t len);
 
 // Selection
 void client_select_next_colony(Client* client);

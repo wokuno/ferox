@@ -22,11 +22,25 @@
 #define DEFAULT_WORLD_HEIGHT 200
 #define DEFAULT_INITIAL_COLONY_COUNT 50
 #define DEFAULT_TICK_RATE_MS 100
+#define CLIENT_BASELINE_RING_SIZE 8
 
 typedef struct ClientFrame {
     uint8_t* data;
     size_t len;
 } ClientFrame;
+
+typedef struct ClientBaselineEntry {
+    bool occupied;
+    bool sent;
+    bool acked;
+    uint32_t sequence;
+    uint32_t tick;
+    uint32_t width;
+    uint32_t height;
+    uint32_t grid_size;
+    size_t bytes;
+    uint16_t* grid;
+} ClientBaselineEntry;
 
 typedef struct ClientSendBatch {
     ClientFrame* frames;
@@ -35,6 +49,9 @@ typedef struct ClientSendBatch {
     size_t frame_index;
     size_t frame_offset;
     bool started;
+    bool has_world_sequence;
+    uint32_t world_sequence;
+    ClientBaselineEntry baseline_candidate;
 } ClientSendBatch;
 
 // Client session represents a connected client
@@ -44,8 +61,11 @@ typedef struct ClientSession {
     bool active;
     uint32_t selected_colony;  // Colony selected for detailed view
     ProtocolRecvState recv_state;
+    ProtocolAckWindow world_ack_window;
     ClientSendBatch send_current;
     ClientSendBatch send_pending;
+    ClientBaselineEntry baseline_ring[CLIENT_BASELINE_RING_SIZE];
+    size_t baseline_next;
     struct ClientSession* next;
 } ClientSession;
 
